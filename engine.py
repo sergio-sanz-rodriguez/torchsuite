@@ -174,8 +174,8 @@ class Engine:
             "RESET": '\033[39m'
         }
         self.info = f"{self.colors['GREEN']}[INFO]{self.colors['BLACK']}"
-        self.error = f"{self.colors['RED']}{self.error}{self.colors['BLACK']}"
-        self.warning = f"{self.colors['BLUE']}{self.error}{self.colors['BLACK']}"
+        self.error = f"{self.colors['RED']}[ERROR]{self.colors['BLACK']}"
+        self.warning = f"{self.colors['BLUE']}[WARNING]{self.colors['BLACK']}"
 
     @staticmethod
     def sec_to_min_sec(seconds):

@@ -784,12 +784,12 @@ class Engine:
         try:    
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{self.warning} Error calculating final FPR at recall: {e}")
+            logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"{self.warning} Error calculating final pAUC at recall: {e}")
+            logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
@@ -947,12 +947,12 @@ class Engine:
         try:    
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{self.warning} Error calculating final FPR at recall: {e}")
+            logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"{self.warning} Error calculating final pAUC at recall: {e}")
+            logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
@@ -1044,12 +1044,12 @@ class Engine:
         try:    
             test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{self.warning} Error calculating final FPR at recall: {e}")
+            logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
             test_fpr = 1.0
         try:    
             test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"{self.warning} Error calculating final pAUC at recall: {e}")
+            logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
             test_pauc = 0.0
 
         return test_loss, test_acc, test_fpr, test_pauc

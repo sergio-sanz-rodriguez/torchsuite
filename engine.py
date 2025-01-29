@@ -431,6 +431,7 @@ class Engine:
             amp,
             enable_clipping,
             accumulation_steps,
+            debug_mode,
             writer):
         
         """
@@ -447,6 +448,7 @@ class Engine:
         print(f"[INFO] Plot curves: {plot_curves}")
         print(f"[INFO] Automatic Mixed Precision (AMP): {amp}")
         print(f"[INFO] Enable clipping: {enable_clipping}")
+        print(f"[INFO] Debug mode: {debug_mode}")
         print(f"[INFO] Enable writer: {writer}")
         print(f"[INFO] Target directory: {self.target_dir}")
         print(f"[INFO] Save model: {self.save_best_model}")
@@ -484,8 +486,9 @@ class Engine:
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
-        enable_clipping: bool=True,
+        enable_clipping: bool=False,
         accumulation_steps: int=1,
+        debug_mode: bool=False,
         writer: Optional[SummaryWriter] = None
     ):
 
@@ -506,6 +509,7 @@ class Engine:
             amp (bool, optional): Enable automatic mixed precision for faster training. Default is True.
             enable_clipping (bool, optional): Whether to enable gradient clipping. Default is True.
             accumulation_steps (int, optional): Steps for gradient accumulation. Must be an integer greater than or equal to 1. Default is 1.
+            debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
             save_best_model (Union[str, List[str]]): Criterion mode for saving the model: 
                 - "loss": saves the epoch with the lowest validation loss
                 - "acc": saves the epoch with the highest validation accuracy
@@ -589,6 +593,7 @@ class Engine:
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,            
+            debug_mode=debug_mode,
             writer=writer
             )
         
@@ -623,7 +628,7 @@ class Engine:
         recall_threshold: float=0.95,
         recall_threshold_pauc: float=0.95,
         amp: bool=True,
-        enable_clipping=True,
+        enable_clipping=False,
         debug_mode: bool=False
         ) -> Tuple[float, float, float]:
         
@@ -1343,7 +1348,7 @@ class Engine:
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
-        enable_clipping: bool=True,
+        enable_clipping: bool=False,
         accumulation_steps: int=1,
         debug_mode: bool=False,
         writer=False, #: SummaryWriter=False,
@@ -1440,6 +1445,7 @@ class Engine:
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,
+            debug_mode=debug_mode,
             writer=writer
             )
 

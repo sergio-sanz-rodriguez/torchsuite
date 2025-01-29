@@ -163,6 +163,17 @@ class Engine:
             "test_time [s]": [],
             "lr": [],
             } 
+        
+        # Define colors
+        self.colors = {
+            "BLACK":  '\033[30m',
+            "BLUE": '\033[34m',
+            "ORANGE": '\033[38;5;214m',
+            "GREEN": '\033[32m',
+            "RED": '\033[31m',
+            "RESET": '\033[39m'
+        }
+        self.info = f"{self.colors['GREEN']}[INFO]{self.colors['BLACK']}"
 
     @staticmethod
     def sec_to_min_sec(seconds):
@@ -314,8 +325,8 @@ class Engine:
         return np.mean(partial_auc_values)
 
 
-    @staticmethod
     def save(
+        self,
         model: torch.nn.Module,
         target_dir: str,
         model_name: str):
@@ -347,7 +358,7 @@ class Engine:
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
-        print(f"[INFO] Saving model to: {model_save_path}")
+        print(f"{self.info} Saving model to: {model_save_path}")
         torch.save(obj=model.state_dict(), f=model_save_path)
 
     def load(
@@ -373,15 +384,16 @@ class Engine:
         model_path = Path(target_dir) / model_name
 
         # Load the model
-        print(f"[INFO] Loading model from: {model_path}")
+        print(f"{self.info} Loading model from: {model_path}")
         
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         
         if return_model:
             return self.model
     
-    @staticmethod
+    
     def create_writer(
+        self,
         experiment_name: str, 
         model_name: str, 
         extra: str=None) -> torch.utils.tensorboard.writer.SummaryWriter():
@@ -418,7 +430,7 @@ class Engine:
         else:
             log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
             
-        print(f"[INFO] Created SummaryWriter, saving to: {log_dir}...")
+        print(f"{self.info} Created SummaryWriter, saving to: {log_dir}...")
         return SummaryWriter(log_dir=log_dir)
     
     def print_config(
@@ -438,27 +450,27 @@ class Engine:
         Prints the configuration of the training process.
         """
 
-        print(f"[INFO] Device: {self.device}")
-        print(f"[INFO] Epochs: {epochs}")
-        print(f"[INFO] Batch size: {batch_size}")
-        print(f"[INFO] Accumulation steps: {accumulation_steps}")
-        print(f"[INFO] Effective batch size: {batch_size * accumulation_steps}")
-        print(f"[INFO] Recall threshold - FPR: {recall_threshold}")
-        print(f"[INFO] Recall threshold - pAUC: {recall_threshold_pauc}")
-        print(f"[INFO] Plot curves: {plot_curves}")
-        print(f"[INFO] Automatic Mixed Precision (AMP): {amp}")
-        print(f"[INFO] Enable clipping: {enable_clipping}")
-        print(f"[INFO] Debug mode: {debug_mode}")
-        print(f"[INFO] Enable writer: {writer}")
-        print(f"[INFO] Target directory: {self.target_dir}")
-        print(f"[INFO] Save model: {self.save_best_model}")
+        print(f"{self.info} Device: {self.device}")
+        print(f"{self.info} Epochs: {epochs}")
+        print(f"{self.info} Batch size: {batch_size}")
+        print(f"{self.info} Accumulation steps: {accumulation_steps}")
+        print(f"{self.info} Effective batch size: {batch_size * accumulation_steps}")
+        print(f"{self.info} Recall threshold - FPR: {recall_threshold}")
+        print(f"{self.info} Recall threshold - pAUC: {recall_threshold_pauc}")
+        print(f"{self.info} Plot curves: {plot_curves}")
+        print(f"{self.info} Automatic Mixed Precision (AMP): {amp}")
+        print(f"{self.info} Enable clipping: {enable_clipping}")
+        print(f"{self.info} Debug mode: {debug_mode}")
+        print(f"{self.info} Enable writer: {writer}")
+        print(f"{self.info} Target directory: {self.target_dir}")
+        print(f"{self.info} Save model: {self.save_best_model}")
         if self.save_best_model:
           # Extract base name and extension from the model name
             base_name, extension = os.path.splitext(self.model_name)
             
             # Print base name and extension
-            print(f"[INFO] Model name base: {base_name}")
-            print(f"[INFO] Model name extension: {extension}")
+            print(f"{self.info} Model name base: {base_name}")
+            print(f"{self.info} Model name extension: {extension}")
             
             # Iterate over modes and format model name, skipping 'last'
             for mode in self.mode:
@@ -470,7 +482,7 @@ class Engine:
                     model_name_with_mode = f"_{mode}_epoch<int>{extension}"
                 
                 # Print the final model save path for each mode
-                print(f"[INFO] Save best model based on {mode}: {base_name + model_name_with_mode}")
+                print(f"{self.info} Save best model based on {mode}: {base_name + model_name_with_mode}")
 
     def init_train(
         self,
@@ -1062,13 +1074,6 @@ class Engine:
         - FPR at recall curves
         """
 
-        # Define colors
-        BLACK = '\033[30m'  # Black
-        BLUE = '\033[34m'   # Blue
-        ORANGE = '\033[38;5;214m'  # Orange (using extended colors)
-        GREEN = '\033[32m'  # Green
-        RESET = '\033[39m'  # Reset to default color
-
         # Retrieve the learning rate
         if self.scheduler is None or isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             lr = self.optimizer.param_groups[0]['lr']
@@ -1077,24 +1082,24 @@ class Engine:
         
         # Print results
         print(
-            f"{BLACK}Epoch: {epoch+1} | "
-            f"{BLUE}Train: {BLACK}| "
-            f"{BLUE}loss: {train_loss:.4f} {BLACK}| "
-            f"{BLUE}acc: {train_acc:.4f} {BLACK}| "
-            f"{BLUE}fpr: {train_fpr:.4f} {BLACK}| "
-            f"{BLUE}pauc: {train_pauc:.4f} {BLACK}| "
-            f"{BLUE}time: {self.sec_to_min_sec(train_epoch_time)} {BLACK}| "            
-            f"{BLUE}lr: {lr:.10f}"
+            f"{self.colors['BLACK']}Epoch: {epoch+1} | "
+            f"{self.colors['BLUE']}Train: {self.colors['BLACK']}| "
+            f"{self.colors['BLUE']}loss: {train_loss:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['BLUE']}acc: {train_acc:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['BLUE']}fpr: {train_fpr:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['BLUE']}pauc: {train_pauc:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['BLUE']}time: {self.sec_to_min_sec(train_epoch_time)} {self.colors['BLACK']}| "            
+            f"{self.colors['BLUE']}lr: {lr:.10f}"
         )
         print(
-            f"{BLACK}Epoch: {epoch+1} | "
-            f"{ORANGE}Test:  {BLACK}| "
-            f"{ORANGE}loss: {test_loss:.4f} {BLACK}| "
-            f"{ORANGE}acc: {test_acc:.4f} {BLACK}| "
-            f"{ORANGE}fpr: {test_fpr:.4f} {BLACK}| "
-            f"{ORANGE}pauc: {test_pauc:.4f} {BLACK}| "
-            f"{ORANGE}time: {self.sec_to_min_sec(test_epoch_time)} {BLACK}| "
-            f"{ORANGE}lr: {lr:.10f}"
+            f"{self.colors['BLACK']}Epoch: {epoch+1} | "
+            f"{self.colors['ORANGE']}Test:  {self.colors['BLACK']}| "
+            f"{self.colors['ORANGE']}loss: {test_loss:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['ORANGE']}acc: {test_acc:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['ORANGE']}fpr: {test_fpr:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['ORANGE']}pauc: {test_pauc:.4f} {self.colors['BLACK']}| "
+            f"{self.colors['ORANGE']}time: {self.sec_to_min_sec(test_epoch_time)} {self.colors['BLACK']}| "            
+            f"{self.colors['ORANGE']}lr: {lr:.10f}"
         )
         
         # Update results dictionary
@@ -1330,7 +1335,7 @@ class Engine:
         writer.close() if writer else None
 
         # Print elapsed time
-        print(f"[INFO] Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
+        print(f"{self.info} Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
             
     # Trains and tests a Pytorch model
     def train(
@@ -1548,17 +1553,17 @@ class Engine:
             model = self.model
         elif model_state == "best":
             if self.model_best is None:
-                print(f"[INFO] Model best not found, using default model for prediction.")
+                print(f"{self.info} Model best not found, using default model for prediction.")
                 model = self.model
             else:
                 model = self.model_best
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"[INFO] Model epoch {model_state} not found, using default model for prediction.")
+                print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"[INFO] Model epoch {model_state} not found, using default model for prediction.")
+                    print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]            
@@ -1627,23 +1632,23 @@ class Engine:
             model = self.model
         elif model_state == "best":
             if self.model_best is None:
-                print(f"[INFO] Model best not found, using default model for prediction.")
+                print(f"{self.info} Model best not found, using default model for prediction.")
                 model = self.model
             else:
                 model = self.model_best
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"[INFO] Model epoch {model_state} not found, using default model for prediction.")
+                print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"[INFO] Model epoch {model_state} not found, using default model for prediction.")
+                    print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]
 
         # Create a list of test images and checkout existence
-        print(f"[INFO] Finding all filepaths ending with '.jpg' in directory: {test_dir}")
+        print(f"{self.info} Finding all filepaths ending with '.jpg' in directory: {test_dir}")
         paths = list(Path(test_dir).glob("*/*.jpg"))
         assert len(list(paths)) > 0, f"No files ending with '.jpg' found in this directory: {test_dir}"
 

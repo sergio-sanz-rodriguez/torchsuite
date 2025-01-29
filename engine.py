@@ -174,6 +174,8 @@ class Engine:
             "RESET": '\033[39m'
         }
         self.info = f"{self.colors['GREEN']}[INFO]{self.colors['BLACK']}"
+        self.error = f"{self.colors['RED']}{self.error}{self.colors['BLACK']}"
+        self.warning = f"{self.colors['BLUE']}{self.error}{self.colors['BLACK']}"
 
     @staticmethod
     def sec_to_min_sec(seconds):
@@ -546,19 +548,19 @@ class Engine:
       
         # Validate recall_threshold
         if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
-            raise ValueError("[ERROR] recall_threshold must be a float between 0.0 and 1.0.")
+            raise ValueError(f"{self.error} recall_threshold must be a float between 0.0 and 1.0.")
 
         # Validate recall_threshold_pauc
         if not isinstance(recall_threshold_pauc, (int, float)) or not (0.0 <= float(recall_threshold_pauc) <= 1.0):
-            raise ValueError("[ERROR] recall_threshold_pauc must be a float between 0.0 and 1.0.")
+            raise ValueError(f"{self.error} recall_threshold_pauc must be a float between 0.0 and 1.0.")
 
         # Validate accumulation_steps
         if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
-            raise ValueError("[ERROR] accumulation_steps must be an integer greater than or equal to 1.")
+            raise ValueError(f"{self.error} accumulation_steps must be an integer greater than or equal to 1.")
 
         # Validate epochs
         if not isinstance(epochs, int) or epochs < 1:
-            raise ValueError("[ERROR] epochs must be an integer greater than or equal to 1.")
+            raise ValueError(f"{self.error} epochs must be an integer greater than or equal to 1.")
 
         # Ensure save_best_model is correctly handled
         if save_best_model is None:
@@ -568,17 +570,17 @@ class Engine:
             self.save_best_model = True
             mode = [save_best_model] if isinstance(save_best_model, str) else save_best_model  # Ensure mode is a list
         else:
-            raise ValueError("[ERROR] save_best_model must be None, a string, or a list of strings.")
+            raise ValueError(f"{self.error} save_best_model must be None, a string, or a list of strings.")
 
         # Validate mode only if save_best_model is True
         valid_modes = {"loss", "acc", "fpr", "pauc", "last", "all"}
         if self.save_best_model:
             if not isinstance(mode, list):
-                raise ValueError("[ERROR] mode must be a string or a list of strings.")
+                raise ValueError(f"{self.error} mode must be a string or a list of strings.")
 
             for m in mode:
                 if m not in valid_modes:
-                    raise ValueError(f"[ERROR] Invalid mode value: '{m}'. Must be one of {valid_modes}")
+                    raise ValueError(f"{self.error} Invalid mode value: '{m}'. Must be one of {valid_modes}")
 
         # Assign the validated mode list
         self.mode = mode
@@ -692,7 +694,7 @@ class Engine:
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            print(f"[WARNING] y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
                             #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
                             y_pred = torch.nan_to_num(
                                 y_pred,
@@ -701,7 +703,7 @@ class Engine:
                                 neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            print(f"[WARNING] y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
 
                     # Calculate  and accumulate loss
@@ -709,7 +711,7 @@ class Engine:
                 
                     # Check for NaN or Inf in loss
                     if torch.isnan(loss) or torch.isinf(loss):
-                        print(f"[WARNING] Loss is NaN or Inf at batch {batch}. Skipping batch...")
+                        print(f"{self.warning} Loss is NaN or Inf at batch {batch}. Skipping batch...")
                         continue
 
                 # Backward pass with scaled gradients
@@ -730,7 +732,7 @@ class Engine:
                     for name, param in self.model.named_parameters():
                         if param.grad is not None:
                             if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                print(f"[WARNING] NaN or Inf gradient detected in {name} at batch {batch}.")
+                                print(f"{self.warning} NaN or Inf gradient detected in {name} at batch {batch}.")
                                 break
                 
                 # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -783,7 +785,7 @@ class Engine:
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"[ERROR] Error calculating final FPR at recall: {e}")
+            logging.error(f"{self.error} Error calculating final FPR at recall: {e}")
             train_fpr = None
             train_pauc = None
 
@@ -847,7 +849,7 @@ class Engine:
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            print(f"[WARNING] y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
                             #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
                             y_pred = torch.nan_to_num(
                                 y_pred,
@@ -856,7 +858,7 @@ class Engine:
                                 neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            print(f"[WARNING] y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
                     
                     # Calculate loss, normalize by accumulation steps
@@ -864,7 +866,7 @@ class Engine:
                 
                     # Check for NaN or Inf in loss
                     if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        print(f"[WARNING] Loss is NaN or Inf at batch {batch}. Skipping...")
+                        print(f"{self.warning} Loss is NaN or Inf at batch {batch}. Skipping...")
                         continue
 
                 # Backward pass with scaled gradients
@@ -907,7 +909,7 @@ class Engine:
                         for name, param in self.model.named_parameters():
                             if param.grad is not None:
                                 if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                    print(f"[WARNING] NaN or Inf gradient detected in {name} at batch {batch}")
+                                    print(f"{self.warning} NaN or Inf gradient detected in {name} at batch {batch}")
                                     break
 
                     # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -943,7 +945,7 @@ class Engine:
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"[ERROR] Error calculating final FPR at recall: {e}")
+            logging.error(f"{self.error} Error calculating final FPR at recall: {e}")
             train_fpr = None
             train_pauc = None
 
@@ -998,7 +1000,7 @@ class Engine:
                     # Check for NaN/Inf in predictions
                     if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():
                         if enable_clipping:
-                            print(f"[WARNING] Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                            print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
                             test_pred = torch.nan_to_num(
                                 test_pred,
                                 nan=torch.mean(test_pred).item(),
@@ -1006,7 +1008,7 @@ class Engine:
                                 neginf=torch.min(test_pred).item()
                             )
                         else:
-                            print(f"[WARNING] Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                            print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
                             continue
 
                     # Calculate and accumulate loss
@@ -1015,7 +1017,7 @@ class Engine:
 
                     # Debug NaN/Inf loss
                     if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        print(f"[WARNING] Loss is NaN/Inf at batch {batch}. Skipping...")
+                        print(f"{self.warning} Loss is NaN/Inf at batch {batch}. Skipping...")
                         continue
 
                 # Calculate and accumulate accuracy
@@ -1037,7 +1039,7 @@ class Engine:
             test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)
             test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"[ERROR] Error calculating final FPR at recall: {e}")
+            logging.error(f"{self.error} Error calculating final FPR at recall: {e}")
             test_fpr = None
             test_pauc = None
 
@@ -1253,7 +1255,7 @@ class Engine:
             self.mode = [self.mode]  # Ensure self.mode is always a list
 
         if epoch is None:
-            raise ValueError("[ERROR] epoch must be provided when mode includes 'all' or 'last'.")
+            raise ValueError(f"{self.error} epoch must be provided when mode includes 'all' or 'last'.")
 
         def remove_previous_best(model_name_pattern):
             """Removes previously saved best model files."""
@@ -1269,7 +1271,7 @@ class Engine:
             for mode in self.mode:
                 if mode == "loss":
                     if test_loss is None:
-                        raise ValueError("[ERROR] test_loss must be provided when mode is 'loss'.")
+                        raise ValueError(f"{self.error} test_loss must be provided when mode is 'loss'.")
                     if test_loss < self.best_test_loss:
                         remove_previous_best(self.model_name_loss)
                         self.best_test_loss = test_loss
@@ -1277,7 +1279,7 @@ class Engine:
 
                 elif mode == "acc":
                     if test_acc is None:
-                        raise ValueError("[ERROR] test_acc must be provided when mode is 'acc'.")
+                        raise ValueError(f"{self.error} test_acc must be provided when mode is 'acc'.")
                     if test_acc > self.best_test_acc:
                         remove_previous_best(self.model_name_acc)
                         self.best_test_acc = test_acc
@@ -1285,7 +1287,7 @@ class Engine:
 
                 elif mode == "fpr":
                     if test_fpr is None:
-                        raise ValueError("[ERROR] test_fpr must be provided when mode is 'fpr'.")
+                        raise ValueError(f"{self.error} test_fpr must be provided when mode is 'fpr'.")
                     if test_fpr < self.best_test_fpr:
                         remove_previous_best(self.model_name_fpr)
                         self.best_test_fpr = test_fpr
@@ -1293,7 +1295,7 @@ class Engine:
 
                 elif mode == "pauc":
                     if test_pauc is None:
-                        raise ValueError("[ERROR] test_pauc must be provided when mode is 'pauc'.")
+                        raise ValueError(f"{self.error} test_pauc must be provided when mode is 'pauc'.")
                     if test_pauc > self.best_test_pauc:
                         remove_previous_best(self.model_name_pauc)
                         self.best_test_pauc = test_pauc

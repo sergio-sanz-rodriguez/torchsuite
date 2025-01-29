@@ -484,7 +484,7 @@ class Engine:
                     model_name_with_mode = f"_{mode}_epoch<int>{extension}"
                 
                 # Print the final model save path for each mode
-                print(f"{self.info} Save best model based on {mode}: {base_name + model_name_with_mode}")
+                print(f"{self.info} Save best model - {mode.capitalize()}: {base_name + model_name_with_mode}")
 
     def init_train(
         self,

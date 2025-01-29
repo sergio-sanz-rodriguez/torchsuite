@@ -779,15 +779,18 @@ class Engine:
         train_acc = train_acc / len(dataloader)
 
         # Final FPR calculation
-        try:
-            all_labels = torch.cat(all_labels)
-            all_preds = torch.cat(all_preds)
-            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)
+        all_labels = torch.cat(all_labels)
+        all_preds = torch.cat(all_preds)
+        try:    
+            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+        except Exception as e:
+            logging.error(f"{self.warning} Error calculating final FPR at recall: {e}")
+            train_fpr = 1.0
+        try:    
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"{self.error} Error calculating final FPR at recall: {e}")
-            train_fpr = None
-            train_pauc = None
+            logging.error(f"{self.warning} Error calculating final pAUC at recall: {e}")
+            train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
 
@@ -939,15 +942,18 @@ class Engine:
         train_acc = train_acc / len(dataloader)
 
         # Final FPR calculation
-        try:
-            all_labels = torch.cat(all_labels)
-            all_preds = torch.cat(all_preds)
-            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)
+        all_labels = torch.cat(all_labels)
+        all_preds = torch.cat(all_preds)
+        try:    
+            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+        except Exception as e:
+            logging.error(f"{self.warning} Error calculating final FPR at recall: {e}")
+            train_fpr = 1.0
+        try:    
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"{self.error} Error calculating final FPR at recall: {e}")
-            train_fpr = None
-            train_pauc = None
+            logging.error(f"{self.warning} Error calculating final pAUC at recall: {e}")
+            train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
 
@@ -1033,15 +1039,18 @@ class Engine:
         test_acc = test_acc / len(dataloader)
 
         # Final FPR calculation
-        try:
-            all_labels = torch.cat(all_labels)
-            all_preds = torch.cat(all_preds)
-            test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)
+        all_labels = torch.cat(all_labels)
+        all_preds = torch.cat(all_preds)
+        try:    
+            test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+        except Exception as e:
+            logging.error(f"{self.warning} Error calculating final FPR at recall: {e}")
+            test_fpr = 1.0
+        try:    
             test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
         except Exception as e:
-            logging.error(f"{self.error} Error calculating final FPR at recall: {e}")
-            test_fpr = None
-            test_pauc = None
+            logging.error(f"{self.warning} Error calculating final pAUC at recall: {e}")
+            test_pauc = 0.0
 
         return test_loss, test_acc, test_fpr, test_pauc
 

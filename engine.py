@@ -457,8 +457,8 @@ class Engine:
         print(f"{self.info} Batch size: {batch_size}")
         print(f"{self.info} Accumulation steps: {accumulation_steps}")
         print(f"{self.info} Effective batch size: {batch_size * accumulation_steps}")
-        print(f"{self.info} Recall threshold - FPR: {recall_threshold}")
-        print(f"{self.info} Recall threshold - pAUC: {recall_threshold_pauc}")
+        print(f"{self.info} Recall threshold - fpr: {recall_threshold}")
+        print(f"{self.info} Recall threshold - pauc: {recall_threshold_pauc}")
         print(f"{self.info} Plot curves: {plot_curves}")
         print(f"{self.info} Automatic Mixed Precision (AMP): {amp}")
         print(f"{self.info} Enable clipping: {enable_clipping}")
@@ -484,7 +484,7 @@ class Engine:
                     model_name_with_mode = f"_{mode}_epoch<int>{extension}"
                 
                 # Print the final model save path for each mode
-                print(f"{self.info} Save best model - {mode.capitalize()}: {base_name + model_name_with_mode}")
+                print(f"{self.info} Save best model - {mode}: {base_name + model_name_with_mode}")
 
     def init_train(
         self,
@@ -781,13 +781,14 @@ class Engine:
         # Final FPR calculation
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
+        num_classes = len(dataloader.dataset.classes)
         try:    
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
             logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
+            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
             logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
@@ -944,13 +945,14 @@ class Engine:
         # Final FPR calculation
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
+        num_classes = len(dataloader.dataset.classes)
         try:    
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
             logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
+            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
             logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
@@ -1041,13 +1043,14 @@ class Engine:
         # Final FPR calculation
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
+        num_classes = len(dataloader.dataset.classes)
         try:    
             test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
             logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
             test_fpr = 1.0
         try:    
-            test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc)
+            test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
             logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
             test_pauc = 0.0

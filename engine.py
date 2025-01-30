@@ -638,7 +638,8 @@ class Engine:
     
     def train_step(
         self,
-        dataloader: torch.utils.data.DataLoader, 
+        dataloader: torch.utils.data.DataLoader,
+        num_classes: int=2,
         recall_threshold: float=0.95,
         recall_threshold_pauc: float=0.95,
         amp: bool=True,
@@ -654,6 +655,7 @@ class Engine:
 
         Args:
             dataloader: A DataLoader instance for the model to be trained on.
+            num_classes: Number of classes.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1).
             recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
             amp: Whether to use mixed precision training (True) or not (False).
@@ -781,7 +783,6 @@ class Engine:
         # Final FPR calculation
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
-        num_classes = len(dataloader.dataset.classes)
         try:    
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
@@ -799,6 +800,7 @@ class Engine:
     def train_step_v2(
         self,
         dataloader: torch.utils.data.DataLoader, 
+        num_classes: int=2,
         recall_threshold: float=0.95,
         recall_threshold_pauc: float=0.95,
         amp: bool=True,
@@ -811,6 +813,7 @@ class Engine:
 
         Args:
             dataloader: A DataLoader instance for the model to be trained on.
+            num_classes: Number of classes.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1)
             recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
             amp: Whether to use mixed precision training (True) or not (False).
@@ -945,7 +948,6 @@ class Engine:
         # Final FPR calculation
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
-        num_classes = len(dataloader.dataset.classes)
         try:    
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
@@ -961,7 +963,8 @@ class Engine:
 
     def test_step(
         self,
-        dataloader: torch.utils.data.DataLoader, 
+        dataloader: torch.utils.data.DataLoader,
+        num_classes: int=2,
         recall_threshold: float = 0.95,
         recall_threshold_pauc: float = 0.95,
         amp: bool = True,
@@ -1043,7 +1046,6 @@ class Engine:
         # Final FPR calculation
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
-        num_classes = len(dataloader.dataset.classes)
         try:    
             test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
@@ -1358,7 +1360,8 @@ class Engine:
         model_name: str=None,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         train_dataloader: torch.utils.data.DataLoader=None, 
-        test_dataloader: torch.utils.data.DataLoader=None, 
+        test_dataloader: torch.utils.data.DataLoader=None,
+        num_classes: int=2, 
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         recall_threshold: float=0.95,
@@ -1397,6 +1400,7 @@ class Engine:
             - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
             train_dataloader: A DataLoader instance for the model to be trained on.
             test_dataloader: A DataLoader instance for the model to be tested on.
+            class_names: A list with the names of the classes
             optimizer: A PyTorch optimizer to help minimize the loss function.
             loss_fn: A PyTorch loss function to calculate loss on both datasets.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1). 
@@ -1476,6 +1480,7 @@ class Engine:
             train_epoch_start_time = time.time()
             train_loss, train_acc, train_fpr, train_pauc = self.train_step_v2(
                 dataloader=train_dataloader,
+                num_classes=num_classes,
                 recall_threshold=recall_threshold,
                 recall_threshold_pauc=recall_threshold_pauc,
                 amp=amp,
@@ -1490,6 +1495,7 @@ class Engine:
             test_epoch_start_time = time.time()
             test_loss, test_acc, test_fpr, test_pauc = self.test_step(
                 dataloader=test_dataloader,
+                num_classes=num_classes,
                 recall_threshold=recall_threshold,
                 recall_threshold_pauc=recall_threshold_pauc,
                 amp=amp,

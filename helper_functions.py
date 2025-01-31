@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 from tkinter import Tk
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from sklearn.metrics import f1_score, accuracy_score, roc_curve
+from sklearn.metrics import f1_score, accuracy_score, roc_curve, auc
 
 
 # Walk through an image classification directory and find out how many files (images)

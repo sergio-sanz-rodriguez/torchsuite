@@ -129,7 +129,6 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
         if self.label_smoothing > 0:
             targets_one_hot = (1 - self.label_smoothing) * targets_one_hot + self.label_smoothing / self.num_classes
 
-
         # Compute AUC for each class
         p_auc_values = []
         if self.num_classes == 2:
@@ -141,10 +140,10 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
 
             # Compute the mask for the recall range
             recall_mask = (tpr_vals >= self.recall_range[0]) & (tpr_vals <= self.recall_range[1])
-
+           
             if recall_mask.sum() > 0:
                 # Compute weighted partial AUC using trapezoidal rule
-                pauc = torch.trapz(tpr_vals[recall_mask], fpr_vals[recall_mask])  # Approximate AUC
+                pauc = torch.trapz(torch.clamp(tpr_vals[recall_mask] - self.recall_range[0], min=0), fpr_vals[recall_mask])
                 p_auc_values.append(pauc * self.weight[1].to(predictions.device))
             else:
                 p_auc_values.append(torch.tensor(0.0, device=predictions.device))
@@ -162,7 +161,7 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
 
                 if recall_mask.sum() > 0:
                     # Compute weighted partial AUC using trapezoidal rule
-                    pauc = torch.trapz(tpr_vals[recall_mask], fpr_vals[recall_mask])  # Approximate AUC
+                    pauc = torch.trapz(torch.clamp(tpr_vals[recall_mask] - self.recall_range[0], min=0), fpr_vals[recall_mask])
                     p_auc_values.append(pauc * self.weight[i].to(predictions.device))
                 else:
                     p_auc_values.append(torch.tensor(0.0, device=predictions.device))
@@ -177,5 +176,6 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
         # Total Loss: Subtract weighted pAUC from CE loss
         pauc_loss = -torch.log(avg_p_auc + 1e-7)
         total_loss = ce_loss + self.lambda_pauc * pauc_loss
+        #print(f"pauc: {pauc}, pauc_loss: {pauc_loss}, avg_p_auc: {avg_p_auc}, ce_loss: {ce_loss}, total_loss: {total_loss}")
 
         return total_loss

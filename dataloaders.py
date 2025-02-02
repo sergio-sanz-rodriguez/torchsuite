@@ -148,6 +148,7 @@ def create_dataloaders_with_resampling(
     test_class_0_samples: int = None,
     test_class_1_samples: int = None,
     num_workers: int = 0,
+    combine_train_test: bool = False,
 ):
     """
     Creates training and testing DataLoaders with optional class balancing. It works for binary classification.
@@ -163,9 +164,11 @@ def create_dataloaders_with_resampling(
         test_class_0_samples (int, optional): Target number of samples for class 0 in testing data.
         test_class_1_samples (int, optional): Target number of samples for class 1 in testing data.
         num_workers (int): Number of subprocesses for data loading.
+        combine_train_test (bool): Whether to combine train and test into a single DataLoader.
 
     Returns:
-        tuple: train_dataloader, test_dataloader, class_names
+        tuple: (train_dataloader, test_dataloader, class_names) 
+               or (combined_dataloader, class_names) if combine_train_test=True.
     """
     # Load datasets
     train_data = datasets.ImageFolder(train_dir, transform=train_transform)
@@ -181,6 +184,18 @@ def create_dataloaders_with_resampling(
     # Resample data
     train_data_resampled = resample_data(train_data, train_labels, train_class_0_samples, train_class_1_samples)
     test_data_resampled = resample_data(test_data, test_labels, test_class_0_samples, test_class_1_samples)
+
+    # Combine datasets if required
+    if combine_train_test:
+        combined_data = torch.utils.data.ConcatDataset([train_data_resampled, test_data_resampled])
+        combined_dataloader = DataLoader(
+            combined_data,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
+        return combined_dataloader, class_names
 
     # Create DataLoaders
     train_dataloader = DataLoader(

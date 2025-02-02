@@ -460,6 +460,7 @@ class Engine:
         print(f"{self.info} Effective batch size: {batch_size * accumulation_steps}")
         print(f"{self.info} Recall threshold - fpr: {recall_threshold}")
         print(f"{self.info} Recall threshold - pauc: {recall_threshold_pauc}")
+        print(f"{self.info} Apply validation: {self.apply_validation}")
         print(f"{self.info} Plot curves: {plot_curves}")
         print(f"{self.info} Automatic Mixed Precision (AMP): {amp}")
         print(f"{self.info} Enable clipping: {enable_clipping}")
@@ -491,6 +492,7 @@ class Engine:
         self,
         target_dir: str=None,
         model_name: str=None,
+        apply_validation: bool=True,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
@@ -546,6 +548,12 @@ class Engine:
             
         This method sets up the environment for training, ensuring all necessary resources and parameters are prepared.
         """
+
+        # Validate apply_validation
+        if not isinstance(apply_validation, (bool)):
+            raise ValueError(f"{self.error}'apply_validation' must be True or False.")
+        else:
+            self.apply_validation = apply_validation
       
         # Validate recall_threshold
         if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
@@ -619,23 +627,31 @@ class Engine:
     
         # Initialize the best model and model_epoch list based on the specified mode.
         if self.save_best_model:
-            if self.mode != "all":
-                self.model_best = copy.deepcopy(self.model)                            
-                self.model_best.to(self.device)
+            if self.mode == "loss":
+                self.model_loss = copy.deepcopy(self.model)                            
+                self.model_loss.to(self.device)
                 self.model_name_loss = self.model_name.replace(".", f"_loss.")
+            if self.mode == "acc":
+                self.model_acc = copy.deepcopy(self.model)                            
+                self.model_acc.to(self.device)
                 self.model_name_acc = self.model_name.replace(".", f"_acc.")
+            if self.mode == "fpr":
+                self.model_fpr = copy.deepcopy(self.model)                            
+                self.model_fpr.to(self.device)
                 self.model_name_fpr = self.model_name.replace(".", f"_fpr.")
+            if self.mode == "pauc":
+                self.model_pauc = copy.deepcopy(self.model)                            
+                self.model_pauc.to(self.device)
                 self.model_name_pauc = self.model_name.replace(".", f"_pauc.")
-                self.best_test_loss = float("inf") 
-                self.best_test_acc = 0.0
-                self.best_test_fpr = float("inf")
-                self.best_test_pauc = 0.0
-            else:
+            if self.mode == "all":
                 self.model_epoch = []
                 for k in range(epochs):
                     self.model_epoch.append(copy.deepcopy(self.model))
                     self.model_epoch[k].to(self.device)
-
+            self.best_test_loss = float("inf") 
+            self.best_test_acc = 0.0
+            self.best_test_fpr = float("inf")
+            self.best_test_pauc = 0.0
     
     def train_step(
         self,
@@ -643,6 +659,7 @@ class Engine:
         num_classes: int=2,
         recall_threshold: float=0.95,
         recall_threshold_pauc: float=0.95,
+        epoch_number: int = 1,
         amp: bool=True,
         enable_clipping=False,
         debug_mode: bool=False
@@ -659,6 +676,7 @@ class Engine:
             num_classes: Number of classes.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1).
             recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
+            epoch_number: Epoch number.
             amp: Whether to use mixed precision training (True) or not (False).
             enable_clipping: enables clipping on gradients and model outputs.
             debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
@@ -667,6 +685,8 @@ class Engine:
             A tuple of training loss, training accuracy, and fpr at recall metrics.
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
+
+        print(f"Training epoch {epoch_number+1}...")
 
         # Put model in train mode
         self.model.train()
@@ -804,6 +824,7 @@ class Engine:
         num_classes: int=2,
         recall_threshold: float=0.95,
         recall_threshold_pauc: float=0.95,
+        epoch_number: int = 1,
         amp: bool=True,
         enable_clipping=False,
         accumulation_steps: int = 1,
@@ -817,6 +838,7 @@ class Engine:
             num_classes: Number of classes.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1)
             recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
+            epoch_number: Epoch number.
             amp: Whether to use mixed precision training (True) or not (False).
             enable_clipping: enables clipping on gradients and model outputs.
             accumulation_steps: Number of mini-batches to accumulate gradients before an optimizer step.
@@ -827,6 +849,8 @@ class Engine:
             A tuple of training loss, training accuracy, and fpr at recall metrics.
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
+
+        print(f"Training epoch {epoch_number+1}...")
 
         # Put model in train mode
         self.model.train()
@@ -968,6 +992,7 @@ class Engine:
         num_classes: int=2,
         recall_threshold: float = 0.95,
         recall_threshold_pauc: float = 0.95,
+        epoch_number: int = 1,
         amp: bool = True,
         debug_mode: bool = False,
         enable_clipping: bool = False
@@ -979,6 +1004,7 @@ class Engine:
             dataloader: A DataLoader instance for the model to be tested on.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1).
             recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
+            epoch_number: Epoch number.
             amp: Whether to use Automatic Mixed Precision for inference.
             debug_mode: Enables logging for debugging purposes.
             enable_clipping: Enables NaN/Inf value clipping for test predictions.
@@ -987,76 +1013,85 @@ class Engine:
             A tuple of test loss, test accuracy, FPR-at-recall, and pAUC-at-recall metrics.
         """
 
-        # Put model in eval mode
-        self.model.eval() 
-        self.model.to(self.device)
+        # Execute the test step is apply_validation is enabled
+        if self.apply_validation:
 
-        # Setup test loss and test accuracy values
-        test_loss, test_acc = 0, 0
-        all_preds = []
-        all_labels = []
+            print(f"Validating epoch {epoch_number+1}...")
 
-        # Turn on inference context manager
-        with torch.inference_mode():
-            # Loop through DataLoader batches
-            for batch, (X, y) in tqdm(enumerate(dataloader), total=len(dataloader), colour='#FF9E2C'):
-                #, desc=f"Validating epoch {epoch_number}..."):
-                # Send data to target device
-                X, y = X.to(self.device), y.to(self.device)
+            # Put model in eval mode
+            self.model.eval() 
+            self.model.to(self.device)
 
-                # Enable AMP if specified
-                with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
-                    test_pred = self.model(X)
-                    test_pred = test_pred.contiguous()
+            # Setup test loss and test accuracy values
+            test_loss, test_acc = 0, 0
+            all_preds = []
+            all_labels = []
 
-                    # Check for NaN/Inf in predictions
-                    if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():
-                        if enable_clipping:
-                            print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
-                            test_pred = torch.nan_to_num(
-                                test_pred,
-                                nan=torch.mean(test_pred).item(),
-                                posinf=torch.max(test_pred).item(),
-                                neginf=torch.min(test_pred).item()
-                            )
-                        else:
-                            print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+            # Turn on inference context manager
+            with torch.inference_mode():
+                # Loop through DataLoader batches
+                for batch, (X, y) in tqdm(enumerate(dataloader), total=len(dataloader), colour='#FF9E2C'):
+                    #, desc=f"Validating epoch {epoch_number}..."):
+                    # Send data to target device
+                    X, y = X.to(self.device), y.to(self.device)
+
+                    # Enable AMP if specified
+                    with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
+                        test_pred = self.model(X)
+                        test_pred = test_pred.contiguous()
+
+                        # Check for NaN/Inf in predictions
+                        if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():
+                            if enable_clipping:
+                                print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                                test_pred = torch.nan_to_num(
+                                    test_pred,
+                                    nan=torch.mean(test_pred).item(),
+                                    posinf=torch.max(test_pred).item(),
+                                    neginf=torch.min(test_pred).item()
+                                )
+                            else:
+                                print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                                continue
+
+                        # Calculate and accumulate loss
+                        loss = self.loss_fn(test_pred, y)
+                        test_loss += loss.item()
+
+                        # Debug NaN/Inf loss
+                        if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
+                            print(f"{self.warning} Loss is NaN/Inf at batch {batch}. Skipping...")
                             continue
 
-                    # Calculate and accumulate loss
-                    loss = self.loss_fn(test_pred, y)
-                    test_loss += loss.item()
+                    # Calculate and accumulate accuracy
+                    test_pred_class = test_pred.argmax(dim=1)
+                    test_acc += self.calculate_accuracy(y, test_pred_class) #((test_pred_class == y).sum().item()/len(test_pred))
 
-                    # Debug NaN/Inf loss
-                    if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        print(f"{self.warning} Loss is NaN/Inf at batch {batch}. Skipping...")
-                        continue
+                    # Collect outputs for fpr-at-recall calculation
+                    all_preds.append(torch.softmax(test_pred, dim=1).detach().cpu())
+                    all_labels.append(y.detach().cpu())
 
-                # Calculate and accumulate accuracy
-                test_pred_class = test_pred.argmax(dim=1)
-                test_acc += self.calculate_accuracy(y, test_pred_class) #((test_pred_class == y).sum().item()/len(test_pred))
+            # Adjust metrics to get average loss and accuracy per batch 
+            test_loss = test_loss / len(dataloader)
+            test_acc = test_acc / len(dataloader)
 
-                # Collect outputs for fpr-at-recall calculation
-                all_preds.append(torch.softmax(test_pred, dim=1).detach().cpu())
-                all_labels.append(y.detach().cpu())
-
-        # Adjust metrics to get average loss and accuracy per batch 
-        test_loss = test_loss / len(dataloader)
-        test_acc = test_acc / len(dataloader)
-
-        # Final FPR calculation
-        all_labels = torch.cat(all_labels)
-        all_preds = torch.cat(all_preds)
-        try:    
-            test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
-        except Exception as e:
-            logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
-            test_fpr = 1.0
-        try:    
-            test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
-        except Exception as e:
-            logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
-            test_pauc = 0.0
+            # Final FPR calculation
+            all_labels = torch.cat(all_labels)
+            all_preds = torch.cat(all_preds)
+            try:    
+                test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+            except Exception as e:
+                logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
+                test_fpr = 1.0
+            try:    
+                test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+            except Exception as e:
+                logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
+                test_pauc = 0.0
+        
+        # Otherwise set params with initial values
+        else:
+            test_loss, test_acc, test_fpr, test_pauc = self.best_test_loss, self.best_test_acc, self.best_test_fpr, self.best_test_pauc
 
         return test_loss, test_acc, test_fpr, test_pauc
 
@@ -1064,6 +1099,7 @@ class Engine:
     def display_results(
         self,
         epoch,
+        max_epochs,
         train_loss,
         train_acc,
         recall_threshold,
@@ -1099,7 +1135,7 @@ class Engine:
         
         # Print results
         print(
-            f"{self.colors['BLACK']}Epoch: {epoch+1} | "
+            f"{self.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
             f"{self.colors['BLUE']}Train: {self.colors['BLACK']}| "
             f"{self.colors['BLUE']}loss: {train_loss:.4f} {self.colors['BLACK']}| "
             f"{self.colors['BLUE']}acc: {train_acc:.4f} {self.colors['BLACK']}| "
@@ -1108,16 +1144,17 @@ class Engine:
             f"{self.colors['BLUE']}time: {self.sec_to_min_sec(train_epoch_time)} {self.colors['BLACK']}| "            
             f"{self.colors['BLUE']}lr: {lr:.10f}"
         )
-        print(
-            f"{self.colors['BLACK']}Epoch: {epoch+1} | "
-            f"{self.colors['ORANGE']}Test:  {self.colors['BLACK']}| "
-            f"{self.colors['ORANGE']}loss: {test_loss:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['ORANGE']}acc: {test_acc:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['ORANGE']}fpr: {test_fpr:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['ORANGE']}pauc: {test_pauc:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['ORANGE']}time: {self.sec_to_min_sec(test_epoch_time)} {self.colors['BLACK']}| "            
-            f"{self.colors['ORANGE']}lr: {lr:.10f}"
-        )
+        if self.apply_validation:
+            print(
+                f"{self.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
+                f"{self.colors['ORANGE']}Test:  {self.colors['BLACK']}| "
+                f"{self.colors['ORANGE']}loss: {test_loss:.4f} {self.colors['BLACK']}| "
+                f"{self.colors['ORANGE']}acc: {test_acc:.4f} {self.colors['BLACK']}| "
+                f"{self.colors['ORANGE']}fpr: {test_fpr:.4f} {self.colors['BLACK']}| "
+                f"{self.colors['ORANGE']}pauc: {test_pauc:.4f} {self.colors['BLACK']}| "
+                f"{self.colors['ORANGE']}time: {self.sec_to_min_sec(test_epoch_time)} {self.colors['BLACK']}| "            
+                f"{self.colors['ORANGE']}lr: {lr:.10f}"
+            )
         
         # Update results dictionary
         self.results["epoch"].append(epoch+1)
@@ -1136,26 +1173,44 @@ class Engine:
         # See if there's a writer, if so, log to it
         if writer:
             # Add results to SummaryWriter
-            writer.add_scalars(
-                main_tag="Loss", 
-                tag_scalar_dict={"train_loss": train_loss,
-                                 "test_loss": test_loss},
-                global_step=epoch)
-            writer.add_scalars(
-                main_tag="Accuracy", 
-                tag_scalar_dict={"train_acc": train_acc,
-                                 "test_acc": test_acc},
-                global_step=epoch)
-            writer.add_scalars(
-                main_tag=f"FPR at {recall_threshold * 100}% recall", 
-                tag_scalar_dict={"train_fpr": train_fpr,
-                                    "test_fpr": test_fpr}, 
-                global_step=epoch)
-            writer.add_scalars(
-                main_tag=f"pAUC above {recall_threshold_pauc * 100}% recall", 
-                tag_scalar_dict={"train_pauc": train_pauc,
-                                    "test_pauc": test_pauc}, 
-                global_step=epoch)
+            if self.apply_validation:
+                writer.add_scalars(
+                    main_tag="Loss", 
+                    tag_scalar_dict={"train_loss": train_loss,
+                                    "test_loss": test_loss},
+                    global_step=epoch)
+                writer.add_scalars(
+                    main_tag="Accuracy", 
+                    tag_scalar_dict={"train_acc": train_acc,
+                                    "test_acc": test_acc},
+                    global_step=epoch)
+                writer.add_scalars(
+                    main_tag=f"FPR at {recall_threshold * 100}% recall", 
+                    tag_scalar_dict={"train_fpr": train_fpr,
+                                        "test_fpr": test_fpr}, 
+                    global_step=epoch)
+                writer.add_scalars(
+                    main_tag=f"pAUC above {recall_threshold_pauc * 100}% recall", 
+                    tag_scalar_dict={"train_pauc": train_pauc,
+                                        "test_pauc": test_pauc}, 
+                    global_step=epoch)
+            else:
+                writer.add_scalars(
+                    main_tag="Loss", 
+                    tag_scalar_dict={"train_loss": train_loss},
+                    global_step=epoch)
+                writer.add_scalars(
+                    main_tag="Accuracy", 
+                    tag_scalar_dict={"train_acc": train_acc},
+                    global_step=epoch)
+                writer.add_scalars(
+                    main_tag=f"FPR at {recall_threshold * 100}% recall", 
+                    tag_scalar_dict={"train_fpr": train_fpr}, 
+                    global_step=epoch)
+                writer.add_scalars(
+                    main_tag=f"pAUC above {recall_threshold_pauc * 100}% recall", 
+                    tag_scalar_dict={"train_pauc": train_pauc}, 
+                    global_step=epoch)
         else:
             pass
 
@@ -1169,7 +1224,8 @@ class Engine:
             # Plot loss
             plt.subplot(1, n_plots, 1)
             plt.plot(range_epochs, self.results["train_loss"], label="train_loss")
-            plt.plot(range_epochs, self.results["test_loss"], label="test_loss")
+            if self.apply_validation:
+                plt.plot(range_epochs, self.results["test_loss"], label="test_loss")
             plt.title("Loss")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -1178,7 +1234,8 @@ class Engine:
             # Plot accuracy
             plt.subplot(1, n_plots, 2)
             plt.plot(range_epochs, self.results["train_acc"], label="train_accuracy")
-            plt.plot(range_epochs, self.results["test_acc"], label="test_accuracy")
+            if self.apply_validation:
+                plt.plot(range_epochs, self.results["test_acc"], label="test_accuracy")
             plt.title("Accuracy")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -1187,7 +1244,8 @@ class Engine:
             # Plot FPR at recall
             plt.subplot(1, n_plots, 3)
             plt.plot(range_epochs, self.results["train_fpr"], label="train_fpr_at_recall")
-            plt.plot(range_epochs, self.results["test_fpr"], label="test_fpr_at_recall")
+            if self.apply_validation:
+                plt.plot(range_epochs, self.results["test_fpr"], label="test_fpr_at_recall")
             plt.title(f"FPR at {recall_threshold * 100}% recall")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -1196,7 +1254,8 @@ class Engine:
             # Plot pAUC at recall
             plt.subplot(1, n_plots, 4)
             plt.plot(range_epochs, self.results["train_pauc"], label="train_pauc_at_recall")
-            plt.plot(range_epochs, self.results["test_pauc"], label="test_pauc_at_recall")
+            if self.apply_validation:
+                plt.plot(range_epochs, self.results["test_pauc"], label="test_pauc_at_recall")
             plt.title(f"pAUC above {recall_threshold_pauc * 100}% recall")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -1221,7 +1280,7 @@ class Engine:
         """
             
         if self.scheduler:
-            if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            if self.apply_validation and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 # Check whether scheduler is configured for "min" or "max"
                 if self.scheduler.mode == "min" and test_loss is not None:
                     self.scheduler.step(test_loss)  # Minimize test_loss
@@ -1282,7 +1341,7 @@ class Engine:
             """Helper function to save the model."""
             self.save(model=self.model, target_dir=self.target_dir, model_name=model_name.replace(".", f"_epoch{epoch+1}."))
 
-        if self.save_best_model:
+        if self.save_best_model:            
             for mode in self.mode:
                 if mode == "loss":
                     if test_loss is None:
@@ -1465,6 +1524,7 @@ class Engine:
             target_dir=target_dir,
             model_name=model_name,
             save_best_model=save_best_model,
+            apply_validation= apply_validation,
             optimizer=optimizer,
             loss_fn=loss_fn,
             scheduler=scheduler,
@@ -1484,13 +1544,13 @@ class Engine:
         for epoch in range(epochs):
 
             # Perform training step and time it
-            print(f"Training epoch {epoch+1}...")
             train_epoch_start_time = time.time()
             train_loss, train_acc, train_fpr, train_pauc = self.train_step_v2(
                 dataloader=train_dataloader,
                 num_classes=num_classes,
                 recall_threshold=recall_threshold,
                 recall_threshold_pauc=recall_threshold_pauc,
+                epoch_number=epoch,
                 amp=amp,
                 enable_clipping=enable_clipping,
                 accumulation_steps=accumulation_steps,
@@ -1499,27 +1559,25 @@ class Engine:
             train_epoch_time = time.time() - train_epoch_start_time
 
             # Perform test step and time it
-            if apply_validation:
-                print(f"Validating epoch {epoch+1}...")
-                test_epoch_start_time = time.time()
-                test_loss, test_acc, test_fpr, test_pauc = self.test_step(
-                    dataloader=test_dataloader,
-                    num_classes=num_classes,
-                    recall_threshold=recall_threshold,
-                    recall_threshold_pauc=recall_threshold_pauc,
-                    amp=amp,
-                    enable_clipping=enable_clipping,
-                    debug_mode=debug_mode
-                    )
-                test_epoch_time = time.time() - test_epoch_start_time
-            else:
-                test_loss, test_acc, test_fpr, test_pauc, test_epoch_time = self.best_test_loss, self.best_test_acc, self.best_test_fpr, self.best_test_pauc, 0.0
+            test_epoch_start_time = time.time()
+            test_loss, test_acc, test_fpr, test_pauc = self.test_step(
+                dataloader=test_dataloader,
+                num_classes=num_classes,
+                recall_threshold=recall_threshold,
+                recall_threshold_pauc=recall_threshold_pauc,
+                epoch_number=epoch,
+                amp=amp,
+                enable_clipping=enable_clipping,
+                debug_mode=debug_mode
+                )
+            test_epoch_time = time.time() - test_epoch_start_time if self.apply_validation else 0.0            
 
             clear_output(wait=True)
 
             # Show results
             self.display_results(
                 epoch=epoch,
+                max_epochs=epochs,
                 train_loss=train_loss,
                 train_acc=train_acc,
                 recall_threshold=recall_threshold,
@@ -1543,11 +1601,12 @@ class Engine:
             )
 
             # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.
+            # If apply_validation is enabled then upate models based on validation results
             df_results = self.update_model(
-                test_loss=test_loss,
-                test_acc=test_acc,
-                test_fpr=test_fpr,
-                test_pauc=test_pauc,
+                test_loss=test_loss if self.apply_validation else train_loss,
+                test_acc=test_acc if self.apply_validation else train_acc,
+                test_fpr=test_fpr if self.apply_validation else train_fpr
+                test_pauc=test_pauc if self.apply_validation else train_pauc,
                 epoch=epoch
                 )
 
@@ -1560,7 +1619,7 @@ class Engine:
     def predict(
         self,
         dataloader: torch.utils.data.DataLoader,
-        model_state: str="default",
+        model_state: str="last",
         output_type: str="softmax",        
         ) -> torch.Tensor:
 
@@ -1568,7 +1627,7 @@ class Engine:
         Predicts classes for a given dataset using a trained model.
 
         Args:
-            model_state: specifies the model to use for making predictions. Default: "default", the last stored model.
+            model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
             dataloader (torch.utils.data.DataLoader): The dataset to predict on.
             output_type (str): The type of output to return. Either "softmax", "logits", or "argmax".            
 
@@ -1577,17 +1636,35 @@ class Engine:
         """
  
         # Check model to use
-        valid_models = {"default", "best"}
-        assert model_state in valid_models or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
+        valid_modes =  {"loss", "acc", "fpr", "pauc", "last", "all"}
+        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
 
-        if model_state == "default":
+        if model_state == "last":
             model = self.model
-        elif model_state == "best":
-            if self.model_best is None:
-                print(f"{self.info} Model best not found, using default model for prediction.")
+        elif model_state == "loss":
+            if self.model_loss is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
-                model = self.model_best
+                model = self.model_loss
+        elif model_state == "acc":
+            if self.model_acc is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_acc
+        elif model_state == "fpr":
+            if self.model_fpr is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_fpr
+        elif model_state == "pauc":
+            if self.model_pauc is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
                 print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
@@ -1634,7 +1711,7 @@ class Engine:
         test_dir: str, 
         transform: torchvision.transforms, 
         class_names: List[str], 
-        model_state: str="default",
+        model_state: str="last",
         sample_fraction: float=1.0,
         seed=42,        
         ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -1643,7 +1720,7 @@ class Engine:
         Predicts classes for a given dataset using a trained model and stores the per-sample results in dictionaries.
 
         Args:
-            model_state: specifies the model to use for making predictions. "last" (default), "best", an integer
+            model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
             test_dir (str): The directory containing the test images.
             transform (torchvision.transforms): The transformation to apply to the test images.
             class_names (list): A list of class names.
@@ -1656,17 +1733,35 @@ class Engine:
         """
 
         # Check model to use
-        valid_models = {"default", "best"}
-        assert model_state in valid_models or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
+        valid_modes =  {"loss", "acc", "fpr", "pauc", "last", "all"}
+        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
 
-        if model_state == "default":
+        if model_state == "last":
             model = self.model
-        elif model_state == "best":
-            if self.model_best is None:
-                print(f"{self.info} Model best not found, using default model for prediction.")
+        elif model_state == "loss":
+            if self.model_loss is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
-                model = self.model_best
+                model = self.model_loss
+        elif model_state == "acc":
+            if self.model_acc is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_acc
+        elif model_state == "fpr":
+            if self.model_fpr is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_fpr
+        elif model_state == "pauc":
+            if self.model_pauc is None:
+                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
                 print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")

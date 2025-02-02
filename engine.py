@@ -12,6 +12,7 @@ import time
 import numpy as np
 import pandas as pd
 import copy
+import warnings
 from datetime import datetime
 from typing import Tuple, Dict, Any, List, Union, Optional
 from tqdm.auto import tqdm 
@@ -135,18 +136,6 @@ class Engine:
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
-
-        # Check if model is provided
-        if self.model is None:
-            warnings.warn(
-                "[WARNING] No model has been introduced. Only limited functionalities "
-                "will be allowed: 'sec_to_min_sec', 'calculate_accuracy', "
-                "'calculate_fpr_at_recall', 'calculate_pauc_at_recall', "
-                "'load', and 'create_writer'."
-                "You can later on load the model with 'load'."
-            )
-        else:
-            self.model.to(self.device)
      
         # Create empty results dictionary
         self.results = {
@@ -177,6 +166,20 @@ class Engine:
         self.error = f"{self.colors['RED']}[ERROR]{self.colors['BLACK']}"
         self.warning = f"{self.colors['BLUE']}[WARNING]{self.colors['BLACK']}"
 
+        # Check if model is provided
+        if self.model is None:
+            raise ValueError(f"{self.error}Instantiate the engine by passing a PyTorch model to handle.")
+            #print(f"self.colors['GREEN']}[INFO] Use method 'load' to load the model or instatiate again the model using attribute 'model'.")
+            #warnings.warn(
+            #    "[WARNING] No model has been introduced. Only limited functionalities "
+            #    "will be allowed: 'sec_to_min_sec', 'calculate_accuracy', "
+            #    "'calculate_fpr_at_recall', 'calculate_pauc_at_recall', "
+            #    "'load', and 'create_writer'."
+            #    "You can later on load the model with 'load'."
+            #)
+        else:
+            self.model.to(self.device)
+
     @staticmethod
     def sec_to_min_sec(seconds):
         """
@@ -190,7 +193,7 @@ class Engine:
             str: A formatted string representing the time in minutes and seconds, aligned properly.
         """
         if not isinstance(seconds, (int, float)) or seconds < 0:
-            raise ValueError("Input must be a non-negative number.")
+            raise ValueError(f"{self.error}Input must be a non-negative number.")
         
         minutes = int(seconds // 60)
         remaining_seconds = int(seconds % 60)
@@ -237,7 +240,7 @@ class Engine:
 
         # Check if recall_threhold is a valid number
         if not (0 <= recall_threshold <= 1):
-            raise ValueError("recall_threshold must be between 0 and 1.")
+            raise ValueError(f"{self.error}'recall_threshold' must be between 0 and 1.")
 
         # Convert list to tensor if necessary
         if isinstance(y_pred_probs, list):
@@ -366,8 +369,7 @@ class Engine:
     def load(
         self,
         target_dir: str,
-        model_name: str,
-        return_model: bool=False):
+        model_name: str):
         
         """Loads a PyTorch model from a target directory and optionally returns it.
 
@@ -390,8 +392,7 @@ class Engine:
         
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         
-        if return_model:
-            return self.model
+        return self
     
     
     def create_writer(
@@ -548,19 +549,19 @@ class Engine:
       
         # Validate recall_threshold
         if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
-            raise ValueError(f"{self.error} recall_threshold must be a float between 0.0 and 1.0.")
+            raise ValueError(f"{self.error}'recall_threshold' must be a float between 0.0 and 1.0.")
 
         # Validate recall_threshold_pauc
         if not isinstance(recall_threshold_pauc, (int, float)) or not (0.0 <= float(recall_threshold_pauc) <= 1.0):
-            raise ValueError(f"{self.error} recall_threshold_pauc must be a float between 0.0 and 1.0.")
+            raise ValueError(f"{self.error}'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
 
         # Validate accumulation_steps
         if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
-            raise ValueError(f"{self.error} accumulation_steps must be an integer greater than or equal to 1.")
+            raise ValueError(f"{self.error}'accumulation_steps' must be an integer greater than or equal to 1.")
 
         # Validate epochs
         if not isinstance(epochs, int) or epochs < 1:
-            raise ValueError(f"{self.error} epochs must be an integer greater than or equal to 1.")
+            raise ValueError(f"{self.error}'epochs' must be an integer greater than or equal to 1.")
 
         # Ensure save_best_model is correctly handled
         if save_best_model is None:
@@ -570,17 +571,17 @@ class Engine:
             self.save_best_model = True
             mode = [save_best_model] if isinstance(save_best_model, str) else save_best_model  # Ensure mode is a list
         else:
-            raise ValueError(f"{self.error} save_best_model must be None, a string, or a list of strings.")
+            raise ValueError(f"{self.error}'save_best_model' must be None, a string, or a list of strings.")
 
         # Validate mode only if save_best_model is True
         valid_modes = {"loss", "acc", "fpr", "pauc", "last", "all"}
         if self.save_best_model:
             if not isinstance(mode, list):
-                raise ValueError(f"{self.error} mode must be a string or a list of strings.")
+                raise ValueError(f"{self.error}'mode' must be a string or a list of strings.")
 
             for m in mode:
                 if m not in valid_modes:
-                    raise ValueError(f"{self.error} Invalid mode value: '{m}'. Must be one of {valid_modes}")
+                    raise ValueError(f"{self.error}Invalid mode value: '{m}'. Must be one of {valid_modes}")
 
         # Assign the validated mode list
         self.mode = mode
@@ -1228,7 +1229,7 @@ class Engine:
                     self.scheduler.step(test_acc)  # Maximize test_accuracy
                 else:
                     raise ValueError(
-                        "The scheduler requires either `test_loss` or `test_acc` "
+                        f"{self.error}The scheduler requires either `test_loss` or `test_acc` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -1269,7 +1270,7 @@ class Engine:
             self.mode = [self.mode]  # Ensure self.mode is always a list
 
         if epoch is None:
-            raise ValueError(f"{self.error} epoch must be provided when mode includes 'all' or 'last'.")
+            raise ValueError(f"{self.error}'epoch' must be provided when mode includes 'all' or 'last'.")
 
         def remove_previous_best(model_name_pattern):
             """Removes previously saved best model files."""
@@ -1285,7 +1286,7 @@ class Engine:
             for mode in self.mode:
                 if mode == "loss":
                     if test_loss is None:
-                        raise ValueError(f"{self.error} test_loss must be provided when mode is 'loss'.")
+                        raise ValueError(f"{self.error}'test_loss' must be provided when mode is 'loss'.")
                     if test_loss < self.best_test_loss:
                         remove_previous_best(self.model_name_loss)
                         self.best_test_loss = test_loss
@@ -1293,7 +1294,7 @@ class Engine:
 
                 elif mode == "acc":
                     if test_acc is None:
-                        raise ValueError(f"{self.error} test_acc must be provided when mode is 'acc'.")
+                        raise ValueError(f"{self.error}'test_acc' must be provided when mode is 'acc'.")
                     if test_acc > self.best_test_acc:
                         remove_previous_best(self.model_name_acc)
                         self.best_test_acc = test_acc
@@ -1301,7 +1302,7 @@ class Engine:
 
                 elif mode == "fpr":
                     if test_fpr is None:
-                        raise ValueError(f"{self.error} test_fpr must be provided when mode is 'fpr'.")
+                        raise ValueError(f"{self.error}'test_fpr' must be provided when mode is 'fpr'.")
                     if test_fpr < self.best_test_fpr:
                         remove_previous_best(self.model_name_fpr)
                         self.best_test_fpr = test_fpr
@@ -1309,7 +1310,7 @@ class Engine:
 
                 elif mode == "pauc":
                     if test_pauc is None:
-                        raise ValueError(f"{self.error} test_pauc must be provided when mode is 'pauc'.")
+                        raise ValueError(f"{self.error}'test_pauc' must be provided when mode is 'pauc'.")
                     if test_pauc > self.best_test_pauc:
                         remove_previous_best(self.model_name_pauc)
                         self.best_test_pauc = test_pauc
@@ -1361,6 +1362,7 @@ class Engine:
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         train_dataloader: torch.utils.data.DataLoader=None, 
         test_dataloader: torch.utils.data.DataLoader=None,
+        apply_validation: bool=True,
         num_classes: int=2, 
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
@@ -1400,6 +1402,12 @@ class Engine:
             - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
             train_dataloader: A DataLoader instance for the model to be trained on.
             test_dataloader: A DataLoader instance for the model to be tested on.
+            apply_validation:
+            - If set to True, the model's performance is evaluated on the validation dataset after each epoch,
+              helping to detect overfitting and guide potential adjustments in hyperparameters.
+            - If set to False, validation is skipped, which reduces computational cost and speeds up training,
+              but at the risk of overfitting.
+            - Default: True
             class_names: A list with the names of the classes
             optimizer: A PyTorch optimizer to help minimize the loss function.
             loss_fn: A PyTorch loss function to calculate loss on both datasets.
@@ -1491,18 +1499,21 @@ class Engine:
             train_epoch_time = time.time() - train_epoch_start_time
 
             # Perform test step and time it
-            print(f"Validating epoch {epoch+1}...")
-            test_epoch_start_time = time.time()
-            test_loss, test_acc, test_fpr, test_pauc = self.test_step(
-                dataloader=test_dataloader,
-                num_classes=num_classes,
-                recall_threshold=recall_threshold,
-                recall_threshold_pauc=recall_threshold_pauc,
-                amp=amp,
-                enable_clipping=enable_clipping,
-                debug_mode=debug_mode
-                )
-            test_epoch_time = time.time() - test_epoch_start_time
+            if apply_validation:
+                print(f"Validating epoch {epoch+1}...")
+                test_epoch_start_time = time.time()
+                test_loss, test_acc, test_fpr, test_pauc = self.test_step(
+                    dataloader=test_dataloader,
+                    num_classes=num_classes,
+                    recall_threshold=recall_threshold,
+                    recall_threshold_pauc=recall_threshold_pauc,
+                    amp=amp,
+                    enable_clipping=enable_clipping,
+                    debug_mode=debug_mode
+                    )
+                test_epoch_time = time.time() - test_epoch_start_time
+            else:
+                test_loss, test_acc, test_fpr, test_pauc, test_epoch_time = self.best_test_loss, self.best_test_acc, self.best_test_fpr, self.best_test_pauc, 0.0
 
             clear_output(wait=True)
 

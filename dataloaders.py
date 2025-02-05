@@ -7,10 +7,12 @@ import random
 import torch
 import pandas as pd
 import numpy as np
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, Dataset
 from torchvision import datasets, transforms
 from torchvision.transforms import v2
 from collections import defaultdict
+from typing import List, Tuple, Optional, Union
+from PIL import Image
 
 NUM_WORKERS = os.cpu_count()
 
@@ -214,6 +216,108 @@ def create_dataloaders_with_resampling(
     )
 
     return train_dataloader, test_dataloader, class_names
+
+
+class CustomImageDataset(Dataset):
+    
+    """
+    Custom dataset for loading images from a list of paths.
+
+    Args:
+        image_paths (List[str]): List of file paths to images.
+        labels (List[int]): List of corresponding labels.
+        transform (transforms.Compose, optional): Transformations to apply.
+    """
+
+    def __init__(
+            self,
+            image_paths: List[str],
+            labels: Union[List[int], List[str]],
+            transform: Optional[transforms.Compose] = None
+            ):
+        self.image_paths = image_paths
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        label = self.labels[idx]
+        image = Image.open(img_path).convert("RGB")
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image, label
+    
+
+def create_dataloaders_list(
+    train_image_paths: List[str],
+    train_labels: Union[List[int], List[str]],
+    val_image_paths: List[str],
+    val_labels: Union[List[int], List[str]],
+    test_image_paths: List[str],
+    test_labels: Union[List[int], List[str]],
+    train_transform: transforms.Compose,
+    val_transform: transforms.Compose,
+    test_transform: transforms.Compose,
+    batch_size: int,
+    num_workers: int = 0,
+):
+    """
+    Creates training and testing DataLoaders with optional class balancing using image paths instead of directories.
+    Instead a folder, lists of image paths and labels are passed. It is usefull to select a subset of samples in the
+    folder.
+
+    Args:
+        train_image_paths (List[str]): List of training image file paths.
+        train_labels (List[int]): List of corresponding labels for training images.
+        test_image_paths (List[str]): List of test image file paths.
+        test_labels (List[int]): List of corresponding labels for test images.
+        train_transform (transforms.Compose): Transformations for training data.
+        test_transform (transforms.Compose): Transformations for test data.
+        batch_size (int): Number of samples per batch in DataLoaders.
+        num_workers (int): Number of subprocesses for data loading.
+
+    Returns:
+        tuple: (train_dataloader, test_dataloader, class_names) 
+               or (combined_dataloader, class_names) if combine_train_test=True.
+    """
+    # Create datasets
+    train_data = CustomImageDataset(train_image_paths, train_labels, transform=train_transform)
+    val_data = CustomImageDataset(val_image_paths, val_labels, transform=val_transform)
+    test_data = CustomImageDataset(test_image_paths, test_labels, transform=test_transform)
+
+    # Get class names
+    class_names = list(set(train_labels))  # Unique class labels
+
+    # Create DataLoaders
+    train_dataloader = DataLoader(
+        train_data,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    val_dataloader = DataLoader(
+        val_data,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    test_dataloader = DataLoader(
+        test_data,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    return train_dataloader, val_dataloader, test_dataloader, class_names
+
 
 
 def create_dataloaders_for_vit(

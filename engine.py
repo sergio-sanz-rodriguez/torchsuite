@@ -27,81 +27,179 @@ from sklearn.metrics import precision_recall_curve, classification_report, roc_c
 from contextlib import nullcontext
 from sklearn.preprocessing import LabelEncoder
 
-def save_model(model: torch.nn.Module,
-               target_dir: str,
-               model_name: str):
 
-    """Saves a PyTorch model to a target directory.
+# Common utility class
+class Common:
 
-    Args:
-        model: A target PyTorch model to save.
-        target_dir: A directory for saving the model to.
-        model_name: A filename for the saved model. Should include
-        ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
+    """A class containing utility functions for classification tasks."""
 
-    Example usage:
-        save_model(model=model_0,
-                target_dir="models",
-                model_name="05_going_modular_tingvgg_model.pth")
-    """
+    colors = {
+        "BLACK":  '\033[30m',
+        "BLUE": '\033[34m',
+        "ORANGE": '\033[38;5;214m',
+        "GREEN": '\033[32m',
+        "RED": '\033[31m',
+        "RESET": '\033[39m'
+    }
 
-    # Create target directory
-    target_dir_path = Path(target_dir)
-    target_dir_path.mkdir(parents=True,
-                          exist_ok=True)
-
-    # Define the list of valid extensions
-    valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
-
-    # Create model save path
-    assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
-    model_save_path = Path(target_dir) / model_name
-
-    # Save the model state_dict()
-    print(f"[INFO] Saving best model to: {model_save_path}")
-    torch.save(obj=model.state_dict(), f=model_save_path)
-
-def load_model(model: torch.nn.Module,
-               target_dir: str,
-               model_name: str):
+    info =    f"{colors['GREEN']}[INFO]{colors['BLACK']}"
+    warning = f"{colors['ORANGE']}[WARNING]{colors['BLACK']}"
+    error =   f"{colors['RED']}[ERROR]{colors['BLACK']}"
     
-    """Loads a PyTorch model from a target directory.
+    @staticmethod
+    def sec_to_min_sec(seconds):
+        """Converts seconds to a formatted string in minutes and seconds."""
+        if not isinstance(seconds, (int, float)) or seconds < 0:
+            raise ValueError(f"{Common.error} Input must be a non-negative number.")
+        
+        minutes = int(seconds // 60)
+        remaining_seconds = int(seconds % 60)
 
-    Args:
-        model: A target PyTorch model to load.
-        target_dir: A directory where the model is located.
-        model_name: The name of the model to load. Should include
-        ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
+        return f"{str(minutes).rjust(3)}m{str(remaining_seconds).zfill(2)}s"
 
-    Example usage:
-        model = load_model(model=model,
-                        target_dir="models",
-                        model_name="model.pth")
+    @staticmethod
+    def calculate_accuracy(y_true, y_pred):
+        """Calculates accuracy between truth labels and predictions."""
+        assert len(y_true) == len(y_pred), "Length of y_true and y_pred must be the same."
+        return torch.eq(y_true, y_pred).sum().item() / len(y_true)
 
-    Returns:
-    The loaded PyTorch model.
-    """
+    @staticmethod
+    def calculate_fpr_at_recall(y_true, y_pred_probs, recall_threshold):
+        """Calculates the False Positive Rate (FPR) at a specified recall threshold."""
+        if not (0 <= recall_threshold <= 1):
+            raise ValueError(f"{Common.error} 'recall_threshold' must be between 0 and 1.")
 
-    # Create the model directory path
-    model_dir_path = Path(target_dir)
+        if isinstance(y_pred_probs, list):
+            y_pred_probs = torch.cat(y_pred_probs)
+        if isinstance(y_true, list):
+            y_true = torch.cat(y_true)
 
-    # Define the list of valid extensions
-    valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
+        n_classes = y_pred_probs.shape[1]
+        fpr_per_class = []
 
-    # Create model save path
-    assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
-    model_save_path = Path(target_dir) / model_name
+        for class_idx in range(n_classes):
+            y_true_bin = (y_true == class_idx).int().detach().numpy()
+            y_scores = y_pred_probs[:, class_idx].detach().numpy()
 
-    # Load the model
-    print(f"[INFO] Loading model from: {model_path}")
-    
-    model.load_state_dict(torch.load(model_path, weights_only=True))
-    
-    return model
+            _, recall, thresholds = precision_recall_curve(y_true_bin, y_scores)
+
+            idx = np.where(recall >= recall_threshold)[0]
+            if len(idx) > 0:
+                threshold = thresholds[idx[-1]]
+                fp = np.sum((y_scores >= threshold) & (y_true_bin == 0))
+                tn = np.sum((y_scores < threshold) & (y_true_bin == 0))
+                fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+            else:
+                fpr = 0  
+
+            fpr_per_class.append(fpr)
+
+        return np.mean(fpr_per_class)
+
+    @staticmethod
+    def calculate_pauc_at_recall(y_true, y_pred_probs, recall_threshold=0.80, num_classes=101):
+        """Calculates the Partial AUC for multi-class classification at the given recall threshold."""
+        y_true = np.asarray(y_true)
+        y_pred_probs = np.asarray(y_pred_probs)
+
+        partial_auc_values = []
+
+        for class_idx in range(num_classes):
+            y_true_bin = (y_true == class_idx).astype(int)
+            y_scores_class = y_pred_probs[:, class_idx]
+
+            fpr, tpr, _ = roc_curve(y_true_bin, y_scores_class)
+
+            max_fpr = 1 - recall_threshold
+            stop_index = np.searchsorted(fpr, max_fpr, side='right')
+
+            if stop_index < len(fpr):
+                fpr_interp_points = [fpr[stop_index - 1], fpr[stop_index]]
+                tpr_interp_points = [tpr[stop_index - 1], tpr[stop_index]]
+                tpr = np.append(tpr[:stop_index], np.interp(max_fpr, fpr_interp_points, tpr_interp_points))
+                fpr = np.append(fpr[:stop_index], max_fpr)
+            else:
+                tpr = np.append(tpr, 1.0)
+                fpr = np.append(fpr, max_fpr)
+
+            partial_auc_value = auc(fpr, tpr)
+            partial_auc_values.append(partial_auc_value)
+
+        return np.mean(partial_auc_values)
+
+    @staticmethod
+    def save_model(model: torch.nn.Module, target_dir: str, model_name: str):
+
+        """Saves a PyTorch model to a target directory.
+
+        Args:
+            model: A target PyTorch model to save.
+            target_dir: A directory for saving the model to.
+            model_name: A filename for the saved model. Should include
+            ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
+
+        Example usage:
+            save_model(model=model_0,
+                    target_dir="models",
+                    model_name="05_going_modular_tingvgg_model.pth")
+        """
+
+        # Create target directory
+        target_dir_path = Path(target_dir)
+        target_dir_path.mkdir(parents=True,
+                            exist_ok=True)
+
+        # Define the list of valid extensions
+        valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
+
+        # Create model save path
+        assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
+        model_save_path = Path(target_dir) / model_name
+
+        # Save the model state_dict()
+        print(f"{Common.info} Saving best model to: {model_save_path}")
+        torch.save(obj=model.state_dict(), f=model_save_path)
+
+    @staticmethod
+    def load_model(model: torch.nn.Module, target_dir: str, model_name: str):
+        
+        """Loads a PyTorch model from a target directory.
+
+        Args:
+            model: A target PyTorch model to load.
+            target_dir: A directory where the model is located.
+            model_name: The name of the model to load. Should include
+            ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
+
+        Example usage:
+            model = load_model(model=model,
+                            target_dir="models",
+                            model_name="model.pth")
+
+        Returns:
+        The loaded PyTorch model.
+        """
+
+        # Create the model directory path
+        model_dir_path = Path(target_dir)
+
+        # Define the list of valid extensions
+        valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
+
+        # Create model save path
+        assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
+        model_save_path = Path(target_dir) / model_name
+
+        # Load the model
+        print(f"{Common.info} Loading model from: {model_path}")
+        
+        model.load_state_dict(torch.load(model_path, weights_only=True))
+        
+        return model
 
 
 # Training and prediction engine class
-class Engine:
+class ClassificationEngine:
 
     """
     A class to handle training, evaluation, and predictions for a PyTorch model.
@@ -125,6 +223,7 @@ class Engine:
         self.device = device
         self.model = model
         self.save_best_model = False
+        self.keep_best_models_in_memory = False
         self.mode = None
         self.model_best = None
         self.model_epoch = None
@@ -152,23 +251,10 @@ class Engine:
             "test_time [s]": [],
             "lr": [],
             } 
-        
-        # Define colors
-        self.colors = {
-            "BLACK":  '\033[30m',
-            "BLUE": '\033[34m',
-            "ORANGE": '\033[38;5;214m',
-            "GREEN": '\033[32m',
-            "RED": '\033[31m',
-            "RESET": '\033[39m'
-        }
-        self.info = f"{self.colors['GREEN']}[INFO]{self.colors['BLACK']}"
-        self.error = f"{self.colors['RED']}[ERROR]{self.colors['BLACK']}"
-        self.warning = f"{self.colors['BLUE']}[WARNING]{self.colors['BLACK']}"
 
         # Check if model is provided
         if self.model is None:
-            raise ValueError(f"{self.error}Instantiate the engine by passing a PyTorch model to handle.")
+            raise ValueError(f"{Common.error} Instantiate the engine by passing a PyTorch model to handle.")
             #print(f"self.colors['GREEN']}[INFO] Use method 'load' to load the model or instatiate again the model using attribute 'model'.")
             #warnings.warn(
             #    "[WARNING] No model has been introduced. Only limited functionalities "
@@ -179,156 +265,6 @@ class Engine:
             #)
         else:
             self.model.to(self.device)
-
-    @staticmethod
-    def sec_to_min_sec(seconds):
-        """
-        Converts seconds to a formatted string in minutes and seconds, fully aligned.
-
-        Args:
-            seconds (float): The number of seconds to be converted.
-            max_minutes_width (int): The width to align the minutes column.
-
-        Returns:
-            str: A formatted string representing the time in minutes and seconds, aligned properly.
-        """
-        if not isinstance(seconds, (int, float)) or seconds < 0:
-            raise ValueError(f"{self.error}Input must be a non-negative number.")
-        
-        minutes = int(seconds // 60)
-        remaining_seconds = int(seconds % 60)
-
-        # Format aligned with right-justification
-        return f"{str(minutes).rjust(3)}m{str(remaining_seconds).zfill(2)}s"
-
-    
-    # Calculate accuracy (a classification metric)
-    @staticmethod
-    def calculate_accuracy(
-        y_true,
-        y_pred):
-
-        """Calculates accuracy between truth labels and predictions.
-
-        Args:
-            y_true (torch.Tensor): Truth labels for predictions.
-            y_pred (torch.Tensor): Predictions to be compared to predictions.
-
-        Returns:
-            [torch.float]: Accuracy value between y_true and y_pred, e.g. 0.78
-        """
-
-        assert len(y_true) == len(y_pred), "Length of y_true and y_pred must be the same."
-        return torch.eq(y_true, y_pred).sum().item() / len(y_true)
-
-    @staticmethod
-    def calculate_fpr_at_recall(
-        y_true,
-        y_pred_probs,
-        recall_threshold):
-
-        """Calculates the False Positive Rate (FPR) at a specified recall threshold.
-
-        Args:
-            y_true (torch.Tensor): Ground truth labels.
-            y_pred_probs (torch.Tensor): Predicted probabilities.
-            recall_threshold (float): The recall threshold at which to calculate the FPR.
-
-        Returns:
-            float: The calculated FPR at the specified recall threshold.
-        """
-
-        # Check if recall_threhold is a valid number
-        if not (0 <= recall_threshold <= 1):
-            raise ValueError(f"{self.error}'recall_threshold' must be between 0 and 1.")
-
-        # Convert list to tensor if necessary
-        if isinstance(y_pred_probs, list):
-            y_pred_probs = torch.cat(y_pred_probs)  
-        if isinstance(y_true, list):
-            y_true = torch.cat(y_true)
-
-        n_classes = y_pred_probs.shape[1]
-        fpr_per_class = []
-
-        for class_idx in range(n_classes):
-            # Get true binary labels and predicted probabilities for the class
-            y_true_bin = (y_true == class_idx).int().detach().numpy()
-            y_scores = y_pred_probs[:, class_idx].detach().numpy()
-
-            # Compute precision-recall curve
-            _, recall, thresholds = precision_recall_curve(y_true_bin, y_scores)
-
-            # Find the threshold closest to the desired recall
-            idx = np.where(recall >= recall_threshold)[0]
-            if len(idx) > 0:
-                threshold = thresholds[idx[-1]]
-                # Calculate false positive rate
-                fp = np.sum((y_scores >= threshold) & (y_true_bin == 0))
-                tn = np.sum((y_scores < threshold) & (y_true_bin == 0))
-                fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
-            else:
-                fpr = 0  # No threshold meets the recall condition
-
-            fpr_per_class.append(fpr)
-
-        return np.mean(fpr_per_class)  # Average FPR across all classes
-    
-    @staticmethod
-    def calculate_pauc_at_recall(
-        y_true,
-        y_pred_probs,
-        recall_threshold=0.80,
-        num_classes=101):
-        """
-        Calculates the Partial AUC for multi-class classification at the given recall threshold.
-        Args:
-            y_true (list or np.ndarray): Ground truth labels (int or one-hot encoded).
-            y_pred_probs (np.ndarray): Predicted probabilities (shape: [batch_size, num_classes]).
-            recall_threshold (float): The threshold on recall to calculate partial AUC at.
-            num_classes (int): Number of classes in the classification problem.
-            
-        Returns:
-            float: The averaged partial AUC over all classes.
-        """
-        
-        # Ensure the input is in the correct format
-        y_true = np.asarray(y_true)
-        y_pred_probs = np.asarray(y_pred_probs)
-
-        # Initialize list to store partial AUC values for each class
-        partial_auc_values = []
-
-        for class_idx in range(num_classes):
-            # Get true binary labels for class_idx and predicted scores
-            y_true_bin = (y_true == class_idx).astype(int)
-            y_scores_class = y_pred_probs[:, class_idx]
-
-            # ROC curve
-            fpr, tpr, _ = roc_curve(y_true_bin, y_scores_class)
-
-            # Find the index where TPR exceeds the recall threshold
-            max_fpr = 1 - recall_threshold
-            stop_index = np.searchsorted(fpr, max_fpr, side='right')
-
-            # Interpolate to find the TPR at the given max FPR
-            if stop_index < len(fpr):
-                # Interpolate to find the TPR at max_fpr
-                fpr_interp_points = [fpr[stop_index - 1], fpr[stop_index]]
-                tpr_interp_points = [tpr[stop_index - 1], tpr[stop_index]]
-                tpr = np.append(tpr[:stop_index], np.interp(max_fpr, fpr_interp_points, tpr_interp_points))
-                fpr = np.append(fpr[:stop_index], max_fpr)
-            else:
-                tpr = np.append(tpr, 1.0)
-                fpr = np.append(fpr, max_fpr)
-
-            # Calculate partial AUC for the class
-            partial_auc_value = auc(fpr, tpr)
-            partial_auc_values.append(partial_auc_value)
-
-        # Return the average partial AUC across all classes
-        return np.mean(partial_auc_values)
-
 
     def save(
         self,
@@ -363,7 +299,7 @@ class Engine:
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
-        print(f"{self.info} Saving model to: {model_save_path}")
+        print(f"{Common.info} Saving model to: {model_save_path}")
         torch.save(obj=model.state_dict(), f=model_save_path)
 
     def load(
@@ -388,7 +324,7 @@ class Engine:
         model_path = Path(target_dir) / model_name
 
         # Load the model
-        print(f"{self.info} Loading model from: {model_path}")
+        print(f"{Common.info} Loading model from: {model_path}")
         
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         
@@ -433,7 +369,7 @@ class Engine:
         else:
             log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
             
-        print(f"{self.info} Created SummaryWriter, saving to: {log_dir}...")
+        print(f"{Common.info} Created SummaryWriter, saving to: {log_dir}...")
         return SummaryWriter(log_dir=log_dir)
     
     def print_config(
@@ -453,28 +389,28 @@ class Engine:
         Prints the configuration of the training process.
         """
 
-        print(f"{self.info} Device: {self.device}")
-        print(f"{self.info} Epochs: {epochs}")
-        print(f"{self.info} Batch size: {batch_size}")
-        print(f"{self.info} Accumulation steps: {accumulation_steps}")
-        print(f"{self.info} Effective batch size: {batch_size * accumulation_steps}")
-        print(f"{self.info} Recall threshold - fpr: {recall_threshold}")
-        print(f"{self.info} Recall threshold - pauc: {recall_threshold_pauc}")
-        print(f"{self.info} Apply validation: {self.apply_validation}")
-        print(f"{self.info} Plot curves: {plot_curves}")
-        print(f"{self.info} Automatic Mixed Precision (AMP): {amp}")
-        print(f"{self.info} Enable clipping: {enable_clipping}")
-        print(f"{self.info} Debug mode: {debug_mode}")
-        print(f"{self.info} Enable writer: {writer}")
-        print(f"{self.info} Target directory: {self.target_dir}")
-        print(f"{self.info} Save model: {self.save_best_model}")
+        print(f"{Common.info} Device: {self.device}")
+        print(f"{Common.info} Epochs: {epochs}")
+        print(f"{Common.info} Batch size: {batch_size}")
+        print(f"{Common.info} Accumulation steps: {accumulation_steps}")
+        print(f"{Common.info} Effective batch size: {batch_size * accumulation_steps}")
+        print(f"{Common.info} Recall threshold - fpr: {recall_threshold}")
+        print(f"{Common.info} Recall threshold - pauc: {recall_threshold_pauc}")
+        print(f"{Common.info} Apply validation: {self.apply_validation}")
+        print(f"{Common.info} Plot curves: {plot_curves}")
+        print(f"{Common.info} Automatic Mixed Precision (AMP): {amp}")
+        print(f"{Common.info} Enable clipping: {enable_clipping}")
+        print(f"{Common.info} Debug mode: {debug_mode}")
+        print(f"{Common.info} Enable writer: {writer}")
+        print(f"{Common.info} Save model: {self.save_best_model}")
+        print(f"{Common.info} Target directory: {self.target_dir}")        
         if self.save_best_model:
           # Extract base name and extension from the model name
             base_name, extension = os.path.splitext(self.model_name)
             
             # Print base name and extension
-            print(f"{self.info} Model name base: {base_name}")
-            print(f"{self.info} Model name extension: {extension}")
+            print(f"{Common.info} Model name base: {base_name}")
+            print(f"{Common.info} Model name extension: {extension}")
             
             # Iterate over modes and format model name, skipping 'last'
             for mode in self.mode:
@@ -486,7 +422,11 @@ class Engine:
                     model_name_with_mode = f"_{mode}_epoch<int>{extension}"
                 
                 # Print the final model save path for each mode
-                print(f"{self.info} Save best model - {mode}: {base_name + model_name_with_mode}")
+                print(f"{Common.info} Save best model - {mode}: {base_name + model_name_with_mode}")
+        if self.keep_best_models_in_memory:
+            print(f"{Common.warning} Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
+        else:
+            print(f"{Common.info} Keeping best models in memory: {self.keep_best_models_in_memory}")
 
     def init_train(
         self,
@@ -494,6 +434,7 @@ class Engine:
         model_name: str=None,
         apply_validation: bool=True,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
+        keep_best_models_in_memory: bool=False,
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
@@ -549,27 +490,33 @@ class Engine:
         This method sets up the environment for training, ensuring all necessary resources and parameters are prepared.
         """
 
+        # Validate keep_best_models_in_memory
+        if not isinstance(keep_best_models_in_memory, (bool)):
+            raise ValueError(f"{Common.error}'keep_best_models_in_memory' must be True or False.")
+        else:
+            self.keep_best_models_in_memory = keep_best_models_in_memory
+
         # Validate apply_validation
         if not isinstance(apply_validation, (bool)):
-            raise ValueError(f"{self.error}'apply_validation' must be True or False.")
+            raise ValueError(f"{Common.error}'apply_validation' must be True or False.")
         else:
             self.apply_validation = apply_validation
       
         # Validate recall_threshold
         if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
-            raise ValueError(f"{self.error}'recall_threshold' must be a float between 0.0 and 1.0.")
+            raise ValueError(f"{Common.error}'recall_threshold' must be a float between 0.0 and 1.0.")
 
         # Validate recall_threshold_pauc
         if not isinstance(recall_threshold_pauc, (int, float)) or not (0.0 <= float(recall_threshold_pauc) <= 1.0):
-            raise ValueError(f"{self.error}'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
+            raise ValueError(f"{Common.error}'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
 
         # Validate accumulation_steps
         if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
-            raise ValueError(f"{self.error}'accumulation_steps' must be an integer greater than or equal to 1.")
+            raise ValueError(f"{Common.error}'accumulation_steps' must be an integer greater than or equal to 1.")
 
         # Validate epochs
         if not isinstance(epochs, int) or epochs < 1:
-            raise ValueError(f"{self.error}'epochs' must be an integer greater than or equal to 1.")
+            raise ValueError(f"{Common.error}'epochs' must be an integer greater than or equal to 1.")
 
         # Ensure save_best_model is correctly handled
         if save_best_model is None:
@@ -579,17 +526,17 @@ class Engine:
             self.save_best_model = True
             mode = [save_best_model] if isinstance(save_best_model, str) else save_best_model  # Ensure mode is a list
         else:
-            raise ValueError(f"{self.error}'save_best_model' must be None, a string, or a list of strings.")
+            raise ValueError(f"{Common.error}'save_best_model' must be None, a string, or a list of strings.")
 
         # Validate mode only if save_best_model is True
         valid_modes = {"loss", "acc", "fpr", "pauc", "last", "all"}
         if self.save_best_model:
             if not isinstance(mode, list):
-                raise ValueError(f"{self.error}'mode' must be a string or a list of strings.")
+                raise ValueError(f"{Common.error}'mode' must be a string or a list of strings.")
 
             for m in mode:
                 if m not in valid_modes:
-                    raise ValueError(f"{self.error}Invalid mode value: '{m}'. Must be one of {valid_modes}")
+                    raise ValueError(f"{Common.error}Invalid mode value: '{m}'. Must be one of {valid_modes}")
 
         # Assign the validated mode list
         self.mode = mode
@@ -627,27 +574,32 @@ class Engine:
     
         # Initialize the best model and model_epoch list based on the specified mode.
         if self.save_best_model:
-            if self.mode == "loss":
-                self.model_loss = copy.deepcopy(self.model)                            
-                self.model_loss.to(self.device)
+            if "loss" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_loss = copy.deepcopy(self.model)                            
+                    self.model_loss.to(self.device)
                 self.model_name_loss = self.model_name.replace(".", f"_loss.")
-            if self.mode == "acc":
-                self.model_acc = copy.deepcopy(self.model)                            
-                self.model_acc.to(self.device)
+            if "acc" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_acc = copy.deepcopy(self.model)                            
+                    self.model_acc.to(self.device)
                 self.model_name_acc = self.model_name.replace(".", f"_acc.")
-            if self.mode == "fpr":
-                self.model_fpr = copy.deepcopy(self.model)                            
-                self.model_fpr.to(self.device)
+            if "fpr" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_fpr = copy.deepcopy(self.model)                            
+                    self.model_fpr.to(self.device)
                 self.model_name_fpr = self.model_name.replace(".", f"_fpr.")
-            if self.mode == "pauc":
-                self.model_pauc = copy.deepcopy(self.model)                            
-                self.model_pauc.to(self.device)
+            if "pauc" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_pauc = copy.deepcopy(self.model)                            
+                    self.model_pauc.to(self.device)
                 self.model_name_pauc = self.model_name.replace(".", f"_pauc.")
-            if self.mode == "all":
-                self.model_epoch = []
-                for k in range(epochs):
-                    self.model_epoch.append(copy.deepcopy(self.model))
-                    self.model_epoch[k].to(self.device)
+            if "all" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_epoch = []
+                    for k in range(epochs):
+                        self.model_epoch.append(copy.deepcopy(self.model))
+                        self.model_epoch[k].to(self.device)
             self.best_test_loss = float("inf") 
             self.best_test_acc = 0.0
             self.best_test_fpr = float("inf")
@@ -686,7 +638,7 @@ class Engine:
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        print(f"Training epoch {epoch_number+1}...")
+        print(f"{Common.info} Training epoch {epoch_number+1}...")
 
         # Put model in train mode
         self.model.train()
@@ -717,7 +669,7 @@ class Engine:
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
                             #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
                             y_pred = torch.nan_to_num(
                                 y_pred,
@@ -726,7 +678,7 @@ class Engine:
                                 neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
 
                     # Calculate  and accumulate loss
@@ -734,7 +686,7 @@ class Engine:
                 
                     # Check for NaN or Inf in loss
                     if torch.isnan(loss) or torch.isinf(loss):
-                        print(f"{self.warning} Loss is NaN or Inf at batch {batch}. Skipping batch...")
+                        print(f"{Common.warning} Loss is NaN or Inf at batch {batch}. Skipping batch...")
                         continue
 
                 # Backward pass with scaled gradients
@@ -755,7 +707,7 @@ class Engine:
                     for name, param in self.model.named_parameters():
                         if param.grad is not None:
                             if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                print(f"{self.warning} NaN or Inf gradient detected in {name} at batch {batch}.")
+                                print(f"{Common.warning} NaN or Inf gradient detected in {name} at batch {batch}.")
                                 break
                 
                 # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -791,7 +743,7 @@ class Engine:
             # Calculate and accumulate loss and accuracy across all batches
             train_loss += loss.item()
             y_pred_class = y_pred.argmax(dim=1)
-            train_acc += self.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item()/len(y_pred)
+            train_acc += Common.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item()/len(y_pred)
             
             # Collect outputs for fpr-at-recall calculation
             all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
@@ -805,14 +757,14 @@ class Engine:
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
         try:    
-            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+            train_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
+            logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+            train_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
-            logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
+            logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
@@ -850,7 +802,7 @@ class Engine:
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        print(f"Training epoch {epoch_number+1}...")
+        print(f"{Common.info} Training epoch {epoch_number+1}...")
 
         # Put model in train mode
         self.model.train()
@@ -881,7 +833,7 @@ class Engine:
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
                             #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
                             y_pred = torch.nan_to_num(
                                 y_pred,
@@ -890,7 +842,7 @@ class Engine:
                                 neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            print(f"{self.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
                     
                     # Calculate loss, normalize by accumulation steps
@@ -898,7 +850,7 @@ class Engine:
                 
                     # Check for NaN or Inf in loss
                     if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        print(f"{self.warning} Loss is NaN or Inf at batch {batch}. Skipping...")
+                        print(f"{Common.warning} Loss is NaN or Inf at batch {batch}. Skipping...")
                         continue
 
                 # Backward pass with scaled gradients
@@ -941,7 +893,7 @@ class Engine:
                         for name, param in self.model.named_parameters():
                             if param.grad is not None:
                                 if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                    print(f"{self.warning} NaN or Inf gradient detected in {name} at batch {batch}")
+                                    print(f"{Common.warning} NaN or Inf gradient detected in {name} at batch {batch}")
                                     break
 
                     # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -960,7 +912,7 @@ class Engine:
             # Accumulate metrics
             train_loss += loss.item() * accumulation_steps  # Scale back to original loss
             y_pred_class = y_pred.argmax(dim=1)
-            train_acc += self.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item() / len(y_pred)
+            train_acc += Common.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item() / len(y_pred)
 
             # Collect outputs for fpr-at-recall calculation
             all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
@@ -974,14 +926,14 @@ class Engine:
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
         try:    
-            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+            train_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
+            logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+            train_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
-            logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
+            logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
@@ -1016,7 +968,7 @@ class Engine:
         # Execute the test step is apply_validation is enabled
         if self.apply_validation:
 
-            print(f"Validating epoch {epoch_number+1}...")
+            print(f"{Common.info} Validating epoch {epoch_number+1}...")
 
             # Put model in eval mode
             self.model.eval() 
@@ -1043,7 +995,7 @@ class Engine:
                         # Check for NaN/Inf in predictions
                         if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():
                             if enable_clipping:
-                                print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                                print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
                                 test_pred = torch.nan_to_num(
                                     test_pred,
                                     nan=torch.mean(test_pred).item(),
@@ -1051,7 +1003,7 @@ class Engine:
                                     neginf=torch.min(test_pred).item()
                                 )
                             else:
-                                print(f"{self.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                                print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
                                 continue
 
                         # Calculate and accumulate loss
@@ -1060,12 +1012,12 @@ class Engine:
 
                         # Debug NaN/Inf loss
                         if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                            print(f"{self.warning} Loss is NaN/Inf at batch {batch}. Skipping...")
+                            print(f"{Common.warning} Loss is NaN/Inf at batch {batch}. Skipping...")
                             continue
 
                     # Calculate and accumulate accuracy
                     test_pred_class = test_pred.argmax(dim=1)
-                    test_acc += self.calculate_accuracy(y, test_pred_class) #((test_pred_class == y).sum().item()/len(test_pred))
+                    test_acc += Common.calculate_accuracy(y, test_pred_class) #((test_pred_class == y).sum().item()/len(test_pred))
 
                     # Collect outputs for fpr-at-recall calculation
                     all_preds.append(torch.softmax(test_pred, dim=1).detach().cpu())
@@ -1079,14 +1031,14 @@ class Engine:
             all_labels = torch.cat(all_labels)
             all_preds = torch.cat(all_preds)
             try:    
-                test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+                test_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
             except Exception as e:
-                logging.error(f"{self.warning} Innacurate calculation of final FPR at recall: {e}")
+                logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
                 test_fpr = 1.0
             try:    
-                test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+                test_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
             except Exception as e:
-                logging.error(f"{self.warning} Innacurate calculation of final pAUC at recall: {e}")
+                logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
                 test_pauc = 0.0
         
         # Otherwise set params with initial values
@@ -1135,25 +1087,25 @@ class Engine:
         
         # Print results
         print(
-            f"{self.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
-            f"{self.colors['BLUE']}Train: {self.colors['BLACK']}| "
-            f"{self.colors['BLUE']}loss: {train_loss:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['BLUE']}acc: {train_acc:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['BLUE']}fpr: {train_fpr:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['BLUE']}pauc: {train_pauc:.4f} {self.colors['BLACK']}| "
-            f"{self.colors['BLUE']}time: {self.sec_to_min_sec(train_epoch_time)} {self.colors['BLACK']}| "            
-            f"{self.colors['BLUE']}lr: {lr:.10f}"
+            f"{Common.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
+            f"{Common.colors['BLUE']}Train: {Common.colors['BLACK']}| "
+            f"{Common.colors['BLUE']}loss: {train_loss:.4f} {Common.colors['BLACK']}| "
+            f"{Common.colors['BLUE']}acc: {train_acc:.4f} {Common.colors['BLACK']}| "
+            f"{Common.colors['BLUE']}fpr: {train_fpr:.4f} {Common.colors['BLACK']}| "
+            f"{Common.colors['BLUE']}pauc: {train_pauc:.4f} {Common.colors['BLACK']}| "
+            f"{Common.colors['BLUE']}time: {Common.sec_to_min_sec(train_epoch_time)} {Common.colors['BLACK']}| "            
+            f"{Common.colors['BLUE']}lr: {lr:.10f}"
         )
         if self.apply_validation:
             print(
-                f"{self.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
-                f"{self.colors['ORANGE']}Test:  {self.colors['BLACK']}| "
-                f"{self.colors['ORANGE']}loss: {test_loss:.4f} {self.colors['BLACK']}| "
-                f"{self.colors['ORANGE']}acc: {test_acc:.4f} {self.colors['BLACK']}| "
-                f"{self.colors['ORANGE']}fpr: {test_fpr:.4f} {self.colors['BLACK']}| "
-                f"{self.colors['ORANGE']}pauc: {test_pauc:.4f} {self.colors['BLACK']}| "
-                f"{self.colors['ORANGE']}time: {self.sec_to_min_sec(test_epoch_time)} {self.colors['BLACK']}| "            
-                f"{self.colors['ORANGE']}lr: {lr:.10f}"
+                f"{Common.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
+                f"{Common.colors['ORANGE']}Test:  {Common.colors['BLACK']}| "
+                f"{Common.colors['ORANGE']}loss: {test_loss:.4f} {Common.colors['BLACK']}| "
+                f"{Common.colors['ORANGE']}acc: {test_acc:.4f} {Common.colors['BLACK']}| "
+                f"{Common.colors['ORANGE']}fpr: {test_fpr:.4f} {Common.colors['BLACK']}| "
+                f"{Common.colors['ORANGE']}pauc: {test_pauc:.4f} {Common.colors['BLACK']}| "
+                f"{Common.colors['ORANGE']}time: {Common.sec_to_min_sec(test_epoch_time)} {Common.colors['BLACK']}| "            
+                f"{Common.colors['ORANGE']}lr: {lr:.10f}"
             )
         
         # Update results dictionary
@@ -1288,7 +1240,7 @@ class Engine:
                     self.scheduler.step(test_acc)  # Maximize test_accuracy
                 else:
                     raise ValueError(
-                        f"{self.error}The scheduler requires either `test_loss` or `test_acc` "
+                        f"{Common.error}The scheduler requires either `test_loss` or `test_acc` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -1329,11 +1281,14 @@ class Engine:
             self.mode = [self.mode]  # Ensure self.mode is always a list
 
         if epoch is None:
-            raise ValueError(f"{self.error}'epoch' must be provided when mode includes 'all' or 'last'.")
+            raise ValueError(f"{Common.error}'epoch' must be provided when mode includes 'all' or 'last'.")
 
-        def remove_previous_best(model_name_pattern):
+        # Save model according criteria
+
+        # Helper functions
+        def remove_previous_best(model_name):
             """Removes previously saved best model files."""
-            file_to_remove = glob.glob(os.path.join(self.target_dir, model_name_pattern.replace(".", "_epoch*.")))
+            file_to_remove = glob.glob(os.path.join(self.target_dir, model_name.replace(".", "_epoch*.")))
             for f in file_to_remove:
                 os.remove(f)
 
@@ -1343,46 +1298,56 @@ class Engine:
 
         if self.save_best_model:            
             for mode in self.mode:
+                # Loss criterion
                 if mode == "loss":
                     if test_loss is None:
-                        raise ValueError(f"{self.error}'test_loss' must be provided when mode is 'loss'.")
+                        raise ValueError(f"{Common.error}'test_loss' must be provided when mode is 'loss'.")
                     if test_loss < self.best_test_loss:
                         remove_previous_best(self.model_name_loss)
                         self.best_test_loss = test_loss
+                        if self.keep_best_models_in_memory:
+                            self.model_loss.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_loss)
-
+                # Accuracy criterion    
                 elif mode == "acc":
                     if test_acc is None:
-                        raise ValueError(f"{self.error}'test_acc' must be provided when mode is 'acc'.")
+                        raise ValueError(f"{Common.error}'test_acc' must be provided when mode is 'acc'.")
                     if test_acc > self.best_test_acc:
                         remove_previous_best(self.model_name_acc)
                         self.best_test_acc = test_acc
+                        if self.keep_best_models_in_memory:
+                            self.model_acc.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_acc)
-
+                # FPR criterion
                 elif mode == "fpr":
                     if test_fpr is None:
-                        raise ValueError(f"{self.error}'test_fpr' must be provided when mode is 'fpr'.")
+                        raise ValueError(f"{Common.error}'test_fpr' must be provided when mode is 'fpr'.")
                     if test_fpr < self.best_test_fpr:
                         remove_previous_best(self.model_name_fpr)
                         self.best_test_fpr = test_fpr
+                        if self.keep_best_models_in_memory:
+                            self.model_fpr.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_fpr)
-
+                # pAUC criterion    
                 elif mode == "pauc":
                     if test_pauc is None:
-                        raise ValueError(f"{self.error}'test_pauc' must be provided when mode is 'pauc'.")
+                        raise ValueError(f"{Common.error}'test_pauc' must be provided when mode is 'pauc'.")
                     if test_pauc > self.best_test_pauc:
                         remove_previous_best(self.model_name_pauc)
                         self.best_test_pauc = test_pauc
+                        if self.keep_best_models_in_memory:
+                            self.model_pauc.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_pauc)
-
+                # Last-epoch criterion
                 elif mode == "last":
                     remove_previous_best(self.model_name)
                     save_model(self.model_name)
-
+                # All epochs
                 elif mode == "all":
+                    if self.keep_best_models_in_memory:
+                        if isinstance(self.model_epoch, list) and epoch < len(self.model_epoch):
+                            self.model_epoch[epoch].load_state_dict(self.model.state_dict())
                     save_model(self.model_name)
-                    if isinstance(self.model_epoch, list) and epoch < len(self.model_epoch):
-                        self.model_epoch[epoch].load_state_dict(self.model.state_dict())
 
         # Save results to CSV
         name, _ = self.model_name.rsplit('.', 1)
@@ -1411,23 +1376,24 @@ class Engine:
         writer.close() if writer else None
 
         # Print elapsed time
-        print(f"{self.info} Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
+        print(f"{Common.info} Training finished! Elapsed time: {Common.sec_to_min_sec(train_time)}")
             
     # Trains and tests a Pytorch model
     def train(
         self,
         target_dir: str=None,
         model_name: str=None,
-        save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
+        save_best_model: Union[str, List[str]] = "last",
+        keep_best_models_in_memory: bool=False,
         train_dataloader: torch.utils.data.DataLoader=None, 
         test_dataloader: torch.utils.data.DataLoader=None,
         apply_validation: bool=True,
         num_classes: int=2, 
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
+        scheduler: torch.optim.lr_scheduler=None,
         recall_threshold: float=0.95,
         recall_threshold_pauc: float=0.95,
-        scheduler: torch.optim.lr_scheduler=None,
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
@@ -1459,6 +1425,7 @@ class Engine:
             - "last" (last epoch)
             - "all" (save models for all epochs)
             - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
+            keep_best_models_in_memory: Indicates if keeping the best models in memory for future use during inference. The model state at the last epoch will always be kept in memory.
             train_dataloader: A DataLoader instance for the model to be trained on.
             test_dataloader: A DataLoader instance for the model to be tested on.
             apply_validation:
@@ -1470,9 +1437,9 @@ class Engine:
             class_names: A list with the names of the classes
             optimizer: A PyTorch optimizer to help minimize the loss function.
             loss_fn: A PyTorch loss function to calculate loss on both datasets.
+            scheduler: A PyTorch learning rate scheduler to adjust the learning rate during training.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1). 
             recall_threshold_pauc: The recall threshold at which to calculate the pAUC score (between 0 and 1).
-            scheduler: A PyTorch learning rate scheduler to adjust the learning rate during training.
             epochs: An integer indicating how many epochs to train for.        
             plot: A boolean indicating whether to plot the training and testing curves.
             amp: A boolean indicating whether to use Automatic Mixed Precision (AMP) during training.
@@ -1524,6 +1491,7 @@ class Engine:
             target_dir=target_dir,
             model_name=model_name,
             save_best_model=save_best_model,
+            keep_best_models_in_memory=keep_best_models_in_memory,
             apply_validation= apply_validation,
             optimizer=optimizer,
             loss_fn=loss_fn,
@@ -1605,7 +1573,7 @@ class Engine:
             df_results = self.update_model(
                 test_loss=test_loss if self.apply_validation else train_loss,
                 test_acc=test_acc if self.apply_validation else train_acc,
-                test_fpr=test_fpr if self.apply_validation else train_fpr
+                test_fpr=test_fpr if self.apply_validation else train_fpr,
                 test_pauc=test_pauc if self.apply_validation else train_pauc,
                 epoch=epoch
                 )
@@ -1643,35 +1611,35 @@ class Engine:
             model = self.model
         elif model_state == "loss":
             if self.model_loss is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_loss
         elif model_state == "acc":
             if self.model_acc is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_acc
         elif model_state == "fpr":
             if self.model_fpr is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_fpr
         elif model_state == "pauc":
             if self.model_pauc is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
+                print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
+                    print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]            
@@ -1740,41 +1708,41 @@ class Engine:
             model = self.model
         elif model_state == "loss":
             if self.model_loss is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_loss
         elif model_state == "acc":
             if self.model_acc is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_acc
         elif model_state == "fpr":
             if self.model_fpr is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_fpr
         elif model_state == "pauc":
             if self.model_pauc is None:
-                print(f"{self.info} Model not found, using last-epoch model for prediction.")
+                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
+                print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"{self.info} Model epoch {model_state} not found, using default model for prediction.")
+                    print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]
 
         # Create a list of test images and checkout existence
-        print(f"{self.info} Finding all filepaths ending with '.jpg' in directory: {test_dir}")
+        print(f"{Common.info} Finding all filepaths ending with '.jpg' in directory: {test_dir}")
         paths = list(Path(test_dir).glob("*/*.jpg"))
         assert len(list(paths)) > 0, f"No files ending with '.jpg' found in this directory: {test_dir}"
 

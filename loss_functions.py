@@ -1,9 +1,16 @@
+"""
+Defines custom loss functions for training deep learning models in PyTorch.  
+Includes implementations for specialized loss functions tailored for classification tasks.  
+Additional loss functions for other tasks (e.g., object detection, segmentation) may be added in the future.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 def roc_curve_gpu(y_true, y_score):
+
     """
     Compute ROC curve on GPU. This function calculates the True Positive Rate (TPR)
     and False Positive Rate (FPR) for various thresholds.
@@ -16,6 +23,7 @@ def roc_curve_gpu(y_true, y_score):
         fpr (Tensor): False positive rate at each threshold.
         tpr (Tensor): True positive rate at each threshold.
     """
+
     # Handle binary or multiclass cases
     if y_score.dim() == 1:
         # Binary case: Treat y_score as probabilities for the positive class
@@ -196,6 +204,7 @@ class CrossEntropyPAUCLoss(nn.Module):
 
 
 class CrossEntropyFPRLoss(nn.Module):
+
     """
     Custom loss combining Cross-Entropy and False Positive Rate (FPR) optimization for binary and multi-class classification.
     
@@ -295,6 +304,7 @@ class CrossEntropyFPRLoss(nn.Module):
         return total_loss
 
     def compute_fpr(self, targets, probs, recall_threshold):
+
         """
         Compute False Positive Rate (FPR) at the given recall threshold.
 
@@ -325,153 +335,65 @@ class CrossEntropyFPRLoss(nn.Module):
             return 0
         
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+# Define knowledge distillation loss
+class DistillationLoss(nn.Module):
 
-class CrossEntropyPAUCLossV2(nn.Module):
     """
-    Combines Cross-Entropy (or BCE for binary classification) with Partial AUC (pAUC) optimization.
-    
-    Arguments:
-        recall_range (tuple): Recall range for pAUC computation.
-        lambda_pauc (float): Weight for pAUC contribution (0.0 <= lambda_pauc <= 1.0).
-        num_classes (int): Number of classification classes.
-        label_smoothing (float): Label smoothing factor.
-        weight (Tensor): Optional class weights for imbalance handling.
-        debug (bool): Enables debug output.
+    This class implements the knowledge distillation loss, which combines both
+    a soft target loss (based on the teacher's logits) and a hard target loss 
+    (based on the ground truth labels).
+
+    The loss is a weighted sum of:
+        - Soft loss: The Kullback-Leibler divergence between the teacher's and 
+          student's softened logits.
+        - Hard loss: The Cross Entropy loss between the student's logits and 
+          the true labels.
+
+    Attributes:
+        alpha (float): Weight for the hard loss (CrossEntropyLoss). Defaults to 0.5.
+        temperature (float): Temperature for softening the logits. Defaults to 3.0.
+        kl_div (nn.KLDivLoss): The Kullback-Leibler divergence loss function.
+        ce_loss (nn.CrossEntropyLoss): The Cross Entropy loss function.
+
+    Methods:
+        forward(student_logits, teacher_logits, labels):
+            Computes the combined distillation loss.
     """
 
-    def __init__(
-            self,
-            recall_range=(0.95, 1.0),
-            lambda_pauc=0.5,
-            num_classes=2,
-            label_smoothing=0.1,
-            weight=None,
-            debug_mode=False):
-        
+    def __init__(self, alpha=0.5, temperature=3.0, label_smoothing=0.1):
+
+        """
+        Initializes the DistillationLoss object with the specified alpha and temperature values.
+
+        Args:
+            alpha (float): The weight for the hard loss. Defaults to 0.5.
+            temperature (float): The temperature for softening the logits. Defaults to 3.0.
+        """
+
         super().__init__()
-        self.recall_range = recall_range
-        self.lambda_pauc = lambda_pauc
-        self.num_classes = num_classes
-        self.label_smoothing = label_smoothing
-        self.debug_mode = debug_mode
+        self.alpha = alpha
+        self.temperature = temperature
+        self.kl_div = nn.KLDivLoss(reduction="batchmean")
+        self.ce_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    
+    def forward(self, student_logits, teacher_logits, labels):
 
-        # Loss function selection
-        if num_classes == 2:
-            self.cross_entropy_loss = nn.BCEWithLogitsLoss(weight=weight)
-        else:
-            self.corss_entropy_loss = nn.CrossEntropyLoss(weight=weight, label_smoothing=label_smoothing)
-
-        # Register weight tensor for pAUC computation
-        self.weight = weight.clone().detach().to(dtype=torch.float32) if weight is not None else torch.ones(num_classes, dtype=torch.float32)
-
-    def forward(self, predictions, targets):
         """
-        Computes combined loss: Cross-Entropy (or BCE) + pAUC.
+        Computes the combined distillation loss by calculating the soft loss and hard loss
+        and returning their weighted sum.
 
-        Arguments:
-            predictions (Tensor): Model logits, shape [batch_size, num_classes].
-            targets (Tensor): Ground truth labels, shape [batch_size].
+        Args:
+            student_logits (torch.Tensor): The logits produced by the student model.
+            teacher_logits (torch.Tensor): The logits produced by the teacher model.
+            labels (torch.Tensor): The ground truth labels.
 
         Returns:
-            Tensor: Total loss value.
+            torch.Tensor: The computed distillation loss.
         """
         
-        # Compute standard classification loss
-        if self.num_classes == 2:
-            # Modify targets to one-hot encoded format
-            #targets = torch.eye(2, device=targets.device)[targets.long()].unsqueeze(1)
-            targets = targets.unsqueeze(1)
-            ce_loss = self.cross_entropy_loss(predictions, targets)
-            # Convert to probability
-            probs = torch.sigmoid(predictions).squeeze(1)
-        else:
-            # Convert logits to probabilities
-            ce_loss = self.cross_entropy_loss(predictions, targets)
-            probs = F.softmax(predictions, dim=1)
-
-        # Compute pAUC loss
-        pauc_loss = self.compute_pauc_loss(probs, targets)
-
-        # Compute total loss
-        total_loss = (1 - self.lambda_pauc) * ce_loss + self.lambda_pauc * pauc_loss
-
-        if self.debug_mode:
-            print(f"ce_loss: {ce_loss.item()}, pauc_loss: {pauc_loss.item()}, total_loss: {total_loss.item()}")
-
-        return total_loss
-
-    def compute_pauc_loss(self, probs, targets):
-        """
-        Computes the pAUC loss.
-
-        Arguments:
-            probs (Tensor): Predicted probabilities.
-            targets (Tensor): True labels.
-
-        Returns:
-            Tensor: pAUC loss.
-        """
-        
-        pauc_values = []
-
-        # Binary classification case
-        if self.num_classes == 2:
-
-            # Compute the ROC curve values
-            class_probs = probs
-            class_targets = targets.float()
-            fpr_vals, tpr_vals = roc_curve_gpu(class_targets, class_probs)
-
-            # Mast to filter recall values within the specified recall range
-            recall_mask = (tpr_vals >= self.recall_range[0]) & (tpr_vals <= self.recall_range[1])
-
-            # If there are valid points in the recall range
-            if recall_mask.sum() > 0:
-                
-                # compute pAUC using the trapezoidal rule and clamp the recall to the lower bound of the range
-                pauc = torch.trapz(torch.clamp(tpr_vals[recall_mask] - self.recall_range[0], min=0), fpr_vals[recall_mask])
-                pauc_values.append(torch.tensor(pauc, device=probs.device))
-
-            else:
-
-                # No valid points, append 0
-                pauc_values.append(torch.tensor(0.0, device=probs.device))
-        
-        # Multi-class classification case
-        else:
-            for i in range(self.num_classes):
-                
-                # Compute the ROC curve values (False Positive Rate and True Positive Rate)
-                class_probs = probs[:, i]
-                class_targets = (targets == i).float()
-                fpr_vals, tpr_vals = roc_curve_gpu(class_targets, class_probs)
-
-                # Mask to filter recall values within the specified recall range
-                recall_mask = (tpr_vals >= self.recall_range[0]) & (tpr_vals <= self.recall_range[1])
-
-                # If there are valid points in the recall range
-                if recall_mask.sum() > 0:
-
-                    # Compute pAUC using the trapezoidal rule, clamp the recall to the lower bound of the range
-                    pauc = torch.trapz(torch.clamp(tpr_vals[recall_mask] - self.recall_range[0], min=0), fpr_vals[recall_mask])
-                    pauc_values.append(torch.tensor(pauc * self.weight[i], device=probs.device))
-
-                else:
-
-                    # No valid points, append 0
-                    pauc_values.append(torch.tensor(0.0, device=probs.device))
-
-        # Compute the average pAUC over all classes, weighted by the class weights
-        avg_pauc = torch.sum(torch.stack(pauc_values)) / (self.weight.sum().to(probs.device) * (self.recall_range[1] - self.recall_range[0]))
-
-        # Ensure the average pAUC is between 0 and 1
-        avg_pauc = torch.clamp(avg_pauc, min=0.0, max=1.0)
-
-        # Return the pAUC loss (1 - pAUC squared)
-        return 1 - avg_pauc**2
-
-
-
+        soft_loss = self.kl_div(
+            torch.nn.functional.log_softmax(student_logits / self.temperature, dim=1),
+            torch.nn.functional.softmax(teacher_logits / self.temperature, dim=1)
+        )
+        hard_loss = self.ce_loss(student_logits, labels)
+        return self.alpha * hard_loss + (1 - self.alpha) * soft_loss

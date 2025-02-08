@@ -1,2 +1,21 @@
-# TorchKit
-A Comprehensive Pytorch Toolkit for Deep Learning Modeling.
+# TorchKit  
+TorchKit is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development.  
+
+It provides essential modules and utilities for training, inference, data handling, and model optimization, making it an invaluable tool for researchers, machine learning professionals, and practitioners.  
+
+Currently, TorchKit is fully optimized for **classification** tasks in computer vision. Future versions will extend support to object detection, segmentation, and other unstructured data types such as audio.  
+
+## Modules  
+
+- **Training and inference engine:** A robust `engine.py` module for seamless training and evaluation workflows.  
+- **Flexible data loading:** `dataloaders.py` simplifies dataset preparation and augmentation.  
+- **Utility functions:** `helper_functions.py` offers a collection of tools to enhance productivity.  
+- **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies.  
+- **Vision Transformer (ViT) support:** `vision_transformer.py` enables ViT implementations with PyTorch.  
+- **Custom loss functions:** `loss_functions.py` includes various loss formulations for different tasks.  
+
+## Code Example  
+The notebook `code_example.ipynb` demonstrates the implementation and training of a deep learning model using some of the modules described above.  
+
+For any questions, feel free to contact me via email at **sergio.sanz.rodriguez@gmail.com** or connect with me on LinkedIn: [linkedin.com/in/sergio-sanz-rodriguez/](https://www.linkedin.com/in/sergio-sanz-rodriguez/).  
+

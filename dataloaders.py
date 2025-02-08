@@ -2,6 +2,7 @@
 Contains functionality for creating PyTorch DataLoaders for 
 image classification data.
 """
+
 import os
 import random
 import torch
@@ -13,6 +14,7 @@ from torchvision.transforms import v2
 from collections import defaultdict
 from typing import List, Tuple, Optional, Union
 from PIL import Image
+
 
 NUM_WORKERS = os.cpu_count()
 
@@ -85,14 +87,14 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True, #enables fast data transfre to CUDA-enable GPU
+        pin_memory=True, #enables fast data transfer to CUDA-enable GPU
     )
     test_dataloader = DataLoader(
         test_data,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True, #enables fast data transfre to CUDA-enable GPU
+        pin_memory=True, #enables fast data transfer to CUDA-enable GPU
     )
 
     return train_dataloader, test_dataloader, class_names
@@ -320,275 +322,207 @@ def create_dataloaders_list(
 
 
 
-def create_dataloaders_for_vit(
-        vit_model: str="bitbase16",
-        train_dir: str="./",
-        test_dir: str="./",
-        batch_size: int=64,
+def create_dataloaders_vit(
+        vit_model: str = "vit_b_16_224",
+        train_dir: str = "./",
+        test_dir: str = "./",
+        batch_size: int = 64,
         num_train_samples: int = None, 
         num_test_samples: int = None,
-        aug: bool=True,
-        num_workers: int=os.cpu_count()
-        ):
-    
+        aug: bool = True,
+        num_workers: int = os.cpu_count()
+    ):
+
     """
-    Creates data loaders for the training and test datasets to be used to traing visiton transformers.
+    Creates data loaders for training and testing datasets tailored for Vision Transformers
+    according to https://pytorch.org/vision/main/models/vision_transformer.html. Applies 
+    necessary preprocessing transformations, including optional data augmentation. 
+    using v2.TrivialAugmentWide().
 
     Args:
-        vit_model (str): The name of the ViT model to use. Default is "bitbase16".
-            -bitbase16: ViT-Base/16-224
-            -bitbase16_2: ViT-Base/16-384
-            -bitlarge16: ViT-Large/16-224
-            -bitlarge32: ViT-Large/32-224
-        train_dir (str): The path to the training dataset directory. Default is TRAIN_DIR.
-        test_dir (str): The path to the test dataset directory. Default is TEST_DIR.
-        batch_size (int): The batch size for the data loaders. Default is BATCH_SIZE.
-        num_train_samples: Number of samples to include in the training dataset (None for all samples).
-        num_test_samples: Number of samples to include in the test dataset (None for all samples).
-        aug (bool): Whether to apply data augmentation or not. Default is True.
-        display_imgs (bool): Whether to display sample images or not. Default is True.
+        vit_model (str): The ViT model variant to use. Default is "vit_b_16_224".
+            Options:
+            - 'vit_b_16_224': ViT-Base/16-224
+            - 'vit_b_16_384': ViT-Base/16-384
+            - 'vit_b_32_224': ViT-Base/32-224
+            - 'vit_l_16_224': ViT-Large/16-224
+            - 'vit_l_16_384': ViT-Large/16-384
+            - 'vit_l_32_224': ViT-Large/32-224
+            - 'vit_h_14_224': ViT-Huge/14-224
+            - 'vit_h_14_518': ViT-Huge/14-518
+        train_dir (str): Path to the training dataset directory. Default is "./".
+        test_dir (str): Path to the test dataset directory. Default is "./".
+        batch_size (int): Batch size for the data loaders. Default is 64.
+        num_train_samples (int, optional): Number of samples to include in the training dataset (None for all samples).
+        num_test_samples (int, optional): Number of samples to include in the test dataset (None for all samples).
+        aug (bool): Whether to apply data augmentation. Default is True.
+        num_workers (int): Number of workers for data loading. Default is os.cpu_count().
 
     Returns:
-        train_dataloader (torch.utils.data.DataLoader): The data loader for the training dataset.
-        test_dataloader (torch.utils.data.DataLoader): The data loader for the test dataset.
-        class_names (list): A list of class names.
+        tuple:
+            train_dataloader (torch.utils.data.DataLoader): Data loader for the training dataset.
+            test_dataloader (torch.utils.data.DataLoader): Data loader for the test dataset.
+            class_names (list): List of class names in the dataset.
     """
 
-    IMG_SIZE = 224
-    IMG_SIZE_2 = 384
-    IMG_SIZE_3 = 518
+    # Mapping ViT model names to image sizes (resize and crop)
+    vit_model_sizes = {
+        'vit_b_16_224': (256, 224),
+        'vit_b_16_384': (384, 384),
+        'vit_b_32_224': (256, 224),
+        'vit_l_16_224': (242, 224),
+        'vit_l_16_384': (512, 512),
+        'vit_l_32_224': (256, 224),
+        'vit_h_14_224': (224, 224),
+        'vit_h_14_518': (518, 518)
+    }
 
-    # Manual transforms for the training dataset
-    manual_transforms = v2.Compose([           
-        v2.RandomCrop((IMG_SIZE, IMG_SIZE)),    
+    # Validate model selection
+    if vit_model not in vit_model_sizes:
+        raise ValueError(f"[ERROR] Invalid ViT model '{vit_model}'. Available options: {list(vit_model_sizes.keys())}")
+
+    # Get image sizes for the selected ViT model
+    IMG_SIZE_RESIZE, IMG_SIZE_CROP = vit_model_sizes[vit_model]
+
+    # Define training transformations
+    if aug:
+        train_transforms = v2.Compose([
+            v2.TrivialAugmentWide(),
+            v2.Resize((IMG_SIZE_RESIZE, IMG_SIZE_RESIZE)),
+            v2.RandomCrop((IMG_SIZE_CROP, IMG_SIZE_CROP)),
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    else:
+        train_transforms = v2.Compose([
+            v2.Resize((IMG_SIZE_RESIZE, IMG_SIZE_RESIZE)),
+            v2.CenterCrop((IMG_SIZE_CROP, IMG_SIZE_CROP)),
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    # Define test transformations
+    test_transforms = v2.Compose([
+        v2.Resize((IMG_SIZE_RESIZE, IMG_SIZE_RESIZE)),
+        v2.CenterCrop((IMG_SIZE_CROP, IMG_SIZE_CROP)),
         v2.ToImage(),
-        v2.ToDtype(torch.float32, scale=True),    
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    # ViT-Base/16 transforms
-    if vit_model == "vitbase16":
+    # Create data loaders
+    train_dataloader, test_dataloader, class_names = create_dataloaders(
+        train_dir=train_dir,
+        test_dir=test_dir,
+        train_transform=train_transforms,
+        test_transform=test_transforms,
+        batch_size=batch_size,
+        num_train_samples=num_train_samples,
+        num_test_samples=num_test_samples,
+        num_workers=num_workers
+    )
 
-        # Manual transforms for the training dataset
-        if aug:
-            manual_transforms_train_vitb = v2.Compose([    
-                v2.TrivialAugmentWide(),
-                v2.Resize((256)),
-                v2.RandomCrop((IMG_SIZE, IMG_SIZE)),    
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]) 
-            ])
-        else:
-            manual_transforms_train_vitb = v2.Compose([
-                v2.Resize((256)),
-                v2.CenterCrop((IMG_SIZE, IMG_SIZE)),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])
-            ])
+    return train_dataloader, test_dataloader, class_names
 
-        # Manual transforms for the test dataset
-        manual_transforms_test_vitb = v2.Compose([    
-            v2.Resize((256)),
-            v2.CenterCrop((IMG_SIZE, IMG_SIZE)),    
+
+def create_dataloaders_swin(
+    swin_model: str = "swin_t",
+    train_dir: str = "./train",
+    test_dir: str = "./test",
+    batch_size: int = 64,
+    num_train_samples: int = None,
+    num_test_samples: int = None,
+    aug: bool = True,
+    num_workers: int = os.cpu_count()
+):
+    """
+    Creates data loaders for training and testing datasets tailored for Swin Transformers
+    according to https://pytorch.org/vision/main/models/swin_transformer.html. Applies 
+    necessary preprocessing transformations, including optional data augmentation with
+    v2.TrivialAugmentWide().
+
+    Args:
+        swin_model (str): The specific Swin Transformer model to use. Default is "swin_t".
+            Options include:
+            - "swin_t_224": Swin-Tiny
+            - "swin_s_224": Swin-Small
+            - "swin_b_224": Swin-Base
+            - "swin_v2_t_256": Swin-V2-Tiny
+            - "swin_v2_s_256": Swin-V2-Small
+            - "swin_v2_b_256": Swin-V2-Base
+        train_dir (str): Path to the training dataset directory. Default is "./train".
+        test_dir (str): Path to the testing dataset directory. Default is "./test".
+        batch_size (int): Batch size for the data loaders. Default is 64.
+        num_train_samples (int, optional): Number of samples to include in the training dataset (None for all samples).
+        num_test_samples (int, optional): Number of samples to include in the testing dataset (None for all samples).
+        aug (bool): Whether to apply data augmentation. Default is True.
+        num_workers (int): Number of subprocesses to use for data loading. Default is the number of CPU cores.
+
+    Returns:
+        tuple: A tuple containing:
+            - train_dataloader (torch.utils.data.DataLoader): Data loader for the training dataset.
+            - test_dataloader (torch.utils.data.DataLoader): Data loader for the testing dataset.
+            - class_names (list): List of class names.
+    """
+
+    # Define input size and normalization parameters based on the model
+    model_params = {
+        'swin_t_224': (232, 224),
+        'swin_s_224': (246, 224),
+        'swin_b_224': (238, 224),
+        'swin_v2_t_256': (260, 256),
+        'swin_v2_s_256': (260, 256),
+        'swin_v2_b_256': (272, 256)
+    }
+
+    if swin_model not in model_params:
+        raise ValueError(f"[ERROR] The specified model '{swin_model}' is not among the supported options.")
+
+    input_size = model_params[swin_model]['input_size']
+
+    # Get image sizes for the selected ViT model
+    IMG_SIZE_RESIZE, IMG_SIZE_CROP = vit_model_sizes[vit_model]
+
+    # Define training transformations
+    if aug:
+        train_transforms = v2.Compose([
+            v2.TrivialAugmentWide(),
+            v2.Resize((IMG_SIZE_RESIZE, IMG_SIZE_RESIZE)),
+            v2.RandomCrop((IMG_SIZE_CROP, IMG_SIZE_CROP)),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]) 
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-
-        # Create data loaders for ViT-Base
-        train_dataloader, test_dataloader, class_names = create_dataloaders(
-            train_dir=train_dir,
-            test_dir=test_dir,
-            train_transform=manual_transforms_train_vitb,
-            test_transform=manual_transforms_test_vitb,
-            batch_size=batch_size,
-            num_train_samples=num_train_samples,
-            num_test_samples=num_test_samples,
-            num_workers=num_workers
-            )
-    
-    if vit_model == "vitbase16_2":
-
-        # Manual transforms for the training dataset
-        if aug:
-            manual_transforms_train_vitb = v2.Compose([    
-                v2.TrivialAugmentWide(),
-                v2.Resize((384)),
-                v2.CenterCrop((IMG_SIZE_2, IMG_SIZE_2)),    
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]) 
-            ])
-        else:
-            manual_transforms_train_vitb = v2.Compose([
-                v2.Resize((384)),
-                v2.CenterCrop((IMG_SIZE_2, IMG_SIZE_2)),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])
-            ])
-
-        # Manual transforms for the test dataset
-        manual_transforms_test_vitb = v2.Compose([    
-            v2.Resize((384)),
-            v2.CenterCrop((IMG_SIZE_2, IMG_SIZE_2)),    
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]) 
-        ])
-
-        # Create data loaders for ViT-Base
-        train_dataloader, test_dataloader, class_names = create_dataloaders(
-            train_dir=train_dir,
-            test_dir=test_dir,
-            train_transform=manual_transforms_train_vitb,
-            test_transform=manual_transforms_test_vitb,
-            batch_size=batch_size,
-            num_train_samples=num_train_samples,
-            num_test_samples=num_test_samples,
-            num_workers=num_workers
-            )
-
-    # ViT-Large/16 transforms
-    elif vit_model == "vitlarge16":
-
-        # Manual transforms for the training dataset
-        if aug:
-            manual_transforms_train_vitl = v2.Compose([    
-                v2.TrivialAugmentWide(),
-                v2.Resize((242)),
-                v2.RandomCrop((IMG_SIZE, IMG_SIZE)),    
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]) 
-            ])
-        else:
-            manual_transforms_train_vitl = v2.Compose([
-                v2.Resize((242)),
-                v2.CenterCrop((IMG_SIZE, IMG_SIZE)),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])
-            ])
-
-        # Manual transforms for the test dataset
-        manual_transforms_test_vitl = v2.Compose([    
-            v2.Resize((242)),
-            v2.CenterCrop((IMG_SIZE, IMG_SIZE)),    
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]) 
-        ])
-
-        # Create data loaders for ViT-Large/16
-        train_dataloader, test_dataloader, class_names = create_dataloaders(
-            train_dir=train_dir,
-            test_dir=test_dir,
-            train_transform=manual_transforms_train_vitl,
-            test_transform=manual_transforms_test_vitl,
-            batch_size=batch_size,
-            num_train_samples=num_train_samples,
-            num_test_samples=num_test_samples,
-            num_workers=num_workers
-        )
-
-    # ViT-Large/32 transforms
-    elif vit_model == "vitlarge32":
-        # Manual transforms for the training dataset
-        if aug:
-            manual_transforms_train_vitl = v2.Compose([    
-                v2.TrivialAugmentWide(),
-                v2.Resize((256)),
-                v2.RandomCrop((IMG_SIZE, IMG_SIZE)),    
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]) 
-            ])
-        else:
-            manual_transforms_train_vitl = v2.Compose([
-                v2.Resize((256)),
-                v2.CenterCrop((IMG_SIZE, IMG_SIZE)),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])
-            ])
-
-        # Manual transforms for the test dataset
-        manual_transforms_test_vitl = v2.Compose([    
-            v2.Resize((256)),
-            v2.CenterCrop((IMG_SIZE, IMG_SIZE)),    
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]) 
-        ])
-
-        # Create data loaders for ViT-Large/32
-        train_dataloader, test_dataloader, class_names = create_dataloaders(
-            train_dir=train_dir,
-            test_dir=test_dir,
-            train_transform=manual_transforms_train_vitl,
-            test_transform=manual_transforms_test_vitl,
-            batch_size=batch_size,
-            num_train_samples=num_train_samples,
-            num_test_samples=num_test_samples,
-            num_workers=num_workers
-        )
-    # Vit-Huge/14 transforms
     else:
-        # Manual transforms for the training dataset
-        if aug:
-            manual_transforms_train_vitl = v2.Compose([    
-                v2.TrivialAugmentWide(),
-                v2.Resize((518)),
-                v2.RandomCrop((IMG_SIZE_3, IMG_SIZE_3)),    
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]) 
-            ])
-        else:
-            manual_transforms_train_vitl = v2.Compose([
-                v2.Resize((518)),
-                v2.CenterCrop((IMG_SIZE_3, IMG_SIZE_3)),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])
-            ])
-
-        # Manual transforms for the test dataset
-        manual_transforms_test_vitl = v2.Compose([    
-            v2.Resize((518)),
-            v2.CenterCrop((IMG_SIZE_3, IMG_SIZE_3)),    
+        train_transforms = v2.Compose([
+            v2.Resize((IMG_SIZE_RESIZE, IMG_SIZE_RESIZE)),
+            v2.CenterCrop((IMG_SIZE_CROP, IMG_SIZE_CROP)),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]) 
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        # Create data loaders for ViT-Large/32
-        train_dataloader, test_dataloader, class_names = create_dataloaders(
-            train_dir=train_dir,
-            test_dir=test_dir,
-            train_transform=manual_transforms_train_vitl,
-            test_transform=manual_transforms_test_vitl,
-            batch_size=batch_size,
-            num_train_samples=num_train_samples,
-            num_test_samples=num_test_samples,
-            num_workers=num_workers
-        )
+    # Define test transformations
+    test_transforms = v2.Compose([
+        v2.Resize((IMG_SIZE_RESIZE, IMG_SIZE_RESIZE)),
+        v2.CenterCrop((IMG_SIZE_CROP, IMG_SIZE_CROP)),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    # Create data loaders
+    train_dataloader, test_dataloader, class_names = create_dataloaders(
+        train_dir=train_dir,
+        test_dir=test_dir,
+        train_transform=train_transforms,
+        test_transform=test_transforms,
+        batch_size=batch_size,
+        num_train_samples=num_train_samples,
+        num_test_samples=num_test_samples,
+        num_workers=num_workers
+    )
 
     return train_dataloader, test_dataloader, class_names

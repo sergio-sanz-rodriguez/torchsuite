@@ -1,3 +1,9 @@
+"""
+Implements learning rate schedulers for optimizing model training in PyTorch.  
+Includes custom implementations to control learning rate decay.  
+Future updates may add support for task-specific scheduling strategies.
+"""
+
 import math
 import torch
 from torch.optim.lr_scheduler import LambdaLR

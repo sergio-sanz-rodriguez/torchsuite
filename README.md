@@ -2,7 +2,7 @@
   <img src="images/logo_tochsuite_1.jpg" alt="Into Picture" width="1000"/>
 </div>
 
-# TorchKit  
+# TorchSuite 
 TorchKit is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development.  
 
 It provides essential modules and utilities for training, inference, data handling, and model optimization, making it an invaluable tool for researchers, machine learning professionals, and practitioners.  

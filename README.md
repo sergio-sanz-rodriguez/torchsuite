@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="images/logo_tochsuite_1.jpg" alt="Into Picture" width="1000"/>
+</div>
+
 # TorchKit  
 TorchKit is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development.  
 

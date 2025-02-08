@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="images/logo_tochsuite_1.jpg" alt="Into Picture" width="1000"/>
+  <img src="images/logo_tochsuite_1_resized.jpg" alt="Into Picture" width="1000"/>
 </div>
 
 # TorchSuite 

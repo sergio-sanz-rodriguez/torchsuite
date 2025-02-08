@@ -3,11 +3,11 @@
 </div>
 
 # TorchSuite 
-TorchKit is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development.  
+TorchSuite is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development.  
 
 It provides essential modules and utilities for training, inference, data handling, and model optimization, making it an invaluable tool for researchers, machine learning professionals, and practitioners.  
 
-Currently, TorchKit is fully optimized for **classification** tasks in computer vision. Future versions will extend support to object detection, segmentation, and other unstructured data types such as audio.  
+Currently, TorchSuite is fully optimized for **classification** tasks in computer vision. Future versions will extend support to object detection, segmentation, and other unstructured data types such as audio.  
 
 ## Modules  
 

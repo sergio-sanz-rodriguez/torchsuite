@@ -19,3 +19,9 @@ The notebook `code_example.ipynb` demonstrates the implementation and training o
 
 For any questions, feel free to contact me via email at **sergio.sanz.rodriguez@gmail.com** or connect with me on LinkedIn: [linkedin.com/in/sergio-sanz-rodriguez/](https://www.linkedin.com/in/sergio-sanz-rodriguez/).  
 
+## Requirements
+
+The libraries have been fully validated with PyTorch version 2.5 and Torchvision version 0.20.0. Using other versions of these libraries in the environment may result in runtime errors.
+
+The library versions are specified in the `requirements.txt` file.
+

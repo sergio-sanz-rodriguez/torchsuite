@@ -196,6 +196,15 @@ class Common:
         model.load_state_dict(torch.load(model_save_path, weights_only=True))
         
         return model
+    
+    @staticmethod
+    def get_predictions(output):
+        if isinstance(output, torch.Tensor):
+            return output.contiguous()
+        elif hasattr(output, "logits"):
+            return output.logits.contiguous()
+        else:
+            raise TypeError(f"Unexpected model output type: {type(output)}")
 
 
 # Training and prediction engine class
@@ -235,6 +244,7 @@ class ClassificationEngine:
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
+        self.get_predictions = Common.get_predictions
      
         # Create empty results dictionary
         self.results = {
@@ -827,9 +837,8 @@ class ClassificationEngine:
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
                     # Forward pass
-                    y_pred = self.model(X)
-                    y_pred = y_pred.contiguous()
-
+                    y_pred = self.get_predictions(self.model(X))
+                    
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
@@ -863,8 +872,7 @@ class ClassificationEngine:
 
             else:
                 # Forward pass
-                y_pred = self.model(X)
-                y_pred = y_pred.contiguous()
+                y_pred = self.get_predictions(self.model(X))
                 
                 # Calculate loss, normalize by accumulation steps
                 loss = self.loss_fn(y_pred, y) / accumulation_steps
@@ -990,8 +998,7 @@ class ClassificationEngine:
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
-                        test_pred = self.model(X)
-                        test_pred = test_pred.contiguous()
+                        test_pred = self.get_predictions(self.model(X))
 
                         # Check for NaN/Inf in predictions
                         if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():
@@ -1830,10 +1837,7 @@ class ClassificationEngine:
         return pred_list, classification_report_dict
     
 
-
-
-
-    # Training and prediction engine class
+# Training and prediction engine class
 class DistillationEngine:
 
     """
@@ -1872,6 +1876,7 @@ class DistillationEngine:
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
+        self.get_predictions = Common.get_predictions
      
         # Create empty results dictionary
         self.results = {
@@ -2280,6 +2285,7 @@ class DistillationEngine:
 
         print(f"{Common.info} Training epoch {epoch_number+1}...")
 
+
         # Put student model in train mode
         self.model.train()
         self.model.to(self.device)
@@ -2308,8 +2314,10 @@ class DistillationEngine:
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
                     # Forward pass
-                    y_pred = self.model(X).contiguous()
-                    y_pred_tch = self.model_tch(X_tch).contiguous()
+                    y_pred = self.get_predictions(self.model(X))
+                    y_pred_tch = self.get_predictions(self.model_tch(X_tch))
+                    #y_pred = self.model(X).logits.contiguous()
+                    #y_pred_tch = self.model_tch(X_tch).logits.contiguous()
 
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
@@ -2344,8 +2352,8 @@ class DistillationEngine:
 
             else:
                 # Forward pass
-                y_pred = self.model(X).contiguous()
-                y_pred_tch = self.model_tch(X_tch).contiguous()
+                y_pred = self.get_predictions(self.model(X))
+                y_pred_tch = self.get_predictions(self.model_tch(X_tch))
                 
                 # Calculate loss, normalize by accumulation steps
                 loss = self.loss_fn(y_pred, y_pred_tch, y) / accumulation_steps
@@ -2479,8 +2487,10 @@ class DistillationEngine:
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
-                        test_pred = self.model(X).contiguous()
-                        test_pred_tch = self.model_tch(X_tch).contiguous()
+                        test_pred = self.get_predictions(self.model(X))
+                        test_pred_tch = self.get_predictions(self.model_tch(X_tch))
+                        #test_pred = self.model(X).contiguous()
+                        #test_pred_tch = self.model_tch(X_tch).contiguous()
 
                         # Check for NaN/Inf in predictions
                         if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():

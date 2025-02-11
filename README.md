@@ -1,6 +1,4 @@
-<div align="center">
-  <img src="images/logo_tochsuite_1_resized_1.jpg" alt="Into Picture" width="450"/>
-</div>
+![images/logo_tochsuite_1_resized_1.jpg](https://github.com/sergio-sanz-rodriguez/TorchSuite/blob/094b50fd5107a6b2213e8f40f5c4780dc19e65f2/images/logo_tochsuite_1_resized_1.jpg)
 
 # TorchSuite 
 TorchSuite is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development.  

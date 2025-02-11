@@ -18,6 +18,12 @@ Currently, TorchSuite is fully optimized for **classification** tasks in compute
 - **Vision Transformer (ViT) support:** `vision_transformer.py` enables ViT implementations with PyTorch.  
 - **Custom loss functions:** `loss_functions.py` includes various loss formulations for different tasks.  
 
+## Installation
+
+To install and set up this project, follow these steps:
+1. Clone the repository: 
+2. ```bash https://github.com/sergio-sanz-rodriguez/TorchSuite
+
 ## Code Example  
 The notebook `code_example.ipynb` demonstrates the implementation and training of a deep learning model using some of the modules described above.  
 

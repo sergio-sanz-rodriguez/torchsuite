@@ -366,8 +366,9 @@ class DistillationLoss(nn.Module):
         Initializes the DistillationLoss object with the specified alpha and temperature values.
 
         Args:
-            alpha (float): The weight for the hard loss. Defaults to 0.5.
-            temperature (float): The temperature for softening the logits. Defaults to 3.0.
+            alpha (float): Controls the weighting between soft and hard losses. Defaults to 0.5.
+            temperature (float): Smooths the teacher’s probability distribution, making it easier for the student to learn from. Defaults to 3.0.
+            label_smoothing: Controlls the confidence of the ground truth labels, helping to prevent overfitting. Defaults to 0.1.
         """
 
         super().__init__()

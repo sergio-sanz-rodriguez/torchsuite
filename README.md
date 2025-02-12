@@ -129,7 +129,19 @@ scheduler = FixedLRSchedulerWrapper(
     fixed_epoch=10)
 ```
 
-### ### Training a Classifier Using Distillation
+### Training a Classifier Using Distillation
+Distillation is a technique where a smaller, lightweight model (the "student") is trained to mimic the behavior of a larger, pre-trained model (the "teacher"). This approach can significantly reduce complexity and speed up inference while maintaining comparable accuracy.
+
+A custom cross-entropy-based distillation loss function has been created. This loss function consists of a weighted combination of two components:
+* Soft Loss (KL divergence): Encourages the student model to match the teacher model’s probability distribution, allowing it to learn fine-grained relationships between classes.
+* Hard Loss (cross-entropy): Ensures the student model learns directly from the ground truth labels for correct classification.
+
+A good starting point for configuring this loss function is:
+
+```bash
+loss_fn = DistillationLoss(alpha=0.4, temperature=2, label_smoothing=0.1)
+```
+where `alpha` controls the weighting between soft and hard losses, `temperature` smooths the teacher’s probability distribution, making it easier for the student to learn from, and `label_smoothing` prevents overconfidence by redistributing a small portion of the probability mass to all classes.
 
 
 ## Contributing

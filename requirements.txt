@@ -8,3 +8,5 @@ scikit_learn==1.6.1
 torch==2.5.0
 torchvision==0.20.0
 tqdm==4.66.6
+scikit-image==0.23.1
+tifffile>=2022.8.12

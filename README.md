@@ -145,26 +145,11 @@ where `alpha` controls the weighting between soft and hard losses, `temperature`
 
 
 ## Contributing
-1. Fork the repository.
-2. Create a new branch: 
-```bash
-git checkout -b feature-branch
-```
-3. Make your changes.
-4. Commit your changes:
-```bash
-git commit -am 'Add new feature'
-```
-5. Push to the branch:
-```bash
-git push origin feature-branch
-```
-6. Create a new Pull Request.
+If you want to contribute to this project, contact me via email at **sergio.sanz.rodriguez@gmail.com**.
 
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contact
-
 For any questions, feel free to contact me via email at **sergio.sanz.rodriguez@gmail.com** or connect with me on LinkedIn: [linkedin.com/in/sergio-sanz-rodriguez/](https://www.linkedin.com/in/sergio-sanz-rodriguez/).  
 

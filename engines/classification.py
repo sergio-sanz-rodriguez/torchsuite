@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import copy
 import warnings
+import re
 from datetime import datetime
 from typing import Tuple, Dict, Any, List, Union, Optional
 from tqdm.auto import tqdm 
@@ -31,6 +32,33 @@ except ImportError:
 from sklearn.metrics import precision_recall_curve, classification_report, roc_curve, auc
 from contextlib import nullcontext
 from sklearn.preprocessing import LabelEncoder
+
+import warnings
+warnings.filterwarnings("ignore")
+
+class Logger:
+    def __init__(self):
+        colors = {
+            "BLACK":  '\033[30m',
+            "BLUE": '\033[34m',
+            "ORANGE": '\033[38;5;214m',
+            "GREEN": '\033[32m',
+            "RED": '\033[31m',
+            "RESET": '\033[39m'
+        }
+
+        self.info_tag =    f"{colors['GREEN']}[INFO]{colors['BLACK']}"
+        self.warning_tag = f"{colors['ORANGE']}[WARNING]{colors['BLACK']}"
+        self.error_tag =   f"{colors['RED']}[ERROR]{colors['BLACK']}"
+    
+    def info(self, message: str):
+        print(f"{self.info_tag} {message}")
+    
+    def warning(self, message: str):
+        print(f"{self.warning_tag} {message}")
+    
+    def error(self, message: str):
+        raise ValueError(f"{self.error_tag} {message}")
 
 
 # Common utility class
@@ -203,10 +231,13 @@ class Common:
     def get_predictions(output):
         if isinstance(output, torch.Tensor):
             return output.contiguous()
-        elif hasattr(output, "logits"):
+        elif hasattr(output, "logits"):            
             return output.logits.contiguous()
         else:
             raise TypeError(f"Unexpected model output type: {type(output)}")
+
+    #@staticmethod
+    #def set_inference_context(dataloader: torch.utils.data.DataLoader):
 
 
 # Training and prediction engine class
@@ -233,11 +264,14 @@ class ClassificationEngine:
         # Initialize self variables
         self.device = device
         self.model = model
+        self.model_acc = None
+        self.model_loss = None
+        self.model_fpr = None
+        self.model_pauc = None
+        self.model_epoch = None
         self.save_best_model = False
         self.keep_best_models_in_memory = False
         self.mode = None
-        self.model_best = None
-        self.model_epoch = None
         self.optimizer = None
         self.loss_fn = None
         self.scheduler = None
@@ -246,7 +280,10 @@ class ClassificationEngine:
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
+        #self.inference_context = None
+        self.squeeze_dim = False
         self.get_predictions = Common.get_predictions
+        #self.set_inference_context = Common.set_inference_context
      
         # Create empty results dictionary
         self.results = {
@@ -436,6 +473,7 @@ class ClassificationEngine:
         self,
         target_dir: str=None,
         model_name: str=None,
+        dataloader: torch.utils.data.DataLoader=None,
         apply_validation: bool=True,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         keep_best_models_in_memory: bool=False,
@@ -575,6 +613,30 @@ class ClassificationEngine:
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.scheduler = scheduler
+
+        self.model.train()
+
+        # Attempt a forward pass to check if the shape of X is compatible
+        for batch, (X, y) in enumerate(dataloader):
+            try:
+                # This is where the model will "complain" if the shape is incorrect
+                check = self.get_predictions(self.model(X.to(self.device)))
+            except Exception as e:
+                # If the shape is wrong, reshape X and try again
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                if match:
+                    print(f"{Common.warning} Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                else:
+                    print(f"{Common.warning} Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                    self.squeeze_dim = True
+                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+            break
     
         # Initialize the best model and model_epoch list based on the specified mode.
         if self.save_best_model:
@@ -613,8 +675,8 @@ class ClassificationEngine:
         self,
         dataloader: torch.utils.data.DataLoader,
         num_classes: int=2,
-        recall_threshold: float=0.95,
-        recall_threshold_pauc: float=0.95,
+        recall_threshold: float=0.99,
+        recall_threshold_pauc: float=0.0,
         epoch_number: int = 1,
         amp: bool=True,
         enable_clipping=False,
@@ -646,7 +708,7 @@ class ClassificationEngine:
 
         # Put model in train mode
         self.model.train()
-        self.model.to(self.device)
+        #self.model.to(self.device) # Already done in __init__
 
         # Initialize the GradScaler for  Automatic Mixed Precision (AMP)
         scaler = GradScaler() if amp else None
@@ -662,6 +724,7 @@ class ClassificationEngine:
 
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)
+            X = X.squeeze(1) if self.squeeze_dim else X
 
             # Optimize training with amp if available
             if amp:
@@ -669,7 +732,7 @@ class ClassificationEngine:
                     # Forward pass
                     y_pred = self.model(X)
                     y_pred = y_pred.contiguous()
-                    
+
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
@@ -778,8 +841,8 @@ class ClassificationEngine:
         self,
         dataloader: torch.utils.data.DataLoader, 
         num_classes: int=2,
-        recall_threshold: float=0.95,
-        recall_threshold_pauc: float=0.95,
+        recall_threshold: float=0.99,
+        recall_threshold_pauc: float=0.0,
         epoch_number: int = 1,
         amp: bool=True,
         enable_clipping=False,
@@ -810,7 +873,7 @@ class ClassificationEngine:
 
         # Put model in train mode
         self.model.train()
-        self.model.to(self.device)
+        #self.model.to(self.device) # Already done in __init__
 
         # Initialize the GradScaler for Automatic Mixed Precision (AMP)
         scaler = GradScaler() if amp else None
@@ -826,7 +889,8 @@ class ClassificationEngine:
         for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader):
             
             # Send data to target device
-            X, y = X.to(self.device), y.to(self.device)
+            X, y = X.to(self.device), y.to(self.device)            
+            X = X.squeeze(1) if self.squeeze_dim else X
 
             # Optimize training with amp if available
             if amp:
@@ -952,7 +1016,7 @@ class ClassificationEngine:
         amp: bool = True,
         debug_mode: bool = False,
         enable_clipping: bool = False
-    ) -> Tuple[float, float, float]:
+        ) -> Tuple[float, float, float]:
         
         """Tests a PyTorch model for a single epoch.
 
@@ -976,7 +1040,7 @@ class ClassificationEngine:
 
             # Put model in eval mode
             self.model.eval() 
-            self.model.to(self.device)
+            #self.model.to(self.device) # Already done in __init__
 
             # Setup test loss and test accuracy values
             len_dataloader = len(dataloader)
@@ -984,34 +1048,51 @@ class ClassificationEngine:
             all_preds = []
             all_labels = []
 
-            # Turn on inference context manager
-            with torch.inference_mode():
+            # Set inference context
+            try:
+                inference_context = torch.inference_mode()
+                with torch.inference_mode():        
+                    for batch, (X, y) in enumerate(dataloader):
+                        test_pred = self.get_predictions(self.model(X.to(self.device)))
+                        break
+            except RuntimeError:
+                inference_context = torch.no_grad()
+                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+
+            # Turn on inference context manager 
+            with inference_context:
                 # Loop through DataLoader batches
                 for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader, colour='#FF9E2C'):
                     #, desc=f"Validating epoch {epoch_number}..."):
                     # Send data to target device
-                    X, y = X.to(self.device), y.to(self.device)
+                    X, y = X.to(self.device), y.to(self.device)                    
+                    X = X.squeeze(1) if self.squeeze_dim else X
+                    
+                    if torch.isnan(X).any() or torch.isinf(X).any():
+                        print(f"{Common.warning} NaN or Inf detected in test input!")
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
-                        test_pred = self.get_predictions(self.model(X))
+
+                         # Forward pass
+                        y_pred = self.get_predictions(self.model(X))
 
                         # Check for NaN/Inf in predictions
-                        if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():
+                        if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                             if enable_clipping:
                                 print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
-                                test_pred = torch.nan_to_num(
-                                    test_pred,
-                                    nan=torch.mean(test_pred).item(),
-                                    posinf=torch.max(test_pred).item(),
-                                    neginf=torch.min(test_pred).item()
+                                y_pred = torch.nan_to_num(
+                                    y_pred,
+                                    nan=torch.mean(y_pred).item(),
+                                    posinf=torch.max(y_pred).item(),
+                                    neginf=torch.min(y_pred).item()
                                 )
                             else:
                                 print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
                                 continue
 
                         # Calculate and accumulate loss
-                        loss = self.loss_fn(test_pred, y)
+                        loss = self.loss_fn(y_pred, y)
                         test_loss += loss.item()
 
                         # Debug NaN/Inf loss
@@ -1020,12 +1101,12 @@ class ClassificationEngine:
                             continue
 
                     # Calculate and accumulate accuracy
-                    test_pred = test_pred.float() # Convert to float for stability
-                    test_pred_class = test_pred.argmax(dim=1)
-                    test_acc += Common.calculate_accuracy(y, test_pred_class) #((test_pred_class == y).sum().item()/len(test_pred))
+                    y_pred = y_pred.float() # Convert to float for stability
+                    y_pred_class = y_pred.argmax(dim=1)
+                    test_acc += Common.calculate_accuracy(y, y_pred_class) #((y_pred_class == y).sum().item()/len(test_pred))
 
                     # Collect outputs for fpr-at-recall calculation
-                    all_preds.append(torch.softmax(test_pred, dim=1).detach().cpu())
+                    all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
                     all_labels.append(y.detach().cpu())
 
             # Adjust metrics to get average loss and accuracy per batch 
@@ -1052,7 +1133,6 @@ class ClassificationEngine:
 
         return test_loss, test_acc, test_fpr, test_pauc
 
-    
     def display_results(
         self,
         epoch,
@@ -1276,7 +1356,7 @@ class ClassificationEngine:
         - Saves the logs (self.results).
         - Saves the best-performing model during training based on the specified evaluation mode.
         - If mode is "all", saves the model for every epoch.
-        - Updates `self.model_best` and `self.model_epoch` accordingly.
+        - Updates `self.model_<loss, acc, fpr, pauc, epoch>` accordingly.
 
         Returns:
             A dataframe of training and testing metrics for each epoch.
@@ -1397,8 +1477,8 @@ class ClassificationEngine:
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
-        recall_threshold: float=0.95,
-        recall_threshold_pauc: float=0.95,
+        recall_threshold: float=0.99,
+        recall_threshold_pauc: float=0.0,
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
@@ -1491,6 +1571,7 @@ class ClassificationEngine:
         self.init_train(
             target_dir=target_dir,
             model_name=model_name,
+            dataloader=train_dataloader,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,
             apply_validation= apply_validation,
@@ -1653,11 +1734,47 @@ class ClassificationEngine:
         y_preds = []
         model.eval()
         model.to(self.device)
-        with torch.inference_mode():
+
+        # Set inference context
+        try:
+            inference_context = torch.inference_mode()
+            with torch.inference_mode():        
+                for batch, (X, y) in enumerate(dataloader):
+                    check = self.get_predictions(self.model(X.to(self.device)))
+                    break
+        except RuntimeError:
+            inference_context = torch.no_grad()
+            print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+
+        # Attempt a forward pass to check if the shape of X is compatible
+        for batch, (X, y) in enumerate(dataloader):
+            try:
+                # This is where the model will "complain" if the shape is incorrect
+                check = self.get_predictions(self.model(X.to(self.device)))
+            except Exception as e:
+                # If the shape is wrong, reshape X and try again
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                if match:
+                    print(f"{Common.warning} Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                else:
+                    print(f"{Common.warning} Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                    self.squeeze_dim = True
+                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+            break
+
+        # Turn on inference context manager 
+        with inference_context:
             for X, y in tqdm(dataloader, desc="Making predictions"):
 
                 # Send data and targets to target device
                 X, y = X.to(self.device), y.to(self.device)
+                X = X.squeeze(1) if self.squeeze_dim else X
                 
                 # Do the forward pass
                 y_logit = model(X)
@@ -1788,9 +1905,36 @@ class ClassificationEngine:
             # Prepare model for inference by sending it to target device and turning on eval() mode
             model.to(self.device)
             model.eval()
+
+            # Set inference context
+            try:
+                inference_context = torch.inference_mode()
+                with torch.inference_mode():        
+                    check = model(transformed_image)
+            except RuntimeError:
+                inference_context = torch.no_grad()
+                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
             
+            # Attempt a forward pass to check if the shape of transformed_image is compatible
+            try:
+                # This is where the model will "complain" if the shape is incorrect
+                check = model(transformed_image)
+            except Exception as e:
+                # If the shape is wrong, reshape X and try again
+                print(f"{Common.warning} Wrong input shape: {e}. Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                    self.squeeze_dim = True
+                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+            
+
             # Get prediction probability, predicition label and prediction class
-            with torch.inference_mode():
+            with inference_context:
+                transformed_image = transformed_image.squeeze(1) if self.squeeze_dim else transformed_image
                 pred_logit = model(transformed_image) # perform inference on target sample 
                 #pred_logit = pred_logit.contiguous()
                 pred_prob = torch.softmax(pred_logit, dim=1) # turn logits into prediction probabilities
@@ -2242,8 +2386,8 @@ class DistillationEngine:
         dataloader_std: torch.utils.data.DataLoader, 
         dataloader_tch: torch.utils.data.DataLoader,
         num_classes: int=2,
-        recall_threshold: float=0.95,
-        recall_threshold_pauc: float=0.95,
+        recall_threshold: float=0.99,
+        recall_threshold_pauc: float=0.0,
         epoch_number: int = 1,
         amp: bool=True,
         enable_clipping=False,
@@ -2461,8 +2605,19 @@ class DistillationEngine:
             all_preds = []
             all_labels = []
 
-            # Turn on inference context manager
-            with torch.inference_mode():
+            # Set inference context
+            try:
+                inference_context = torch.inference_mode()
+                with torch.inference_mode():        
+                    for batch, (X, y) in enumerate(dataloader):
+                        test_pred = self.get_predictions(self.model(X.to(self.device)))
+                        break
+            except RuntimeError:
+                inference_context = torch.no_grad()
+                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+
+            # Turn on inference context manager 
+            with inference_context:
                 # Loop through DataLoader batches
                 # for batch, (X, y) in tqdm(enumerate(dataloader), total=len(dataloader), colour='#FF9E2C'):
                 for (batch, (X, y)), (_, (X_tch, _)) in tqdm(zip(enumerate(dataloader_std), enumerate(dataloader_tch)), total=len(dataloader_std), colour='#FF9E2C'):
@@ -2880,8 +3035,8 @@ class DistillationEngine:
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
-        recall_threshold: float=0.95,
-        recall_threshold_pauc: float=0.95,
+        recall_threshold: float=0.99,
+        recall_threshold_pauc: float=0.0,
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
@@ -3142,7 +3297,20 @@ class DistillationEngine:
         y_preds = []
         model.eval()
         model.to(self.device)
-        with torch.inference_mode():
+
+        # Set inference context
+        try:
+            inference_context = torch.inference_mode()
+            with torch.inference_mode():        
+                for batch, (X, y) in enumerate(dataloader):
+                    test_pred = self.get_predictions(self.model(X.to(self.device)))
+                    break
+        except RuntimeError:
+            inference_context = torch.no_grad()
+            print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+
+        # Turn on inference context manager 
+        with inference_context:
             for X, y in tqdm(dataloader, desc="Making predictions"):
 
                 # Send data and targets to target device
@@ -3278,8 +3446,19 @@ class DistillationEngine:
             model.to(self.device)
             model.eval()
             
+            # Set inference context
+            try:
+                inference_context = torch.inference_mode()
+                with torch.inference_mode():        
+                    for batch, (X, y) in enumerate(dataloader):
+                        test_pred = self.get_predictions(self.model(X.to(self.device)))
+                        break
+            except RuntimeError:
+                inference_context = torch.no_grad()
+                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+            
             # Get prediction probability, predicition label and prediction class
-            with torch.inference_mode():
+            with inference_context:
                 pred_logit = model(transformed_image) # perform inference on target sample 
                 #pred_logit = pred_logit.contiguous()
                 pred_prob = torch.softmax(pred_logit, dim=1) # turn logits into prediction probabilities

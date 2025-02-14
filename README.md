@@ -14,17 +14,11 @@ The main highlights of the library are listed next:
 - Support for various deep learning architectures
 - Easy-to-use API for experimentation
 
-Currently, TorchSuite is fully optimized for image and audio classification tasks. Future versions will extend support to:
+Currently, TorchSuite is fully optimized for **image and audio classification tasks**. Future versions will extend support to:
 - Regression
 - Object/Event detection
 - Segmentation
 - Other data types, such as video and text
-
-| Signal | Classification | Regression | Object/Event Detection | Segmentation |
-|-----|-----|-----|-----|-----|
-| Audio | ✅ | ❌ | ❌ | ❌ |
-| Image | ✅ | ❌ | ❌ | ❌ |
-
 
 ## Modules  
 

@@ -6,7 +6,6 @@ Support for other deep learning tasks, such as object segmentation, will be adde
 
 import os
 import glob
-import logging
 import torch
 import torchvision
 import random
@@ -16,6 +15,7 @@ import pandas as pd
 import copy
 import warnings
 import re
+import sys
 from datetime import datetime
 from typing import Tuple, Dict, Any, List, Union, Optional
 from tqdm.auto import tqdm 
@@ -36,55 +36,43 @@ from sklearn.preprocessing import LabelEncoder
 import warnings
 warnings.filterwarnings("ignore")
 
+class Colors:
+    BLACK = '\033[30m'
+    BLUE = '\033[34m'
+    ORANGE = '\033[38;5;214m'
+    GREEN = '\033[32m'
+    RED = '\033[31m'
+    RESET = '\033[39m'
+
 class Logger:
     def __init__(self):
-        colors = {
-            "BLACK":  '\033[30m',
-            "BLUE": '\033[34m',
-            "ORANGE": '\033[38;5;214m',
-            "GREEN": '\033[32m',
-            "RED": '\033[31m',
-            "RESET": '\033[39m'
-        }
 
-        self.info_tag =    f"{colors['GREEN']}[INFO]{colors['BLACK']}"
-        self.warning_tag = f"{colors['ORANGE']}[WARNING]{colors['BLACK']}"
-        self.error_tag =   f"{colors['RED']}[ERROR]{colors['BLACK']}"
+        self.info_tag =    f"{Colors.GREEN}[INFO]{Colors.BLACK}"
+        self.warning_tag = f"{Colors.ORANGE}[WARNING]{Colors.BLACK}"
+        self.error_tag =   f"{Colors.RED}[ERROR]{Colors.BLACK}"
     
     def info(self, message: str):
         print(f"{self.info_tag} {message}")
     
     def warning(self, message: str):
-        print(f"{self.warning_tag} {message}")
+        print(f"{self.warning_tag} {message}", file=sys.stderr)
     
     def error(self, message: str):
-        raise ValueError(f"{self.error_tag} {message}")
+        print(f"{self.error_tag} {message}", file=sys.stderr)
+        raise ValueError(message)
 
 
 # Common utility class
-class Common:
+class Common(Logger):
 
     """A class containing utility functions for classification tasks."""
 
-    colors = {
-        "BLACK":  '\033[30m',
-        "BLUE": '\033[34m',
-        "ORANGE": '\033[38;5;214m',
-        "GREEN": '\033[32m',
-        "RED": '\033[31m',
-        "RESET": '\033[39m'
-    }
-
-    info =    f"{colors['GREEN']}[INFO]{colors['BLACK']}"
-    warning = f"{colors['ORANGE']}[WARNING]{colors['BLACK']}"
-    error =   f"{colors['RED']}[ERROR]{colors['BLACK']}"
-    
     @staticmethod
     def sec_to_min_sec(seconds):
         """Converts seconds to a formatted string in minutes and seconds."""
         if not isinstance(seconds, (int, float)) or seconds < 0:
-            raise ValueError(f"{Common.error} Input must be a non-negative number.")
-        
+            Logger().error("Input must be a non-negative number.")
+                    
         minutes = int(seconds // 60)
         remaining_seconds = int(seconds % 60)
 
@@ -100,7 +88,8 @@ class Common:
     def calculate_fpr_at_recall(y_true, y_pred_probs, recall_threshold):
         """Calculates the False Positive Rate (FPR) at a specified recall threshold."""
         if not (0 <= recall_threshold <= 1):
-            raise ValueError(f"{Common.error} 'recall_threshold' must be between 0 and 1.")
+            Logger().error(f"'recall_threshold' must be between 0 and 1.")
+
 
         if isinstance(y_pred_probs, list):
             y_pred_probs = torch.cat(y_pred_probs)
@@ -190,7 +179,7 @@ class Common:
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
-        print(f"{Common.info} Saving best model to: {model_save_path}")
+        print(f"Saving best model to: {model_save_path}")
         torch.save(obj=model.state_dict(), f=model_save_path)
 
     @staticmethod
@@ -221,8 +210,7 @@ class Common:
         model_save_path = Path(target_dir) / model_name
 
         # Load the model
-        print(f"{Common.info} Loading model from: {model_save_path}")
-        
+        Logger().info(f"Loading model from: {model_save_path}")
         model.load_state_dict(torch.load(model_save_path, weights_only=True))
         
         return model
@@ -234,14 +222,11 @@ class Common:
         elif hasattr(output, "logits"):            
             return output.logits.contiguous()
         else:
-            raise TypeError(f"Unexpected model output type: {type(output)}")
-
-    #@staticmethod
-    #def set_inference_context(dataloader: torch.utils.data.DataLoader):
+            Logger().error(f"Unexpected model output type: {type(output)}")
 
 
 # Training and prediction engine class
-class ClassificationEngine:
+class ClassificationEngine(Common):
 
     """
     A class to handle training, evaluation, and predictions for a PyTorch model.
@@ -282,9 +267,9 @@ class ClassificationEngine:
         self.model_name_pauc = None
         #self.inference_context = None
         self.squeeze_dim = False
-        self.get_predictions = Common.get_predictions
-        #self.set_inference_context = Common.set_inference_context
-     
+        #self.get_predictions = self.get_predictions
+        #self.set_inference_context = self.set_inference_context
+
         # Create empty results dictionary
         self.results = {
             "epoch": [],
@@ -303,7 +288,7 @@ class ClassificationEngine:
 
         # Check if model is provided
         if self.model is None:
-            raise ValueError(f"{Common.error} Instantiate the engine by passing a PyTorch model to handle.")
+            self.error(f"Instantiate the engine by passing a PyTorch model to handle.")
         else:
             self.model.to(self.device)
 
@@ -340,7 +325,7 @@ class ClassificationEngine:
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
-        print(f"{Common.info} Saving model to: {model_save_path}")
+        self.info(f"Saving model to: {model_save_path}")
         torch.save(obj=model.state_dict(), f=model_save_path)
 
     def load(
@@ -365,8 +350,7 @@ class ClassificationEngine:
         model_path = Path(target_dir) / model_name
 
         # Load the model
-        print(f"{Common.info} Loading model from: {model_path}")
-        
+        self.info(f"Loading model from: {model_path}")
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         
         return self
@@ -409,8 +393,8 @@ class ClassificationEngine:
             log_dir = os.path.join("runs", timestamp, experiment_name, model_name, extra)
         else:
             log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
-            
-        print(f"{Common.info} Created SummaryWriter, saving to: {log_dir}...")
+
+        self.info(f"Created SummaryWriter, saving to: {log_dir}...")
         return SummaryWriter(log_dir=log_dir)
     
     def print_config(
@@ -430,28 +414,28 @@ class ClassificationEngine:
         Prints the configuration of the training process.
         """
 
-        print(f"{Common.info} Device: {self.device}")
-        print(f"{Common.info} Epochs: {epochs}")
-        print(f"{Common.info} Batch size: {batch_size}")
-        print(f"{Common.info} Accumulation steps: {accumulation_steps}")
-        print(f"{Common.info} Effective batch size: {batch_size * accumulation_steps}")
-        print(f"{Common.info} Recall threshold - fpr: {recall_threshold}")
-        print(f"{Common.info} Recall threshold - pauc: {recall_threshold_pauc}")
-        print(f"{Common.info} Apply validation: {self.apply_validation}")
-        print(f"{Common.info} Plot curves: {plot_curves}")
-        print(f"{Common.info} Automatic Mixed Precision (AMP): {amp}")
-        print(f"{Common.info} Enable clipping: {enable_clipping}")
-        print(f"{Common.info} Debug mode: {debug_mode}")
-        print(f"{Common.info} Enable writer: {writer}")
-        print(f"{Common.info} Save model: {self.save_best_model}")
-        print(f"{Common.info} Target directory: {self.target_dir}")        
+        self.info(f"Device: {self.device}")
+        self.info(f"Epochs: {epochs}")
+        self.info(f"Batch size: {batch_size}")
+        self.info(f"Accumulation steps: {accumulation_steps}")
+        self.info(f"Effective batch size: {batch_size * accumulation_steps}")
+        self.info(f"Recall threshold - fpr: {recall_threshold}")
+        self.info(f"Recall threshold - pauc: {recall_threshold_pauc}")
+        self.info(f"Apply validation: {self.apply_validation}")
+        self.info(f"Plot curves: {plot_curves}")
+        self.info(f"Automatic Mixed Precision (AMP): {amp}")
+        self.info(f"Enable clipping: {enable_clipping}")
+        self.info(f"Debug mode: {debug_mode}")
+        self.info(f"Enable writer: {writer}")
+        self.info(f"Save model: {self.save_best_model}")
+        self.info(f"Target directory: {self.target_dir}")        
         if self.save_best_model:
           # Extract base name and extension from the model name
             base_name, extension = os.path.splitext(self.model_name)
             
             # Print base name and extension
-            print(f"{Common.info} Model name base: {base_name}")
-            print(f"{Common.info} Model name extension: {extension}")
+            self.info(f"Model name base: {base_name}")
+            self.info(f"Model name extension: {extension}")
             
             # Iterate over modes and format model name, skipping 'last'
             for mode in self.mode:
@@ -463,11 +447,11 @@ class ClassificationEngine:
                     model_name_with_mode = f"_{mode}_epoch<int>{extension}"
                 
                 # Print the final model save path for each mode
-                print(f"{Common.info} Save best model - {mode}: {base_name + model_name_with_mode}")
+                self.info(f"Save best model - {mode}: {base_name + model_name_with_mode}")
         if self.keep_best_models_in_memory:
-            print(f"{Common.warning} Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
+            self.warning(f"Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
         else:
-            print(f"{Common.info} Keeping best models in memory: {self.keep_best_models_in_memory}")
+            self.info(f"Keeping best models in memory: {self.keep_best_models_in_memory}")
 
     def init_train(
         self,
@@ -498,6 +482,7 @@ class ClassificationEngine:
         Args:
             target_dir (str, optional): Directory to save the models. Defaults to "models" if not provided.
             model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
+            dataloader: A DataLoader instance for the model to be trained on.
             optimizer (torch.optim.Optimizer, optional): The optimizer to minimize the loss function.
             loss_fn (torch.nn.Module, optional): The loss function to minimize during training.
             scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler for the optimizer.
@@ -534,31 +519,31 @@ class ClassificationEngine:
 
         # Validate keep_best_models_in_memory
         if not isinstance(keep_best_models_in_memory, (bool)):
-            raise ValueError(f"{Common.error}'keep_best_models_in_memory' must be True or False.")
+            self.error(f"'keep_best_models_in_memory' must be True or False.")
         else:
             self.keep_best_models_in_memory = keep_best_models_in_memory
 
         # Validate apply_validation
         if not isinstance(apply_validation, (bool)):
-            raise ValueError(f"{Common.error}'apply_validation' must be True or False.")
+            self.error(f"'apply_validation' must be True or False.")
         else:
             self.apply_validation = apply_validation
       
         # Validate recall_threshold
         if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
-            raise ValueError(f"{Common.error}'recall_threshold' must be a float between 0.0 and 1.0.")
+            self.error(f"'recall_threshold' must be a float between 0.0 and 1.0.")
 
         # Validate recall_threshold_pauc
         if not isinstance(recall_threshold_pauc, (int, float)) or not (0.0 <= float(recall_threshold_pauc) <= 1.0):
-            raise ValueError(f"{Common.error}'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
+            self.error(f"'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
 
         # Validate accumulation_steps
         if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
-            raise ValueError(f"{Common.error}'accumulation_steps' must be an integer greater than or equal to 1.")
+            self.error(f"'accumulation_steps' must be an integer greater than or equal to 1.")
 
         # Validate epochs
         if not isinstance(epochs, int) or epochs < 1:
-            raise ValueError(f"{Common.error}'epochs' must be an integer greater than or equal to 1.")
+            self.error(f"'epochs' must be an integer greater than or equal to 1.")
 
         # Ensure save_best_model is correctly handled
         if save_best_model is None:
@@ -568,17 +553,17 @@ class ClassificationEngine:
             self.save_best_model = True
             mode = [save_best_model] if isinstance(save_best_model, str) else save_best_model  # Ensure mode is a list
         else:
-            raise ValueError(f"{Common.error}'save_best_model' must be None, a string, or a list of strings.")
+            self.error(f"'save_best_model' must be None, a string, or a list of strings.")
 
         # Validate mode only if save_best_model is True
         valid_modes = {"loss", "acc", "fpr", "pauc", "last", "all"}
         if self.save_best_model:
             if not isinstance(mode, list):
-                raise ValueError(f"{Common.error}'mode' must be a string or a list of strings.")
+                self.error(f"'mode' must be a string or a list of strings.")
 
             for m in mode:
                 if m not in valid_modes:
-                    raise ValueError(f"{Common.error}Invalid mode value: '{m}'. Must be one of {valid_modes}")
+                    self.error(f"Invalid mode value: '{m}'. Must be one of {valid_modes}")
 
         # Assign the validated mode list
         self.mode = mode
@@ -625,9 +610,9 @@ class ClassificationEngine:
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
                 if match:
-                    print(f"{Common.warning} Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
                 else:
-                    print(f"{Common.warning} Attempting to reshape X.")
+                    self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
                 if X.ndimension() == 3:  # [batch_size, 1, time_steps]
@@ -704,7 +689,7 @@ class ClassificationEngine:
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        print(f"{Common.info} Training epoch {epoch_number+1}...")
+        self.info(f"Training epoch {epoch_number+1}...")
 
         # Put model in train mode
         self.model.train()
@@ -736,7 +721,7 @@ class ClassificationEngine:
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
                             #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
                             y_pred = torch.nan_to_num(
                                 y_pred,
@@ -745,7 +730,7 @@ class ClassificationEngine:
                                 neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
 
                     # Calculate  and accumulate loss
@@ -753,7 +738,7 @@ class ClassificationEngine:
                 
                     # Check for NaN or Inf in loss
                     if torch.isnan(loss) or torch.isinf(loss):
-                        print(f"{Common.warning} Loss is NaN or Inf at batch {batch}. Skipping batch...")
+                        self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping batch...")
                         continue
 
                 # Backward pass with scaled gradients
@@ -774,7 +759,7 @@ class ClassificationEngine:
                     for name, param in self.model.named_parameters():
                         if param.grad is not None:
                             if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                print(f"{Common.warning} NaN or Inf gradient detected in {name} at batch {batch}.")
+                                self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}.")
                                 break
                 
                 # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -810,7 +795,7 @@ class ClassificationEngine:
             # Calculate and accumulate loss and accuracy across all batches
             train_loss += loss.item()
             y_pred_class = y_pred.argmax(dim=1)
-            train_acc += Common.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item()/len(y_pred)
+            train_acc += self.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item()/len(y_pred)
             
             # Collect outputs for fpr-at-recall calculation
             all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
@@ -824,14 +809,14 @@ class ClassificationEngine:
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
         try:    
-            train_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
+            self.warning(f"Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
-            logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
+            self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
@@ -869,7 +854,7 @@ class ClassificationEngine:
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        print(f"{Common.info} Training epoch {epoch_number+1}...")
+        self.info(f"Training epoch {epoch_number+1}...")
 
         # Put model in train mode
         self.model.train()
@@ -901,7 +886,7 @@ class ClassificationEngine:
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
                             #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
                             y_pred = torch.nan_to_num(
                                 y_pred,
@@ -910,7 +895,7 @@ class ClassificationEngine:
                                 neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
                     
                     # Calculate loss, normalize by accumulation steps
@@ -918,7 +903,7 @@ class ClassificationEngine:
                 
                     # Check for NaN or Inf in loss
                     if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        print(f"{Common.warning} Loss is NaN or Inf at batch {batch}. Skipping...")
+                        self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping...")
                         continue
 
                 # Backward pass with scaled gradients
@@ -960,7 +945,7 @@ class ClassificationEngine:
                         for name, param in self.model.named_parameters():
                             if param.grad is not None:
                                 if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                    print(f"{Common.warning} NaN or Inf gradient detected in {name} at batch {batch}")
+                                    self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}")
                                     break
 
                     # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -980,7 +965,7 @@ class ClassificationEngine:
             train_loss += loss.item() * accumulation_steps  # Scale back to original loss
             y_pred = y_pred.float() # Convert to float for stability
             y_pred_class = y_pred.argmax(dim=1)
-            train_acc += Common.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item() / len(y_pred)
+            train_acc += self.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item() / len(y_pred)
 
             # Collect outputs for fpr-at-recall calculation
             all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
@@ -994,14 +979,14 @@ class ClassificationEngine:
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
         try:    
-            train_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
+            self.warning(f"Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
-            logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
+            self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
@@ -1036,7 +1021,7 @@ class ClassificationEngine:
         # Execute the test step is apply_validation is enabled
         if self.apply_validation:
 
-            print(f"{Common.info} Validating epoch {epoch_number+1}...")
+            self.info(f"Validating epoch {epoch_number+1}...")
 
             # Put model in eval mode
             self.model.eval() 
@@ -1057,7 +1042,7 @@ class ClassificationEngine:
                         break
             except RuntimeError:
                 inference_context = torch.no_grad()
-                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
             # Turn on inference context manager 
             with inference_context:
@@ -1069,7 +1054,7 @@ class ClassificationEngine:
                     X = X.squeeze(1) if self.squeeze_dim else X
                     
                     if torch.isnan(X).any() or torch.isinf(X).any():
-                        print(f"{Common.warning} NaN or Inf detected in test input!")
+                        self.warning(f"NaN or Inf detected in test input!")
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
@@ -1080,7 +1065,7 @@ class ClassificationEngine:
                         # Check for NaN/Inf in predictions
                         if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                             if enable_clipping:
-                                print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
                                 y_pred = torch.nan_to_num(
                                     y_pred,
                                     nan=torch.mean(y_pred).item(),
@@ -1088,7 +1073,7 @@ class ClassificationEngine:
                                     neginf=torch.min(y_pred).item()
                                 )
                             else:
-                                print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
                                 continue
 
                         # Calculate and accumulate loss
@@ -1097,13 +1082,13 @@ class ClassificationEngine:
 
                         # Debug NaN/Inf loss
                         if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                            print(f"{Common.warning} Loss is NaN/Inf at batch {batch}. Skipping...")
+                            self.warning(f"Loss is NaN/Inf at batch {batch}. Skipping...")
                             continue
 
                     # Calculate and accumulate accuracy
                     y_pred = y_pred.float() # Convert to float for stability
                     y_pred_class = y_pred.argmax(dim=1)
-                    test_acc += Common.calculate_accuracy(y, y_pred_class) #((y_pred_class == y).sum().item()/len(test_pred))
+                    test_acc += self.calculate_accuracy(y, y_pred_class) #((y_pred_class == y).sum().item()/len(test_pred))
 
                     # Collect outputs for fpr-at-recall calculation
                     all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
@@ -1117,14 +1102,14 @@ class ClassificationEngine:
             all_labels = torch.cat(all_labels)
             all_preds = torch.cat(all_preds)
             try:    
-                test_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+                test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
             except Exception as e:
-                logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
+                self.warning(f"Innacurate calculation of final FPR at recall: {e}")
                 test_fpr = 1.0
             try:    
-                test_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+                test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
             except Exception as e:
-                logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
+                self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
                 test_pauc = 0.0
         
         # Otherwise set params with initial values
@@ -1172,25 +1157,25 @@ class ClassificationEngine:
         
         # Print results
         print(
-            f"{Common.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
-            f"{Common.colors['BLUE']}Train: {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}loss: {train_loss:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}acc: {train_acc:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}fpr: {train_fpr:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}pauc: {train_pauc:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}time: {Common.sec_to_min_sec(train_epoch_time)} {Common.colors['BLACK']}| "            
-            f"{Common.colors['BLUE']}lr: {lr:.10f}"
+            f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
+            f"{Colors.BLUE}Train: {Colors.BLACK}| "
+            f"{Colors.BLUE}loss: {train_loss:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}acc: {train_acc:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}fpr: {train_fpr:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}pauc: {train_pauc:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}time: {self.sec_to_min_sec(train_epoch_time)} {Colors.BLACK}| "            
+            f"{Colors.BLUE}lr: {lr:.10f}"
         )
         if self.apply_validation:
             print(
-                f"{Common.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
-                f"{Common.colors['ORANGE']}Test:  {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}loss: {test_loss:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}acc: {test_acc:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}fpr: {test_fpr:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}pauc: {test_pauc:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}time: {Common.sec_to_min_sec(test_epoch_time)} {Common.colors['BLACK']}| "            
-                f"{Common.colors['ORANGE']}lr: {lr:.10f}"
+                f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
+                f"{Colors.ORANGE}Test:  {Colors.BLACK}| "
+                f"{Colors.ORANGE}loss: {test_loss:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}acc: {test_acc:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}fpr: {test_fpr:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}pauc: {test_pauc:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}time: {self.sec_to_min_sec(test_epoch_time)} {Colors.BLACK}| "            
+                f"{Colors.ORANGE}lr: {lr:.10f}"
             )
         
         # Update results dictionary
@@ -1324,8 +1309,8 @@ class ClassificationEngine:
                 elif self.scheduler.mode == "max" and test_acc is not None:
                     self.scheduler.step(test_acc)  # Maximize test_accuracy
                 else:
-                    raise ValueError(
-                        f"{Common.error}The scheduler requires either `test_loss` or `test_acc` "
+                    self.error(
+                        f"The scheduler requires either `test_loss` or `test_acc` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -1366,7 +1351,7 @@ class ClassificationEngine:
             self.mode = [self.mode]  # Ensure self.mode is always a list
 
         if epoch is None:
-            raise ValueError(f"{Common.error}'epoch' must be provided when mode includes 'all' or 'last'.")
+            self.error(f"'epoch' must be provided when mode includes 'all' or 'last'.")
 
         # Save model according criteria
 
@@ -1386,7 +1371,7 @@ class ClassificationEngine:
                 # Loss criterion
                 if mode == "loss":
                     if test_loss is None:
-                        raise ValueError(f"{Common.error}'test_loss' must be provided when mode is 'loss'.")
+                        self.error(f"'test_loss' must be provided when mode is 'loss'.")
                     if test_loss < self.best_test_loss:
                         remove_previous_best(self.model_name_loss)
                         self.best_test_loss = test_loss
@@ -1396,7 +1381,7 @@ class ClassificationEngine:
                 # Accuracy criterion    
                 elif mode == "acc":
                     if test_acc is None:
-                        raise ValueError(f"{Common.error}'test_acc' must be provided when mode is 'acc'.")
+                        self.error(f"'test_acc' must be provided when mode is 'acc'.")
                     if test_acc > self.best_test_acc:
                         remove_previous_best(self.model_name_acc)
                         self.best_test_acc = test_acc
@@ -1406,7 +1391,7 @@ class ClassificationEngine:
                 # FPR criterion
                 elif mode == "fpr":
                     if test_fpr is None:
-                        raise ValueError(f"{Common.error}'test_fpr' must be provided when mode is 'fpr'.")
+                        self.error(f"'test_fpr' must be provided when mode is 'fpr'.")
                     if test_fpr < self.best_test_fpr:
                         remove_previous_best(self.model_name_fpr)
                         self.best_test_fpr = test_fpr
@@ -1416,7 +1401,7 @@ class ClassificationEngine:
                 # pAUC criterion    
                 elif mode == "pauc":
                     if test_pauc is None:
-                        raise ValueError(f"{Common.error}'test_pauc' must be provided when mode is 'pauc'.")
+                        self.error(f"'test_pauc' must be provided when mode is 'pauc'.")
                     if test_pauc > self.best_test_pauc:
                         remove_previous_best(self.model_name_pauc)
                         self.best_test_pauc = test_pauc
@@ -1461,7 +1446,7 @@ class ClassificationEngine:
         writer.close() if writer else None
 
         # Print elapsed time
-        print(f"{Common.info} Training finished! Elapsed time: {Common.sec_to_min_sec(train_time)}")
+        self.info(f"Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
             
     # Trains and tests a Pytorch model
     def train(
@@ -1687,41 +1672,41 @@ class ClassificationEngine:
  
         # Check model to use
         valid_modes =  {"loss", "acc", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
+        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
             model = self.model
         elif model_state == "loss":
             if self.model_loss is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_loss
         elif model_state == "acc":
             if self.model_acc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_acc
         elif model_state == "fpr":
             if self.model_fpr is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_fpr
         elif model_state == "pauc":
             if self.model_pauc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]            
@@ -1735,17 +1720,6 @@ class ClassificationEngine:
         model.eval()
         model.to(self.device)
 
-        # Set inference context
-        try:
-            inference_context = torch.inference_mode()
-            with torch.inference_mode():        
-                for batch, (X, y) in enumerate(dataloader):
-                    check = self.get_predictions(self.model(X.to(self.device)))
-                    break
-        except RuntimeError:
-            inference_context = torch.no_grad()
-            print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
-
         # Attempt a forward pass to check if the shape of X is compatible
         for batch, (X, y) in enumerate(dataloader):
             try:
@@ -1755,9 +1729,9 @@ class ClassificationEngine:
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
                 if match:
-                    print(f"{Common.warning} Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
                 else:
-                    print(f"{Common.warning} Attempting to reshape X.")
+                    self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
                 if X.ndimension() == 3:  # [batch_size, 1, time_steps]
@@ -1767,6 +1741,17 @@ class ClassificationEngine:
                 else:
                     raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
             break
+
+        # Set inference context
+        try:
+            inference_context = torch.inference_mode()
+            with torch.inference_mode():        
+                for batch, (X, y) in enumerate(dataloader):
+                    check = self.get_predictions(self.model(X.to(self.device)))
+                    break
+        except RuntimeError:
+            inference_context = torch.no_grad()
+            self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
         # Turn on inference context manager 
         with inference_context:
@@ -1820,47 +1805,47 @@ class ClassificationEngine:
 
         # Check model to use
         valid_modes =  {"loss", "acc", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
+        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
             model = self.model
         elif model_state == "loss":
             if self.model_loss is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_loss
         elif model_state == "acc":
             if self.model_acc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_acc
         elif model_state == "fpr":
             if self.model_fpr is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_fpr
         elif model_state == "pauc":
             if self.model_pauc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]
 
         # Create a list of test images and checkout existence
-        print(f"{Common.info} Finding all filepaths ending with '.jpg' in directory: {test_dir}")
+        self.info(f"Finding all filepaths ending with '.jpg' in directory: {test_dir}")
         paths = list(Path(test_dir).glob("*/*.jpg"))
         assert len(list(paths)) > 0, f"No files ending with '.jpg' found in this directory: {test_dir}"
 
@@ -1913,7 +1898,7 @@ class ClassificationEngine:
                     check = model(transformed_image)
             except RuntimeError:
                 inference_context = torch.no_grad()
-                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
             
             # Attempt a forward pass to check if the shape of transformed_image is compatible
             try:
@@ -1921,17 +1906,20 @@ class ClassificationEngine:
                 check = model(transformed_image)
             except Exception as e:
                 # If the shape is wrong, reshape X and try again
-                print(f"{Common.warning} Wrong input shape: {e}. Attempting to reshape X.")
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                if match:
+                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                else:
+                    self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
-                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                if transformed_image.ndimension() == 3:  # [batch_size, 1, time_steps]
                     self.squeeze_dim = True
-                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                elif transformed_image.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+                    raise ValueError(f"Unexpected input shape after exception handling: {transformed_image.shape}")
             
-
             # Get prediction probability, predicition label and prediction class
             with inference_context:
                 transformed_image = transformed_image.squeeze(1) if self.squeeze_dim else transformed_image
@@ -1978,7 +1966,7 @@ class ClassificationEngine:
     
 
 # Training and prediction engine class
-class DistillationEngine:
+class DistillationEngine(Common):
 
     """
     A class to handle training, evaluation, and predictions for a PyTorch model.
@@ -2016,7 +2004,7 @@ class DistillationEngine:
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
-        self.get_predictions = Common.get_predictions
+        #self.get_predictions = Common.get_predictions
      
         # Create empty results dictionary
         self.results = {
@@ -2036,7 +2024,7 @@ class DistillationEngine:
 
         # Check if model is provided
         if self.model is None:
-            raise ValueError(f"{Common.error} Instantiate the engine by passing a PyTorch model to handle.")
+            self.error(f"Instantiate the engine by passing a PyTorch model to handle.")
         else:
             self.model.to(self.device)
 
@@ -2073,7 +2061,7 @@ class DistillationEngine:
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
-        print(f"{Common.info} Saving model to: {model_save_path}")
+        self.info(f"Saving model to: {model_save_path}")
         torch.save(obj=model.state_dict(), f=model_save_path)
 
     def load(
@@ -2098,7 +2086,7 @@ class DistillationEngine:
         model_path = Path(target_dir) / model_name
 
         # Load the model
-        print(f"{Common.info} Loading model from: {model_path}")
+        self.info(f"Loading model from: {model_path}")
         
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         
@@ -2143,7 +2131,7 @@ class DistillationEngine:
         else:
             log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
             
-        print(f"{Common.info} Created SummaryWriter, saving to: {log_dir}...")
+        self.info(f"Created SummaryWriter, saving to: {log_dir}...")
         return SummaryWriter(log_dir=log_dir)
     
     def print_config(
@@ -2163,28 +2151,28 @@ class DistillationEngine:
         Prints the configuration of the training process.
         """
 
-        print(f"{Common.info} Device: {self.device}")
-        print(f"{Common.info} Epochs: {epochs}")
-        print(f"{Common.info} Batch size: {batch_size}")
-        print(f"{Common.info} Accumulation steps: {accumulation_steps}")
-        print(f"{Common.info} Effective batch size: {batch_size * accumulation_steps}")
-        print(f"{Common.info} Recall threshold - fpr: {recall_threshold}")
-        print(f"{Common.info} Recall threshold - pauc: {recall_threshold_pauc}")
-        print(f"{Common.info} Apply validation: {self.apply_validation}")
-        print(f"{Common.info} Plot curves: {plot_curves}")
-        print(f"{Common.info} Automatic Mixed Precision (AMP): {amp}")
-        print(f"{Common.info} Enable clipping: {enable_clipping}")
-        print(f"{Common.info} Debug mode: {debug_mode}")
-        print(f"{Common.info} Enable writer: {writer}")
-        print(f"{Common.info} Save model: {self.save_best_model}")
-        print(f"{Common.info} Target directory: {self.target_dir}")        
+        self.info(f"Device: {self.device}")
+        self.info(f"Epochs: {epochs}")
+        self.info(f"Batch size: {batch_size}")
+        self.info(f"Accumulation steps: {accumulation_steps}")
+        self.info(f"Effective batch size: {batch_size * accumulation_steps}")
+        self.info(f"Recall threshold - fpr: {recall_threshold}")
+        self.info(f"Recall threshold - pauc: {recall_threshold_pauc}")
+        self.info(f"Apply validation: {self.apply_validation}")
+        self.info(f"Plot curves: {plot_curves}")
+        self.info(f"Automatic Mixed Precision (AMP): {amp}")
+        self.info(f"Enable clipping: {enable_clipping}")
+        self.info(f"Debug mode: {debug_mode}")
+        self.info(f"Enable writer: {writer}")
+        self.info(f"Save model: {self.save_best_model}")
+        self.info(f"Target directory: {self.target_dir}")        
         if self.save_best_model:
           # Extract base name and extension from the model name
             base_name, extension = os.path.splitext(self.model_name)
             
             # Print base name and extension
-            print(f"{Common.info} Model name base: {base_name}")
-            print(f"{Common.info} Model name extension: {extension}")
+            self.info(f"Model name base: {base_name}")
+            self.info(f"Model name extension: {extension}")
             
             # Iterate over modes and format model name, skipping 'last'
             for mode in self.mode:
@@ -2196,16 +2184,17 @@ class DistillationEngine:
                     model_name_with_mode = f"_{mode}_epoch<int>{extension}"
                 
                 # Print the final model save path for each mode
-                print(f"{Common.info} Save best model - {mode}: {base_name + model_name_with_mode}")
+                self.info(f"Save best model - {mode}: {base_name + model_name_with_mode}")
         if self.keep_best_models_in_memory:
-            print(f"{Common.warning} Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
+            self.warning(f"Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
         else:
-            print(f"{Common.info} Keeping best models in memory: {self.keep_best_models_in_memory}")
+            self.info(f"Keeping best models in memory: {self.keep_best_models_in_memory}")
 
     def init_train(
         self,
         target_dir: str=None,
         model_name: str=None,
+        dataloader: torch.utils.data.DataLoader=None,
         apply_validation: bool=True,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         keep_best_models_in_memory: bool=False,
@@ -2230,6 +2219,7 @@ class DistillationEngine:
         Args:
             target_dir (str, optional): Directory to save the models. Defaults to "models" if not provided.
             model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
+            dataloader: A DataLoader instance for the model to be trained on.
             optimizer (torch.optim.Optimizer, optional): The optimizer to minimize the loss function.
             loss_fn (torch.nn.Module, optional): The loss function to minimize during training.
             scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler for the optimizer.
@@ -2266,31 +2256,31 @@ class DistillationEngine:
 
         # Validate keep_best_models_in_memory
         if not isinstance(keep_best_models_in_memory, (bool)):
-            raise ValueError(f"{Common.error}'keep_best_models_in_memory' must be True or False.")
+            self.error(f"'keep_best_models_in_memory' must be True or False.")
         else:
             self.keep_best_models_in_memory = keep_best_models_in_memory
 
         # Validate apply_validation
         if not isinstance(apply_validation, (bool)):
-            raise ValueError(f"{Common.error}'apply_validation' must be True or False.")
+            self.error(f"'apply_validation' must be True or False.")
         else:
             self.apply_validation = apply_validation
       
         # Validate recall_threshold
         if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
-            raise ValueError(f"{Common.error}'recall_threshold' must be a float between 0.0 and 1.0.")
+            self.error(f"'recall_threshold' must be a float between 0.0 and 1.0.")
 
         # Validate recall_threshold_pauc
         if not isinstance(recall_threshold_pauc, (int, float)) or not (0.0 <= float(recall_threshold_pauc) <= 1.0):
-            raise ValueError(f"{Common.error}'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
+            self.error(f"'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
 
         # Validate accumulation_steps
         if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
-            raise ValueError(f"{Common.error}'accumulation_steps' must be an integer greater than or equal to 1.")
+            self.error(f"'accumulation_steps' must be an integer greater than or equal to 1.")
 
         # Validate epochs
         if not isinstance(epochs, int) or epochs < 1:
-            raise ValueError(f"{Common.error}'epochs' must be an integer greater than or equal to 1.")
+            self.error(f"'epochs' must be an integer greater than or equal to 1.")
 
         # Ensure save_best_model is correctly handled
         if save_best_model is None:
@@ -2300,17 +2290,17 @@ class DistillationEngine:
             self.save_best_model = True
             mode = [save_best_model] if isinstance(save_best_model, str) else save_best_model  # Ensure mode is a list
         else:
-            raise ValueError(f"{Common.error}'save_best_model' must be None, a string, or a list of strings.")
+            self.error(f"'save_best_model' must be None, a string, or a list of strings.")
 
         # Validate mode only if save_best_model is True
         valid_modes = {"loss", "acc", "fpr", "pauc", "last", "all"}
         if self.save_best_model:
             if not isinstance(mode, list):
-                raise ValueError(f"{Common.error}'mode' must be a string or a list of strings.")
+                self.error(f"'mode' must be a string or a list of strings.")
 
             for m in mode:
                 if m not in valid_modes:
-                    raise ValueError(f"{Common.error}Invalid mode value: '{m}'. Must be one of {valid_modes}")
+                    self.error(f"Invalid mode value: '{m}'. Must be one of {valid_modes}")
 
         # Assign the validated mode list
         self.mode = mode
@@ -2345,6 +2335,28 @@ class DistillationEngine:
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.scheduler = scheduler
+
+        # Attempt a forward pass to check if the shape of X is compatible
+        for batch, (X, y) in enumerate(dataloader):
+            try:
+                # This is where the model will "complain" if the shape is incorrect
+                check = self.get_predictions(self.model(X.to(self.device)))
+            except Exception as e:
+                # If the shape is wrong, reshape X and try again
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                if match:
+                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                else:
+                    self.warning(f"Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                    self.squeeze_dim = True
+                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+            break
     
         # Initialize the best model and model_epoch list based on the specified mode.
         if self.save_best_model:
@@ -2415,7 +2427,7 @@ class DistillationEngine:
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        print(f"{Common.info} Training epoch {epoch_number+1}...")
+        self.info(f"Training epoch {epoch_number+1}...")
 
 
         # Put student model in train mode
@@ -2452,7 +2464,7 @@ class DistillationEngine:
                     # Check if the output has NaN or Inf values
                     if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
                             #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
                             y_pred = torch.nan_to_num(
                                 y_pred,
@@ -2461,7 +2473,7 @@ class DistillationEngine:
                                 neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            print(f"{Common.warning} y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
                     
                     # Calculate loss, normalize by accumulation steps
@@ -2469,7 +2481,7 @@ class DistillationEngine:
                 
                     # Check for NaN or Inf in loss
                     if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        print(f"{Common.warning} Loss is NaN or Inf at batch {batch}. Skipping...")
+                        self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping...")
                         continue
 
                 # Backward pass with scaled gradients
@@ -2512,7 +2524,7 @@ class DistillationEngine:
                         for name, param in self.model.named_parameters():
                             if param.grad is not None:
                                 if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                    print(f"{Common.warning} NaN or Inf gradient detected in {name} at batch {batch}")
+                                    self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}")
                                     break
 
                     # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -2532,7 +2544,7 @@ class DistillationEngine:
             train_loss += loss.item() * accumulation_steps  # Scale back to original loss
             y_pred = y_pred.float() # Convert to float for stability
             y_pred_class = y_pred.argmax(dim=1)
-            train_acc += Common.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item() / len(y_pred)
+            train_acc += self.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item() / len(y_pred)
 
             # Collect outputs for fpr-at-recall calculation
             all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
@@ -2546,14 +2558,14 @@ class DistillationEngine:
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
         try:    
-            train_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
         except Exception as e:
-            logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
+            self.error(f"Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
-            logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
+            self.error(f"Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
         return train_loss, train_acc, train_fpr, train_pauc
@@ -2590,7 +2602,7 @@ class DistillationEngine:
         # Execute the test step is apply_validation is enabled
         if self.apply_validation:
 
-            print(f"{Common.info} Validating epoch {epoch_number+1}...")
+            self.info(f"Validating epoch {epoch_number+1}...")
 
             # Put the student model in eval mode
             self.model.eval() 
@@ -2609,12 +2621,12 @@ class DistillationEngine:
             try:
                 inference_context = torch.inference_mode()
                 with torch.inference_mode():        
-                    for batch, (X, y) in enumerate(dataloader):
+                    for batch, (X, y) in enumerate(dataloader_std):
                         test_pred = self.get_predictions(self.model(X.to(self.device)))
                         break
             except RuntimeError:
                 inference_context = torch.no_grad()
-                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
             # Turn on inference context manager 
             with inference_context:
@@ -2634,7 +2646,7 @@ class DistillationEngine:
                         # Check for NaN/Inf in predictions
                         if torch.isnan(test_pred).any() or torch.isinf(test_pred).any():
                             if enable_clipping:
-                                print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
                                 test_pred = torch.nan_to_num(
                                     test_pred,
                                     nan=torch.mean(test_pred).item(),
@@ -2642,7 +2654,7 @@ class DistillationEngine:
                                     neginf=torch.min(test_pred).item()
                                 )
                             else:
-                                print(f"{Common.warning} Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
                                 continue
 
                         # Calculate and accumulate loss
@@ -2651,13 +2663,13 @@ class DistillationEngine:
 
                         # Debug NaN/Inf loss
                         if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                            print(f"{Common.warning} Loss is NaN/Inf at batch {batch}. Skipping...")
+                            self.warning(f"Loss is NaN/Inf at batch {batch}. Skipping...")
                             continue
 
                     # Calculate and accumulate accuracy
                     test_pred = test_pred.float() # Convert to float for stability
                     test_pred_class = test_pred.argmax(dim=1)
-                    test_acc += Common.calculate_accuracy(y, test_pred_class) #((test_pred_class == y).sum().item()/len(test_pred))
+                    test_acc += self.calculate_accuracy(y, test_pred_class) #((test_pred_class == y).sum().item()/len(test_pred))
 
                     # Collect outputs for fpr-at-recall calculation
                     all_preds.append(torch.softmax(test_pred, dim=1).detach().cpu())
@@ -2671,14 +2683,14 @@ class DistillationEngine:
             all_labels = torch.cat(all_labels)
             all_preds = torch.cat(all_preds)
             try:    
-                test_fpr = Common.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
+                test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
             except Exception as e:
-                logging.error(f"{Common.warning} Innacurate calculation of final FPR at recall: {e}")
+                self.error(f"Innacurate calculation of final FPR at recall: {e}")
                 test_fpr = 1.0
             try:    
-                test_pauc = Common.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+                test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
             except Exception as e:
-                logging.error(f"{Common.warning} Innacurate calculation of final pAUC at recall: {e}")
+                self.error(f"Innacurate calculation of final pAUC at recall: {e}")
                 test_pauc = 0.0
         
         # Otherwise set params with initial values
@@ -2727,25 +2739,25 @@ class DistillationEngine:
         
         # Print results
         print(
-            f"{Common.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
-            f"{Common.colors['BLUE']}Train: {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}loss: {train_loss:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}acc: {train_acc:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}fpr: {train_fpr:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}pauc: {train_pauc:.4f} {Common.colors['BLACK']}| "
-            f"{Common.colors['BLUE']}time: {Common.sec_to_min_sec(train_epoch_time)} {Common.colors['BLACK']}| "            
-            f"{Common.colors['BLUE']}lr: {lr:.10f}"
+            f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
+            f"{Colors.BLUE}Train: {Colors.BLACK}| "
+            f"{Colors.BLUE}loss: {train_loss:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}acc: {train_acc:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}fpr: {train_fpr:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}pauc: {train_pauc:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}time: {self.sec_to_min_sec(train_epoch_time)} {Colors.BLACK}| "            
+            f"{Colors.BLUE}lr: {lr:.10f}"
         )
         if self.apply_validation:
             print(
-                f"{Common.colors['BLACK']}Epoch: {epoch+1}/{max_epochs} | "
-                f"{Common.colors['ORANGE']}Test:  {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}loss: {test_loss:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}acc: {test_acc:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}fpr: {test_fpr:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}pauc: {test_pauc:.4f} {Common.colors['BLACK']}| "
-                f"{Common.colors['ORANGE']}time: {Common.sec_to_min_sec(test_epoch_time)} {Common.colors['BLACK']}| "            
-                f"{Common.colors['ORANGE']}lr: {lr:.10f}"
+                f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
+                f"{Colors.ORANGE}Test:  {Colors.BLACK}| "
+                f"{Colors.ORANGE}loss: {test_loss:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}acc: {test_acc:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}fpr: {test_fpr:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}pauc: {test_pauc:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}time: {self.sec_to_min_sec(test_epoch_time)} {Colors.BLACK}| "            
+                f"{Colors.ORANGE}lr: {lr:.10f}"
             )
         
         # Update results dictionary
@@ -2879,8 +2891,8 @@ class DistillationEngine:
                 elif self.scheduler.mode == "max" and test_acc is not None:
                     self.scheduler.step(test_acc)  # Maximize test_accuracy
                 else:
-                    raise ValueError(
-                        f"{Common.error}The scheduler requires either `test_loss` or `test_acc` "
+                    self.error(
+                        f"The scheduler requires either `test_loss` or `test_acc` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -2921,7 +2933,7 @@ class DistillationEngine:
             self.mode = [self.mode]  # Ensure self.mode is always a list
 
         if epoch is None:
-            raise ValueError(f"{Common.error}'epoch' must be provided when mode includes 'all' or 'last'.")
+            self.error(f"'epoch' must be provided when mode includes 'all' or 'last'.")
 
         # Save model according criteria
 
@@ -2941,7 +2953,7 @@ class DistillationEngine:
                 # Loss criterion
                 if mode == "loss":
                     if test_loss is None:
-                        raise ValueError(f"{Common.error}'test_loss' must be provided when mode is 'loss'.")
+                        self.error(f"'test_loss' must be provided when mode is 'loss'.")
                     if test_loss < self.best_test_loss:
                         remove_previous_best(self.model_name_loss)
                         self.best_test_loss = test_loss
@@ -2951,7 +2963,7 @@ class DistillationEngine:
                 # Accuracy criterion    
                 elif mode == "acc":
                     if test_acc is None:
-                        raise ValueError(f"{Common.error}'test_acc' must be provided when mode is 'acc'.")
+                        self.error(f"'test_acc' must be provided when mode is 'acc'.")
                     if test_acc > self.best_test_acc:
                         remove_previous_best(self.model_name_acc)
                         self.best_test_acc = test_acc
@@ -2961,7 +2973,7 @@ class DistillationEngine:
                 # FPR criterion
                 elif mode == "fpr":
                     if test_fpr is None:
-                        raise ValueError(f"{Common.error}'test_fpr' must be provided when mode is 'fpr'.")
+                        self.error(f"'test_fpr' must be provided when mode is 'fpr'.")
                     if test_fpr < self.best_test_fpr:
                         remove_previous_best(self.model_name_fpr)
                         self.best_test_fpr = test_fpr
@@ -2971,7 +2983,7 @@ class DistillationEngine:
                 # pAUC criterion    
                 elif mode == "pauc":
                     if test_pauc is None:
-                        raise ValueError(f"{Common.error}'test_pauc' must be provided when mode is 'pauc'.")
+                        self.error(f"'test_pauc' must be provided when mode is 'pauc'.")
                     if test_pauc > self.best_test_pauc:
                         remove_previous_best(self.model_name_pauc)
                         self.best_test_pauc = test_pauc
@@ -3016,7 +3028,7 @@ class DistillationEngine:
         writer.close() if writer else None
 
         # Print elapsed time
-        print(f"{Common.info} Training finished! Elapsed time: {Common.sec_to_min_sec(train_time)}")
+        self.info(f"Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
 
     
     # Trains and tests a Pytorch model
@@ -3133,6 +3145,7 @@ class DistillationEngine:
         self.init_train(
             target_dir=target_dir,
             model_name=model_name,
+            dataloader=train_dataloader_std,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,
             apply_validation= apply_validation,
@@ -3250,41 +3263,41 @@ class DistillationEngine:
  
         # Check model to use
         valid_modes =  {"loss", "acc", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
+        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
             model = self.model
         elif model_state == "loss":
             if self.model_loss is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_loss
         elif model_state == "acc":
             if self.model_acc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_acc
         elif model_state == "fpr":
             if self.model_fpr is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_fpr
         elif model_state == "pauc":
             if self.model_pauc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]            
@@ -3307,7 +3320,7 @@ class DistillationEngine:
                     break
         except RuntimeError:
             inference_context = torch.no_grad()
-            print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+            self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
         # Turn on inference context manager 
         with inference_context:
@@ -3360,47 +3373,47 @@ class DistillationEngine:
 
         # Check model to use
         valid_modes =  {"loss", "acc", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_models} or an integer."
+        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
             model = self.model
         elif model_state == "loss":
             if self.model_loss is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_loss
         elif model_state == "acc":
             if self.model_acc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_acc
         elif model_state == "fpr":
             if self.model_fpr is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_fpr
         elif model_state == "pauc":
             if self.model_pauc is None:
-                print(f"{Common.info} Model not found, using last-epoch model for prediction.")
+                self.info(f"Model not found, using last-epoch model for prediction.")
                 model = self.model
             else:
                 model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
-                print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                 model = self.model
             else:
                 if model_state > len(self.model_epoch):
-                    print(f"{Common.info} Model epoch {model_state} not found, using default model for prediction.")
+                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
                     model = self.model
                 else:
                     model = self.model_epoch[model_state-1]
 
         # Create a list of test images and checkout existence
-        print(f"{Common.info} Finding all filepaths ending with '.jpg' in directory: {test_dir}")
+        self.info(f"Finding all filepaths ending with '.jpg' in directory: {test_dir}")
         paths = list(Path(test_dir).glob("*/*.jpg"))
         assert len(list(paths)) > 0, f"No files ending with '.jpg' found in this directory: {test_dir}"
 
@@ -3445,17 +3458,35 @@ class DistillationEngine:
             # Prepare model for inference by sending it to target device and turning on eval() mode
             model.to(self.device)
             model.eval()
-            
+
+            # Attempt a forward pass to check if the shape of transformed_image is compatible
+            try:
+                # This is where the model will "complain" if the shape is incorrect
+                check = model(transformed_image)
+            except Exception as e:
+                # If the shape is wrong, reshape X and try again
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                if match:
+                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                else:
+                    self.warning(f"Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if transformed_image.ndimension() == 3:  # [batch_size, 1, time_steps]
+                    self.squeeze_dim = True
+                elif transformed_image.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    raise ValueError(f"Unexpected input shape after exception handling: {transformed_image.shape}")
+
             # Set inference context
             try:
                 inference_context = torch.inference_mode()
                 with torch.inference_mode():        
-                    for batch, (X, y) in enumerate(dataloader):
-                        test_pred = self.get_predictions(self.model(X.to(self.device)))
-                        break
+                    check = model(transformed_image)
             except RuntimeError:
                 inference_context = torch.no_grad()
-                print(f"{Common.warning} torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
             
             # Get prediction probability, predicition label and prediction class
             with inference_context:

@@ -7,7 +7,7 @@ TorchSuite is a versatile and feature-rich PyTorch-based library designed to sim
 
 It provides essential modules and utilities for training, inference, data handling, and model optimization, making it an invaluable tool for researchers, machine learning professionals, and practitioners.  
 
-Currently, TorchSuite is fully optimized for **image classification tasks**. Future versions will extend support to object detection, segmentation, and other unstructured data types such as audio.  
+Currently, TorchSuite is fully optimized for **image classification tasks**. Future versions will extend support for regression, object detection, segmentation, and other unstructured data types, such as audio.  
 
 ## Features
 

@@ -3,27 +3,37 @@
 </div>
 
 # TorchSuite 
-TorchSuite is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development.  
-
-It provides essential modules and utilities for training, inference, data handling, and model optimization, making it an invaluable tool for researchers, machine learning professionals, and practitioners.  
-
-Currently, TorchSuite is fully optimized for **image classification tasks**. Future versions will extend support for regression, object detection, segmentation, and other unstructured data types, such as audio.  
+TorchSuite is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development. It provides essential modules and utilities for training, inference, data handling, and model optimization, making it an invaluable tool for researchers, machine learning professionals, and practitioners.  
 
 ## Features
+
+The main highlights of the library are listed next:
 
 - Simplified model training and evaluation
 - GPU-accelerated computations
 - Support for various deep learning architectures
 - Easy-to-use API for experimentation
 
+Currently, TorchSuite is fully optimized for image and audio classification tasks. Future versions will extend support to:
+- Regression
+- Object/Event detection
+- Segmentation
+- Other data types, such as video and text
+
+| Signal | Classification | Regression | Object/Event Detection | Segmentation |
+|-----|-----|-----|-----|-----|
+| Audio | ✅ | ❌ | ❌ | ❌ |
+| Image | ✅ | ❌ | ❌ | ❌ |
+
+
 ## Modules  
 
-- **Training and inference engine:** A robust `engine.py` module for seamless training and evaluation workflows.  
+- **Training and inference engine:** A robust `classification.py` module for seamless training and evaluation workflows.  
 - **Flexible data loading:** `dataloaders.py` simplifies dataset preparation and augmentation.  
 - **Utility functions:** `helper_functions.py` offers a collection of tools to enhance productivity.  
-- **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies.  
+- **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies. Some classes have been taken from [kamrulhasanrony](https://github.com/kamrulhasanrony/Vision-Transformer-based-Food-Classification/tree/master). 
 - **Vision Transformer (ViT) support:** `vision_transformer.py` enables ViT implementations with PyTorch.  
-- **Custom loss functions:** `loss_functions.py` includes various loss formulations for different tasks.  
+- **Custom loss functions:** `loss_functions.py` includes various loss formulations for different tasks.
 
 ## Installation
 
@@ -87,7 +97,12 @@ tifffile>=2022.8.12
 ```
 
 ## Code Examples  
-The notebook `classification_example.ipynb` demonstrates how to implement and train a deep learning model using some of the modules described above.
+The following notebooks demonstrate how to implement and train deep learning models using the modules described above:
+
+- `image_classification.ipynb` shows the implementation of a transformer-based image classification model using the library.
+- `image_distillation.ipynb` shows how to implement model distillation for image-based tasks.
+- `audio_classification.ipynb` focuses on training models for audio classification.
+These notebooks provide hands-on examples of the core functionality of the library.
 
 ## Best Practices for Deep Learning Training
 
@@ -98,7 +113,7 @@ Data augmentation is of paramount importance to ensure the model's generalizatio
 # Specify transformations
 from torchvision.transforms import v2
 transform_train = v2.Compose([    
-    v2.TrivialAugmentWide(),
+    v2.TrivialAugmentWide(), # Data augmentation
     v2.Resize(256),
     v2.RandomCrop((224, 224)),    
     v2.ToImage(),
@@ -139,6 +154,7 @@ A custom cross-entropy-based distillation loss function has been created. This l
 A good starting point for configuring this loss function is:
 
 ```bash
+# Create loss function
 loss_fn = DistillationLoss(alpha=0.4, temperature=2, label_smoothing=0.1)
 ```
 where `alpha` controls the weighting between soft and hard losses, `temperature` smooths the teacher’s probability distribution, making it easier for the student to learn from, and `label_smoothing` prevents overconfidence by redistributing a small portion of the probability mass to all classes.

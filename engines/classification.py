@@ -1857,11 +1857,6 @@ class ClassificationEngine(Common):
         # Collect file paths
         paths = [p for p in Path(test_dir).rglob("*") if p.suffix.lower() in valid_extensions]
         assert len(paths) > 0, f"No valid image or audio files found in directory: {test_dir}"
-        
-        #self.info(f"Finding all filepaths ending with '.jpg' in directory: {test_dir}")
-        ##paths = list(Path(test_dir).glob(f"*/*.{file_type}"))
-        #paths = [p for p in Path(test_dir).rglob("*") if p.suffix.lower() in valid_extensions]
-        #assert len(list(paths)) > 0, f"No files ending with '.jpg' found in this directory: {test_dir}"
 
         # Number of random images to extract
         num_samples = len(paths)
@@ -1899,8 +1894,6 @@ class ClassificationEngine(Common):
             if path.suffix.lower() in image_extensions:
                 # Load and transform image
                 signal = Image.open(path) #.convert("RGB")
-                if transform:
-                    signal = transform(signal)
             elif path.suffix.lower() in audio_extensions:
                 # Load and transform audio
                 signal, sample_rate = torchaudio.load(path)

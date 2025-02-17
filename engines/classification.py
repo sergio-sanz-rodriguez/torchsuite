@@ -8,6 +8,7 @@ import os
 import glob
 import torch
 import torchvision
+import torchaudio
 import random
 import time
 import numpy as np
@@ -16,6 +17,7 @@ import copy
 import warnings
 import re
 import sys
+import librosa
 from datetime import datetime
 from typing import Tuple, Dict, Any, List, Union, Optional
 from tqdm.auto import tqdm 
@@ -1780,10 +1782,11 @@ class ClassificationEngine(Common):
     def predict_and_store(
         self,
         test_dir: str, 
-        transform: torchvision.transforms, 
+        transform: Union[torchvision.transforms, torchaudio.transforms], 
         class_names: List[str], 
         model_state: str="last",
         sample_fraction: float=1.0,
+        
         seed=42,        
         ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         
@@ -1845,9 +1848,21 @@ class ClassificationEngine(Common):
                     model = self.model_epoch[model_state-1]
 
         # Create a list of test images and checkout existence
-        self.info(f"Finding all filepaths ending with '.jpg' in directory: {test_dir}")
-        paths = list(Path(test_dir).glob("*/*.jpg"))
-        assert len(list(paths)) > 0, f"No files ending with '.jpg' found in this directory: {test_dir}"
+        
+        # Define valid file extensions
+        image_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".gif")
+        audio_extensions = (".wav", ".mp3", ".flac", ".ogg", ".aac", ".m4a")
+
+        valid_extensions = image_extensions + audio_extensions
+
+        # Collect file paths
+        paths = [p for p in Path(test_dir).rglob("*") if p.suffix.lower() in valid_extensions]
+        assert len(paths) > 0, f"No valid image or audio files found in directory: {test_dir}"
+        
+        #self.info(f"Finding all filepaths ending with '.jpg' in directory: {test_dir}")
+        ##paths = list(Path(test_dir).glob(f"*/*.{file_type}"))
+        #paths = [p for p in Path(test_dir).rglob("*") if p.suffix.lower() in valid_extensions]
+        #assert len(list(paths)) > 0, f"No files ending with '.jpg' found in this directory: {test_dir}"
 
         # Number of random images to extract
         num_samples = len(paths)
@@ -1874,19 +1889,27 @@ class ClassificationEngine(Common):
             pred_dict = {}
 
             # Get the sample path and ground truth class name
-            pred_dict["image_path"] = path
+            pred_dict["path"] = path
             class_name = path.parent.stem
             pred_dict["class_name"] = class_name
             
             # Start the prediction timer
             start_time = timer()
             
-            # Open image path
-            img = Image.open(path)
-            
-            # Transform the image, add batch dimension and put image on target device
-            transformed_image = transform(img).unsqueeze(0).to(self.device) 
-            
+            # Process image or audio
+            if path.suffix.lower() in image_extensions:
+                # Load and transform image
+                signal = Image.open(path).convert("RGB")
+                if transform:
+                    signal = transform(signal)
+                signal = signal.unsqueze(0)
+            elif path.suffix.lower() in audio_extensions:
+                # Load and transform audio
+                signal, sample_rate = torchaudio.load(path)
+            if transform:
+                signal = transform(signal)
+            signal = signal.unsqueeze(0).to(self.device)
+
             # Prepare model for inference by sending it to target device and turning on eval() mode
             model.to(self.device)
             model.eval()
@@ -1895,7 +1918,7 @@ class ClassificationEngine(Common):
             try:
                 inference_context = torch.inference_mode()
                 with torch.inference_mode():        
-                    check = model(transformed_image)
+                    check = model(signal)
             except RuntimeError:
                 inference_context = torch.no_grad()
                 self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
@@ -1903,7 +1926,7 @@ class ClassificationEngine(Common):
             # Attempt a forward pass to check if the shape of transformed_image is compatible
             try:
                 # This is where the model will "complain" if the shape is incorrect
-                check = model(transformed_image)
+                check = model(signal)
             except Exception as e:
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
@@ -1913,17 +1936,17 @@ class ClassificationEngine(Common):
                     self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
-                if transformed_image.ndimension() == 3:  # [batch_size, 1, time_steps]
+                if signal.ndimension() == 3:  # [batch_size, 1, time_steps]
                     self.squeeze_dim = True
-                elif transformed_image.ndimension() == 2:  # [batch_size, time_steps]
+                elif signal.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {transformed_image.shape}")
+                    raise ValueError(f"Unexpected input shape after exception handling: {signal.shape}")
             
             # Get prediction probability, predicition label and prediction class
             with inference_context:
-                transformed_image = transformed_image.squeeze(1) if self.squeeze_dim else transformed_image
-                pred_logit = model(transformed_image) # perform inference on target sample 
+                signal = signal.squeeze(1) if self.squeeze_dim else signal
+                pred_logit = model(signal) # perform inference on target sample 
                 #pred_logit = pred_logit.contiguous()
                 pred_prob = torch.softmax(pred_logit, dim=1) # turn logits into prediction probabilities
                 pred_label = torch.argmax(pred_prob, dim=1) # turn prediction probabilities into prediction label

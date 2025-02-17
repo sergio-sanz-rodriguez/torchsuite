@@ -78,16 +78,15 @@ The required libraries are listed in `requirements.txt`:
 ```bash
 ipython==8.12.3
 matplotlib==3.10.0
-numpy==2.2.2
+numpy==2.2.3
 pandas==2.2.3
 Pillow==11.1.0
 Requests==2.32.3
 scikit_learn==1.6.1
 torch==2.5.0
+torchaudio==2.5.0
 torchvision==0.20.0
 tqdm==4.66.6
-scikit-image==0.23.1
-tifffile>=2022.8.12
 ```
 
 ## Code Examples  

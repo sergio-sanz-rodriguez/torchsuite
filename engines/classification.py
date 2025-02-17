@@ -1899,10 +1899,9 @@ class ClassificationEngine(Common):
             # Process image or audio
             if path.suffix.lower() in image_extensions:
                 # Load and transform image
-                signal = Image.open(path).convert("RGB")
+                signal = Image.open(path) #.convert("RGB")
                 if transform:
                     signal = transform(signal)
-                signal = signal.unsqueze(0)
             elif path.suffix.lower() in audio_extensions:
                 # Load and transform audio
                 signal, sample_rate = torchaudio.load(path)

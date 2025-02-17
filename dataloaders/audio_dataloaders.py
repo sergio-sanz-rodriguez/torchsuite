@@ -31,6 +31,20 @@ def load_audio(file_path, target_sample_rate=None, convert_to_mono=False):
     return waveform, sample_rate
 
 
+# Padding function
+def pad_waveform(waveform, target_length):
+    """Pads or truncates the waveform to ensure a fixed length."""
+    current_length = waveform.shape[-1]
+
+    if current_length < target_length:
+        pad_amount = target_length - current_length
+        waveform = torch.nn.functional.pad(waveform, (0, pad_amount))  # Pad at the end
+    elif current_length > target_length:
+        waveform = waveform[:, :target_length]  # Truncate
+
+    return waveform
+
+
 # Function to pad sequences to the same length
 def pad_collate_fn(batch):
     X, y = zip(*batch)

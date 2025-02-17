@@ -468,7 +468,7 @@ def create_dataloaders_swin(
     """
 
     # Define input size and normalization parameters based on the model
-    model_params = {
+    swin_model_sizes = {
         'swin_t_224': (232, 224),
         'swin_s_224': (246, 224),
         'swin_b_224': (238, 224),
@@ -477,13 +477,12 @@ def create_dataloaders_swin(
         'swin_v2_b_256': (272, 256)
     }
 
-    if swin_model not in model_params:
-        raise ValueError(f"[ERROR] The specified model '{swin_model}' is not among the supported options.")
-
-    input_size = model_params[swin_model]['input_size']
+    # Validate model selection
+    if swin_model not in swin_model_sizes:
+        raise ValueError(f"[ERROR] Invalid ViT model '{swin_model}'. Available options: {list(swin_model_sizes.keys())}")
 
     # Get image sizes for the selected ViT model
-    IMG_SIZE_RESIZE, IMG_SIZE_CROP = vit_model_sizes[vit_model]
+    IMG_SIZE_RESIZE, IMG_SIZE_CROP = swin_model_sizes[swin_model]
 
     # Define training transformations
     if aug:

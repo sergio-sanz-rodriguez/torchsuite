@@ -7,10 +7,12 @@ import os
 import random
 import torch
 import torchaudio
+from torchvision.transforms.v2 import Lambda
 from torch.utils.data import DataLoader, Subset, Dataset
 from torch.nn.utils.rnn import pad_sequence
 
 NUM_WORKERS = os.cpu_count()
+
 
 # Function to load an audio file and convert it to a tensor
 def load_audio(file_path, target_sample_rate=None, convert_to_mono=False):
@@ -44,9 +46,50 @@ def pad_waveform(waveform, target_length):
 
     return waveform
 
+import torch
+import torch.nn as nn
+
+
+# Padding class
+class PadWaveform(torch.nn.Module):
+    """A PyTorch module to pad or truncate waveforms to a fixed length."""
+
+    def __init__(self, target_length=16000):
+        
+        """
+        Initializes the PadWaveform module.
+
+        Args:
+            target_length (int): The desired length of the waveform after padding/truncation.
+        """
+        
+        super(PadWaveform, self).__init__()  # Properly initializes the parent nn.Module.
+        self.target_length = target_length  # Stores the target length as an instance attribute.
+
+    def forward(self, waveform):
+        
+        """
+        Pads or truncates the input waveform to ensure it has a fixed length.
+
+        Args:
+            waveform (Tensor): A PyTorch tensor representing the audio waveform. 
+                               Expected shape: (channels, time) or (batch, channels, time).
+
+        Returns:
+            Tensor: The processed waveform with the specified target length.
+        """
+
+        waveform = pad_waveform(waveform, self.target_length)
+       
+        return waveform 
+
 
 # Function to pad sequences to the same length
 def pad_collate_fn(batch):
+
+    """ 
+    This function pad sequences in a batch to the same length
+    """
     X, y = zip(*batch)
 
     # Process each sequence x from the batch
@@ -72,13 +115,89 @@ def pad_collate_fn(batch):
     
     return X_padded, y
 
-class PadSequenceTransform(torch.nn.Module):
-    def __init__(self):
-        super(PadSequenceTransform, self).__init__()
+#class PadSequenceTransform(torch.nn.Module):
+#    def __init__(self):
+#        super(PadSequenceTransform, self).__init__()
 
-    def forward(self, batch):
-        # Apply padding across the batch
-        return pad_sequence(batch, batch_first=True, padding_value=0)
+#    def forward(self, batch):
+#        # Apply padding across the batch
+#        return pad_sequence(batch, batch_first=True, padding_value=0)
+
+
+# Custom Dataset for Audio Classification
+class AudioDataset(Dataset):
+    
+    """
+    A PyTorch Dataset class for loading and preprocessing audio files for classification.
+
+    Args:
+        root_dir (str): The root directory containing subdirectories of audio files for each class.
+        transform (callable, optional): A function/transform to apply to the audio waveform.
+    """
+
+    def __init__(self, root_dir, transform=None):
+    
+        """
+        Initializes the dataset, setting the root directory, transform, and loading file paths and labels.
+
+        Args:
+            root_dir (str): The root directory where class subdirectories containing audio files reside.
+            transform (callable, optional): A transformation to apply to the audio data.
+        """
+    
+        self.root_dir = root_dir  # Root directory containing subdirectories for each class.
+        self.transform = transform  # Optional transformation to apply to the audio data.
+        self.files = []  # List to store file paths of all audio files.
+        self.labels = []  # List to store corresponding labels for each audio file.
+        
+        # Retrieve class names by listing all subdirectories in the root directory.
+        self.classes = sorted([d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))])
+
+        # Create a label map, assigning each class a unique integer index.
+        label_map = {class_name: idx for idx, class_name in enumerate(self.classes)}
+
+        # Loop over each class and collect file paths for audio files (.wav).
+        for class_name in self.classes:
+            class_path = os.path.join(root_dir, class_name)  # Get path of the current class subdirectory.
+            for file in os.listdir(class_path):  # Loop over all files in the class directory.
+                if file.endswith(".wav"):  # Filter only .wav files.
+                    self.files.append(os.path.join(class_path, file))  # Store the full file path.
+                    self.labels.append(label_map[class_name])  # Assign the class label to the file.
+
+    def __len__(self):
+     
+        """
+        Returns the total number of samples in the dataset.
+
+        Returns:
+            int: The number of audio files in the dataset.
+        """
+     
+        return len(self.files)
+
+    def __getitem__(self, idx):
+     
+        """
+        Returns the audio waveform and corresponding label for a given index.
+
+        Args:
+            idx (int): The index of the sample to retrieve.
+
+        Returns:
+            tuple: A tuple containing the audio waveform and its label.
+        """
+     
+        file_path = self.files[idx]  # Get the file path for the sample at the specified index.
+        label = self.labels[idx]  # Get the label for the sample at the specified index.
+        
+        # Load the audio data (waveform and sample rate) from the file.
+        waveform, sample_rate = load_audio(file_path)
+
+        # Apply the transformation, if any, to the waveform.
+        if self.transform:
+            waveform = self.transform(waveform)
+
+        return waveform, label
 
 
 # Custom Dataset for Audio Classification

@@ -9,6 +9,12 @@ from obj_dect_modules.coco_eval import CocoEvaluator
 from obj_dect_modules.coco_utils import get_coco_api_from_dataset
 
 
+#{'loss_classifier': tensor(0.8867, device='cuda:0', grad_fn=<NllLossBackward0>),
+# 'loss_box_reg': tensor(0.2819, device='cuda:0', grad_fn=<DivBackward0>),
+# 'loss_mask': tensor(5.2860, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward0>),
+# 'loss_objectness': tensor(0.0390, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward0>),
+# 'loss_rpn_box_reg': tensor(0.0044, device='cuda:0', grad_fn=<DivBackward0>)}
+
 def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, scaler=None):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")

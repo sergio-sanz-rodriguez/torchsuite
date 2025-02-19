@@ -53,20 +53,7 @@ class Logger:
         self.error_tag =   f"{Colors.RED}[ERROR]{Colors.BLACK}"
         
         # Create empty results dictionary
-        self.results = {
-            "epoch": [],
-            "train_loss": [],
-            "train_acc": [],
-            "train_fpr": [],
-            "train_pauc": [],
-            "train_time [s]": [],
-            "test_loss": [],
-            "test_acc": [],
-            "test_fpr": [],
-            "test_pauc": [],
-            "test_time [s]": [],
-            "lr": [],
-            } 
+        self.results = {}
     
     def info(self, message: str):
         print(f"{self.info_tag} {message}")
@@ -78,27 +65,28 @@ class Logger:
         print(f"{self.error_tag} {message}", file=sys.stderr)
         raise ValueError(message)
     
-    def init_results():
+    def init_results(self, dictionary: dict = None):
+        dictionary = dictionary or {}  # Ensure dictionary is not None
+        self.results.update({
+            "epoch": [],
+            **{f"train_{key}": [] for key in dictionary.keys()},
+            "train_total_loss": [],
+            "train_time [s]": [],
+            **{f"test_{key}": [] for key in dictionary.keys()},
+            "test_total_loss": [],
+            "test_time [s]": [],
+            "lr": []
+        })
 
-        
-    
     def display_results(
         self,
-        epoch,
-        max_epochs,
-        train_loss,
-        train_acc,
-        recall_threshold,
-        recall_threshold_pauc,
-        train_fpr,
-        train_pauc,
-        train_epoch_time,
-        test_loss,
-        test_acc,
-        test_fpr,
-        test_pauc,
-        test_epoch_time,
-        plot_curves
+        epoch: int,
+        max_epochs: int,
+        train_loss: Dict[str, float],        
+        train_epoch_time: float,
+        test_loss: Optional[Dict[str, float]] = None,
+        test_epoch_time: Optional[float] = None,
+        plot_curves: bool = False
         ):
     
         """
@@ -118,90 +106,59 @@ class Logger:
         else:
             lr = self.scheduler.get_last_lr()[0]
         
-        # Print results
+        # Format train loss as a string
+        train_loss_str = f"{Colors.BLACK} | ".join(f"{Colors.BLUE}{key}: {value:.4f}" for key, value in train_loss.items())
+
         print(
             f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
-            f"{Colors.BLUE}Train: {Colors.BLACK}| "
-            f"{Colors.BLUE}loss: {train_loss:.4f} {Colors.BLACK}| "
-            f"{Colors.BLUE}acc: {train_acc:.4f} {Colors.BLACK}| "
-            f"{Colors.BLUE}fpr: {train_fpr:.4f} {Colors.BLACK}| "
-            f"{Colors.BLUE}pauc: {train_pauc:.4f} {Colors.BLACK}| "
+            f"{Colors.BLUE}Train: {Colors.BLACK} {train_loss_str} {Colors.BLACK}| "
             f"{Colors.BLUE}time: {self.sec_to_min_sec(train_epoch_time)} {Colors.BLACK}| "            
             f"{Colors.BLUE}lr: {lr:.10f}"
         )
-        if self.apply_validation:
+        if self.apply_validation and test_loss is not None:
+
+            # Format test loss as a string
+            test_loss_str = " | ".join(f"{Colors.ORANGE}{key}: {value:.4f}" for key, value in test_loss.items())
+
             print(
                 f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
-                f"{Colors.ORANGE}Test:  {Colors.BLACK}| "
-                f"{Colors.ORANGE}loss: {test_loss:.4f} {Colors.BLACK}| "
-                f"{Colors.ORANGE}acc: {test_acc:.4f} {Colors.BLACK}| "
-                f"{Colors.ORANGE}fpr: {test_fpr:.4f} {Colors.BLACK}| "
-                f"{Colors.ORANGE}pauc: {test_pauc:.4f} {Colors.BLACK}| "
+                f"{Colors.ORANGE}Test:  {Colors.BLACK} {test_loss_str} {Colors.BLACK}| "                
                 f"{Colors.ORANGE}time: {self.sec_to_min_sec(test_epoch_time)} {Colors.BLACK}| "            
                 f"{Colors.ORANGE}lr: {lr:.10f}"
             )
         
         # Update results dictionary
-        self.results["epoch"].append(epoch+1)
-        self.results["train_loss"].append(train_loss)
-        self.results["train_acc"].append(train_acc)
-        self.results["test_loss"].append(test_loss)
-        self.results["test_acc"].append(test_acc)
+        self.results["epoch"].append(epoch+1)        
+        for key, value in train_loss.items():
+            self.results[f"train_{key}"].append(value)
         self.results["train_time [s]"].append(train_epoch_time)
-        self.results["test_time [s]"].append(test_epoch_time)
+        if test_loss is not None:
+            for key, value in test_loss.items():
+                self.results[f"test_{key}"].append(value)
+            self.results["test_time [s]"].append(test_epoch_time)
         self.results["lr"].append(lr)
-        self.results["train_fpr"].append(train_fpr)
-        self.results["test_fpr"].append(test_fpr)
-        self.results["train_pauc"].append(train_pauc)
-        self.results["test_pauc"].append(test_pauc)
         
-        # Plots training and test loss, accuracy, and fpr-at-recall curves.
+        # Plot training and test loss curves
         if plot_curves:
-        
-            n_plots = 4
-            plt.figure(figsize=(20, 6))
-            range_epochs = range(1, len(self.results["train_loss"])+1)
+            n_plots = len(train_loss.keys())
+            cols = min(3, n_plots)
+            rows = (n_plots + cols - 1) // cols
 
-            # Plot loss
-            plt.subplot(1, n_plots, 1)
-            plt.plot(range_epochs, self.results["train_loss"], label="train_loss")
-            if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_loss"], label="test_loss")
-            plt.title("Loss")
-            plt.xlabel("Epochs")
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
+            plt.figure(figsize=(20, 6*rows))
+            range_epochs = range(1, len(self.results["epoch"]) + 1)
 
-            # Plot accuracy
-            plt.subplot(1, n_plots, 2)
-            plt.plot(range_epochs, self.results["train_acc"], label="train_accuracy")
-            if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_acc"], label="test_accuracy")
-            plt.title("Accuracy")
-            plt.xlabel("Epochs")
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
-                    
-            # Plot FPR at recall
-            plt.subplot(1, n_plots, 3)
-            plt.plot(range_epochs, self.results["train_fpr"], label="train_fpr_at_recall")
-            if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_fpr"], label="test_fpr_at_recall")
-            plt.title(f"FPR at {recall_threshold * 100}% recall")
-            plt.xlabel("Epochs")
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
+            for i, key in enumerate(train_loss.keys(), start=1):
+                plt.subplot(rows, cols, i)
+                plt.plot(range_epochs, self.results[f"train_{key}"], label=f"train_{key}")
+                
+                if self.apply_validation and test_loss is not None:
+                    plt.plot(range_epochs, self.results[f"test_{key}"], label=f"test_{key}")
+                
+                plt.title(key)
+                plt.xlabel("Epochs")
+                plt.grid(visible=True, which="both", axis="both")
+                plt.legend()
 
-            # Plot pAUC at recall
-            plt.subplot(1, n_plots, 4)
-            plt.plot(range_epochs, self.results["train_pauc"], label="train_pauc_at_recall")
-            if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_pauc"], label="test_pauc_at_recall")
-            plt.title(f"pAUC above {recall_threshold_pauc * 100}% recall")
-            plt.xlabel("Epochs")
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
-                    
             plt.show()
 
 
@@ -369,7 +326,7 @@ class Common(Logger):
 
 
 # Training and prediction engine class
-class ClassificationEngine(Common):
+class ObjectDetectionEngine(Common):
 
     """
     A class to handle training, evaluation, and predictions for a PyTorch model.
@@ -392,10 +349,7 @@ class ClassificationEngine(Common):
         # Initialize self variables
         self.device = device
         self.model = model
-        self.model_acc = None
         self.model_loss = None
-        self.model_fpr = None
-        self.model_pauc = None
         self.model_epoch = None
         self.save_best_model = False
         self.keep_best_models_in_memory = False
@@ -404,15 +358,9 @@ class ClassificationEngine(Common):
         self.loss_fn = None
         self.scheduler = None
         self.model_name = None
-        self.model_name_loss = None
-        self.model_name_acc = None
-        self.model_name_fpr = None
-        self.model_name_pauc = None
-        #self.inference_context = None
+        self.model_name_loss = None        
         self.squeeze_dim = False
-        #self.get_predictions = self.get_predictions
-        #self.set_inference_context = self.set_inference_context
-
+        
         # Check if model is provided
         if self.model is None:
             self.error(f"Instantiate the engine by passing a PyTorch model to handle.")
@@ -482,60 +430,16 @@ class ClassificationEngine(Common):
         
         return self
     
-    
-    def create_writer(
-        self,
-        experiment_name: str, 
-        model_name: str, 
-        extra: str=None) -> torch.utils.tensorboard.writer.SummaryWriter():
-
-        """Creates a torch.utils.tensorboard.writer.SummaryWriter() instance saving to a specific log_dir.
-
-        log_dir is a combination of runs/timestamp/experiment_name/model_name/extra.
-
-        Where timestamp is the current date in YYYY-MM-DD format.
-
-        Args:
-            experiment_name (str): Name of experiment.
-            model_name (str): Name of model.
-            extra (str, optional): Anything extra to add to the directory. Defaults to None.
-
-        Returns:
-            torch.utils.tensorboard.writer.SummaryWriter(): Instance of a writer saving to log_dir.
-
-        Example usage:
-            # Create a writer saving to "runs/2022-06-04/data_10_percent/effnetb2/5_epochs/"
-            writer = create_writer(experiment_name="data_10_percent",
-                                model_name="effnetb2",
-                                extra="5_epochs")
-            # The above is the same as:
-            writer = SummaryWriter(log_dir="runs/2022-06-04/data_10_percent/effnetb2/5_epochs/")
-        """
-
-        # Get timestamp of current date (all experiments on certain day live in same folder)
-        timestamp = datetime.now().strftime("%Y-%m-%d") # returns current date in YYYY-MM-DD format
-
-        if extra:
-            # Create log directory path
-            log_dir = os.path.join("runs", timestamp, experiment_name, model_name, extra)
-        else:
-            log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
-
-        self.info(f"Created SummaryWriter, saving to: {log_dir}...")
-        return SummaryWriter(log_dir=log_dir)
-    
     def print_config(
             self,
             batch_size,
-            recall_threshold,
-            recall_threshold_pauc,
             epochs,
             plot_curves,
             amp,
             enable_clipping,
             accumulation_steps,
-            debug_mode,
-            writer):
+            debug_mode
+            ):
         
         """
         Prints the configuration of the training process.
@@ -546,14 +450,11 @@ class ClassificationEngine(Common):
         self.info(f"Batch size: {batch_size}")
         self.info(f"Accumulation steps: {accumulation_steps}")
         self.info(f"Effective batch size: {batch_size * accumulation_steps}")
-        self.info(f"Recall threshold - fpr: {recall_threshold}")
-        self.info(f"Recall threshold - pauc: {recall_threshold_pauc}")
         self.info(f"Apply validation: {self.apply_validation}")
         self.info(f"Plot curves: {plot_curves}")
         self.info(f"Automatic Mixed Precision (AMP): {amp}")
         self.info(f"Enable clipping: {enable_clipping}")
         self.info(f"Debug mode: {debug_mode}")
-        self.info(f"Enable writer: {writer}")
         self.info(f"Save model: {self.save_best_model}")
         self.info(f"Target directory: {self.target_dir}")        
         if self.save_best_model:
@@ -580,6 +481,34 @@ class ClassificationEngine(Common):
         else:
             self.info(f"Keeping best models in memory: {self.keep_best_models_in_memory}")
 
+    def prepare_data(
+        self,
+        images,
+        targets
+        ):
+
+        """
+        Prepare the data by performing the following operations:
+        1. Moving images to the device (GPU/CPU).
+        2. Moving tensor values within the targets dictionary to the device.
+        
+        Args:
+            images (list): List of image tensors.
+            targets (list of dict): List of dictionaries, where each dictionary contains target data, 
+                                    potentially including tensor values.
+        
+        Returns:
+            tuple: A tuple containing:
+                - images (list): List of image tensors moved to the device.
+                - targets (list of dict): List of dictionaries, with tensor values moved to the device.
+        """
+        
+        images = list(image.to(self.device) for image in images)            
+        targets = [{k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+
+        return images, targets
+
+
     def init_train(
         self,
         target_dir: str=None,
@@ -591,17 +520,14 @@ class ClassificationEngine(Common):
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
-        batch_size: int=64,
-        recall_threshold: float=0.95,
-        recall_threshold_pauc: float=0.95,
+        batch_size: int=64,        
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
         enable_clipping: bool=False,
         accumulation_steps: int=1,
         debug_mode: bool=False,
-        writer: Optional[SummaryWriter] = None
-    ):
+        ):
 
         """
         Initializes the training process by setting up the required configurations, parameters, and resources.
@@ -614,8 +540,6 @@ class ClassificationEngine(Common):
             loss_fn (torch.nn.Module, optional): The loss function to minimize during training.
             scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler for the optimizer.
             batch_size (int, optional): Batch size for the training process. Default is 64.
-            recall_threshold (float, optional): Recall threshold for fpr calculation. Must be a float between 0.0 and 1.0. Default is 0.95.
-            recall_threshold (float, optional): Recall threshold for pAUC calculation. Must be a float between 0.0 and 1.0. Default is 0.95.
             epochs (int, optional): Number of epochs to train. Must be an integer greater than or equal to 1. Default is 30.
             plot_curves (bool, optional): Whether to plot training and validation curves. Default is True.
             amp (bool, optional): Enable automatic mixed precision for faster training. Default is True.
@@ -630,8 +554,7 @@ class ClassificationEngine(Common):
                 - "last": saves last epoch
                 - "all": saves models for all epochs
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
-                - None: the model will not be saved.
-            writer (SummaryWriter, optional): TensorBoard SummaryWriter for logging metrics. Default is False.
+                - None: the model will not be saved.            
 
         Functionality:
             Validates `recall_threshold`, `accumulation_steps`, and `epochs` parameters with assertions.
@@ -654,15 +577,7 @@ class ClassificationEngine(Common):
         if not isinstance(apply_validation, (bool)):
             self.error(f"'apply_validation' must be True or False.")
         else:
-            self.apply_validation = apply_validation
-      
-        # Validate recall_threshold
-        if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
-            self.error(f"'recall_threshold' must be a float between 0.0 and 1.0.")
-
-        # Validate recall_threshold_pauc
-        if not isinstance(recall_threshold_pauc, (int, float)) or not (0.0 <= float(recall_threshold_pauc) <= 1.0):
-            self.error(f"'recall_threshold_pauc' must be a float between 0.0 and 1.0.")
+            self.apply_validation = apply_validation        
 
         # Validate accumulation_steps
         if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
@@ -709,16 +624,13 @@ class ClassificationEngine(Common):
 
         # Print configuration parameters
         self.print_config(
-            batch_size=batch_size,
-            recall_threshold=recall_threshold,
-            recall_threshold_pauc=recall_threshold_pauc,
+            batch_size=batch_size,            
             epochs=epochs,
             plot_curves=plot_curves,
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,            
             debug_mode=debug_mode,
-            writer=writer
             )
         
         # Initialize optimizer, loss_fn, and scheduler
@@ -729,11 +641,23 @@ class ClassificationEngine(Common):
         self.model.train()
 
         # Attempt a forward pass to check if the shape of X is compatible
-        for batch, (X, y) in enumerate(dataloader):
+        for batch, (images, targets) in enumerate(dataloader):
+
+            images, targets = self.prepare_data(images, targets)
+
             try:
                 # This is where the model will "complain" if the shape is incorrect
-                check = self.get_predictions(self.model(X.to(self.device)))
+                check = self.model(images, targets)
+                # Initialize the log results
+                if isinstance(check, dict):
+                    self.init_results(check)
+
             except Exception as e:
+
+                # If the result dict delivered by the model is unknown.
+                #if not isinstance(check, dict):
+                #    self.error(f"Unknown output metrics from the model.")
+
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
                 if match:
@@ -747,7 +671,7 @@ class ClassificationEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
             break
     
         # Initialize the best model and model_epoch list based on the specified mode.
@@ -756,41 +680,20 @@ class ClassificationEngine(Common):
                 if self.keep_best_models_in_memory:
                     self.model_loss = copy.deepcopy(self.model)                            
                     self.model_loss.to(self.device)
-                self.model_name_loss = self.model_name.replace(".", f"_loss.")
-            if "acc" in self.mode:
-                if self.keep_best_models_in_memory:
-                    self.model_acc = copy.deepcopy(self.model)                            
-                    self.model_acc.to(self.device)
-                self.model_name_acc = self.model_name.replace(".", f"_acc.")
-            if "fpr" in self.mode:
-                if self.keep_best_models_in_memory:
-                    self.model_fpr = copy.deepcopy(self.model)                            
-                    self.model_fpr.to(self.device)
-                self.model_name_fpr = self.model_name.replace(".", f"_fpr.")
-            if "pauc" in self.mode:
-                if self.keep_best_models_in_memory:
-                    self.model_pauc = copy.deepcopy(self.model)                            
-                    self.model_pauc.to(self.device)
-                self.model_name_pauc = self.model_name.replace(".", f"_pauc.")
+                self.model_name_loss = self.model_name.replace(".", f"_loss.")    
             if "all" in self.mode:
                 if self.keep_best_models_in_memory:
                     self.model_epoch = []
                     for k in range(epochs):
                         self.model_epoch.append(copy.deepcopy(self.model))
                         self.model_epoch[k].to(self.device)
-            self.best_test_loss = float("inf") 
-            self.best_test_acc = 0.0
-            self.best_test_fpr = float("inf")
-            self.best_test_pauc = 0.0
+            self.best_test_loss = float("inf")         
     
     
     # This train step function includes gradient accumulation (experimental)
     def train_step_v2(
         self,
         dataloader: torch.utils.data.DataLoader, 
-        num_classes: int=2,
-        recall_threshold: float=0.99,
-        recall_threshold_pauc: float=0.0,
         epoch_number: int = 1,
         amp: bool=True,
         enable_clipping=False,
@@ -802,9 +705,6 @@ class ClassificationEngine(Common):
 
         Args:
             dataloader: A DataLoader instance for the model to be trained on.
-            num_classes: Number of classes.
-            recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1)
-            recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
             epoch_number: Epoch number.
             amp: Whether to use mixed precision training (True) or not (False).
             enable_clipping: enables clipping on gradients and model outputs.
@@ -826,49 +726,46 @@ class ClassificationEngine(Common):
         # Initialize the GradScaler for Automatic Mixed Precision (AMP)
         scaler = GradScaler() if amp else None
 
-        # Setup train loss and train accuracy values
+        # Setup train loss values
         len_dataloader = len(dataloader)
-        train_loss, train_acc = 0, 0    
-        all_preds = []
-        all_labels = []
+        train_loss = 0         
+        train_loss_dict = {}     
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader):
+        for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader):
             
+            images, targets = self.prepare_data(images, targets)
+
             # Send data to target device
-            X, y = X.to(self.device), y.to(self.device)            
-            X = X.squeeze(1) if self.squeeze_dim else X
+            #X, y = X.to(self.device), y.to(self.device)            
+            #X = X.squeeze(1) if self.squeeze_dim else X
 
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
+                    
                     # Forward pass
-                    y_pred = self.get_predictions(self.model(X))
+                    loss_dict = self.model(images, targets)
+                    loss = sum(item for item in loss_dict.values())
                     
                     # Check if the output has NaN or Inf values
-                    if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
+                    if torch.isnan(loss).any() or torch.isinf(loss).any():
                         if enable_clipping:
-                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
-                            #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
-                            y_pred = torch.nan_to_num(
-                                y_pred,
-                                nan=torch.mean(y_pred).item(), 
-                                posinf=torch.max(y_pred).item(), 
-                                neginf=torch.min(y_pred).item()
+                            self.warning(f"Loss is NaN or Inf at batch {batch}. Replacing Nans/Infs...")                            
+                            loss = torch.nan_to_num(
+                                loss,
+                                nan=torch.mean(loss).item(), 
+                                posinf=torch.max(loss).item(), 
+                                neginf=torch.min(loss).item()
                                 )
                         else:
-                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                            self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
                     
-                    # Calculate loss, normalize by accumulation steps
-                    loss = self.loss_fn(y_pred, y) / accumulation_steps
-                
-                    # Check for NaN or Inf in loss
-                    if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping...")
-                        continue
-
+                    # Divide into accumulation_steps
+                    loss /= accumulation_steps
+                                      
                 # Backward pass with scaled gradients
                 if debug_mode:
                     # Use anomaly detection
@@ -879,11 +776,12 @@ class ClassificationEngine(Common):
 
             else:
                 # Forward pass
-                y_pred = self.get_predictions(self.model(X))
-                
-                # Calculate loss, normalize by accumulation steps
-                loss = self.loss_fn(y_pred, y) / accumulation_steps
+                loss_dict = self.model(images, targets)
+                loss = sum(item for item in loss_dict.values())
 
+                # Divide into accumulation_steps
+                loss /= accumulation_steps
+                
                 # Backward pass
                 loss.backward()
 
@@ -923,46 +821,29 @@ class ClassificationEngine(Common):
 
                 # Optimizer zero grad
                 self.optimizer.zero_grad()
-
-            # Accumulate metrics
+            
+            # Accumulate metrics for each loss in loss_dict
+            for loss_name, loss_value in loss_dict.items():
+                if loss_name in train_loss_dict:
+                    train_loss_dict[loss_name] += loss_value.item() * accumulation_steps  # Scale back to original loss
+                else:
+                    train_loss_dict[loss_name] = loss_value.item() * accumulation_steps
             train_loss += loss.item() * accumulation_steps  # Scale back to original loss
-            y_pred = y_pred.float() # Convert to float for stability
-            y_pred_class = y_pred.argmax(dim=1)
-            train_acc += self.calculate_accuracy(y, y_pred_class) #(y_pred_class == y).sum().item() / len(y_pred)
 
-            # Collect outputs for fpr-at-recall calculation
-            all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
-            all_labels.append(y.detach().cpu())
-
-        # Adjust metrics to get average loss and accuracy per batch
+        # Adjust metrics to get average losses per batch
+        for loss_name in train_loss_dict:
+            train_loss_dict[loss_name] /= len_dataloader                
         train_loss /= len_dataloader
-        train_acc /= len_dataloader
 
-        # Final FPR calculation
-        all_labels = torch.cat(all_labels)
-        all_preds = torch.cat(all_preds)
-        try:    
-            train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
-        except Exception as e:
-            self.warning(f"Innacurate calculation of final FPR at recall: {e}")
-            train_fpr = 1.0
-        try:    
-            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
-        except Exception as e:
-            self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
-            train_pauc = 0.0
+        train_loss_dict.update({"total_loss": train_loss})        
 
-        return train_loss, train_acc, train_fpr, train_pauc
+        return train_loss, train_loss_dict
 
     def test_step(
         self,
         dataloader: torch.utils.data.DataLoader,
-        num_classes: int=2,
-        recall_threshold: float = 0.95,
-        recall_threshold_pauc: float = 0.95,
         epoch_number: int = 1,
         amp: bool = True,
-        debug_mode: bool = False,
         enable_clipping: bool = False
         ) -> Tuple[float, float, float]:
         
@@ -970,8 +851,6 @@ class ClassificationEngine(Common):
 
         Args:
             dataloader: A DataLoader instance for the model to be tested on.
-            recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1).
-            recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
             epoch_number: Epoch number.
             amp: Whether to use Automatic Mixed Precision for inference.
             debug_mode: Enables logging for debugging purposes.
@@ -986,22 +865,22 @@ class ClassificationEngine(Common):
 
             self.info(f"Validating epoch {epoch_number+1}...")
 
-            # Put model in eval mode
-            self.model.eval() 
-            #self.model.to(self.device) # Already done in __init__
+            # Put model in train mode, otherwise loss results are not generated
+            self.model.train() 
 
             # Setup test loss and test accuracy values
             len_dataloader = len(dataloader)
-            test_loss, test_acc = 0, 0
-            all_preds = []
-            all_labels = []
+            test_loss = 0
+            test_loss_dict = {} 
 
             # Set inference context
             try:
                 inference_context = torch.inference_mode()
                 with torch.inference_mode():        
-                    for batch, (X, y) in enumerate(dataloader):
-                        test_pred = self.get_predictions(self.model(X.to(self.device)))
+                    for batch, (images, targets) in enumerate(dataloader):
+
+                        images, targets = self.prepare_data(images, targets)
+                        check = self.model(images, targets)
                         break
             except RuntimeError:
                 inference_context = torch.no_grad()
@@ -1010,84 +889,65 @@ class ClassificationEngine(Common):
             # Turn on inference context manager 
             with inference_context:
                 # Loop through DataLoader batches
-                for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader, colour='#FF9E2C'):
-                    #, desc=f"Validating epoch {epoch_number}..."):
+                for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader, colour='#FF9E2C'):
+
+                    images, targets = self.prepare_data(images, targets)
+
                     # Send data to target device
-                    X, y = X.to(self.device), y.to(self.device)                    
-                    X = X.squeeze(1) if self.squeeze_dim else X
+                    #X, y = X.to(self.device), y.to(self.device)                    
+                    #X = X.squeeze(1) if self.squeeze_dim else X
                     
-                    if torch.isnan(X).any() or torch.isinf(X).any():
+                    images_tensor = torch.stack(images)
+                    if torch.isnan(images_tensor).any() or torch.isinf(images_tensor).any():
                         self.warning(f"NaN or Inf detected in test input!")
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
 
                          # Forward pass
-                        y_pred = self.get_predictions(self.model(X))
+                        loss_dict = self.model(images, targets)
+                        loss = sum(item for item in loss_dict.values())
 
-                        # Check for NaN/Inf in predictions
-                        if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
+                        # Check if the output has NaN or Inf values
+                        if torch.isnan(loss).any() or torch.isinf(loss).any():
                             if enable_clipping:
-                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
-                                y_pred = torch.nan_to_num(
-                                    y_pred,
-                                    nan=torch.mean(y_pred).item(),
-                                    posinf=torch.max(y_pred).item(),
-                                    neginf=torch.min(y_pred).item()
-                                )
+                                self.warning(f"Loss is NaN or Inf at batch {batch}. Replacing Nans/Infs...")                            
+                                loss = torch.nan_to_num(
+                                    loss,
+                                    nan=torch.mean(loss).item(), 
+                                    posinf=torch.max(loss).item(), 
+                                    neginf=torch.min(loss).item()
+                                    )
                             else:
-                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                                self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping batch...")
                                 continue
 
-                        # Calculate and accumulate loss
-                        loss = self.loss_fn(y_pred, y)
-                        test_loss += loss.item()
+                         # Accumulate individual component losses
+                        for loss_name, loss_value in loss_dict.items():
+                            if loss_name in test_loss_dict:
+                                test_loss_dict[loss_name] += loss_value.item()
+                            else:
+                                test_loss_dict[loss_name] = loss_value.item()
+                        test_loss += loss.item()                    
 
-                        # Debug NaN/Inf loss
-                        if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                            self.warning(f"Loss is NaN/Inf at batch {batch}. Skipping...")
-                            continue
-
-                    # Calculate and accumulate accuracy
-                    y_pred = y_pred.float() # Convert to float for stability
-                    y_pred_class = y_pred.argmax(dim=1)
-                    test_acc += self.calculate_accuracy(y, y_pred_class) #((y_pred_class == y).sum().item()/len(test_pred))
-
-                    # Collect outputs for fpr-at-recall calculation
-                    all_preds.append(torch.softmax(y_pred, dim=1).detach().cpu())
-                    all_labels.append(y.detach().cpu())
-
-            # Adjust metrics to get average loss and accuracy per batch 
+            # Adjust metrics to get average losses per batch 
+            for loss_name in test_loss_dict:
+                test_loss_dict[loss_name] /= len_dataloader
             test_loss /= len_dataloader
-            test_acc /= len_dataloader
 
-            # Final FPR calculation
-            all_labels = torch.cat(all_labels)
-            all_preds = torch.cat(all_preds)
-            try:    
-                test_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, recall_threshold)            
-            except Exception as e:
-                self.warning(f"Innacurate calculation of final FPR at recall: {e}")
-                test_fpr = 1.0
-            try:    
-                test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
-            except Exception as e:
-                self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
-                test_pauc = 0.0
-        
         # Otherwise set params with initial values
-        else:
-            test_loss, test_acc, test_fpr, test_pauc = self.best_test_loss, self.best_test_acc, self.best_test_fpr, self.best_test_pauc
+        else:            
+            test_loss = self.best_test_loss            
 
-        return test_loss, test_acc, test_fpr, test_pauc
+        test_loss_dict.update({"total_loss": test_loss})
 
+        return test_loss, test_loss_dict
 
 
     # Scheduler step after the optimizer
     def scheduler_step(
         self,
         test_loss: float=None,
-        test_acc: float=None,
         ):
 
         """
@@ -1103,9 +963,7 @@ class ClassificationEngine(Common):
             if self.apply_validation and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 # Check whether scheduler is configured for "min" or "max"
                 if self.scheduler.mode == "min" and test_loss is not None:
-                    self.scheduler.step(test_loss)  # Minimize test_loss
-                elif self.scheduler.mode == "max" and test_acc is not None:
-                    self.scheduler.step(test_acc)  # Maximize test_accuracy
+                    self.scheduler.step(test_loss)  # Minimize test_loss                
                 else:
                     self.error(
                         f"The scheduler requires either `test_loss` or `test_acc` "
@@ -1117,10 +975,7 @@ class ClassificationEngine(Common):
     # Updates and saves the best model and model_epoch list based on the specified mode.
     def update_model(
         self,
-        test_loss: float = None,
-        test_acc: float = None,
-        test_fpr: float = None,
-        test_pauc: float = None,
+        test_loss: float = None,        
         epoch: int = None,
     ) -> pd.DataFrame:
 
@@ -1128,10 +983,7 @@ class ClassificationEngine(Common):
         Updates and saves the best model and model_epoch list based on the specified mode(s), as well as the last-epoch model.
 
         Parameters:
-        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).
-        - test_acc (float, optional): Test accuracy for the current epoch (used in "acc" mode).
-        - test_fpr (float, optional): Test false positive rate at the specified recall (used in "fpr" mode).
-        - test_pauc (float, optional): Test pAUC at the specified recall (used in "pauc" mode).
+        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).       
         - epoch (int, optional): Current epoch index, used for naming models when saving all epochs in "all" mode.
 
         Functionality:
@@ -1176,36 +1028,6 @@ class ClassificationEngine(Common):
                         if self.keep_best_models_in_memory:
                             self.model_loss.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_loss)
-                # Accuracy criterion    
-                elif mode == "acc":
-                    if test_acc is None:
-                        self.error(f"'test_acc' must be provided when mode is 'acc'.")
-                    if test_acc > self.best_test_acc:
-                        remove_previous_best(self.model_name_acc)
-                        self.best_test_acc = test_acc
-                        if self.keep_best_models_in_memory:
-                            self.model_acc.load_state_dict(self.model.state_dict())
-                        save_model(self.model_name_acc)
-                # FPR criterion
-                elif mode == "fpr":
-                    if test_fpr is None:
-                        self.error(f"'test_fpr' must be provided when mode is 'fpr'.")
-                    if test_fpr < self.best_test_fpr:
-                        remove_previous_best(self.model_name_fpr)
-                        self.best_test_fpr = test_fpr
-                        if self.keep_best_models_in_memory:
-                            self.model_fpr.load_state_dict(self.model.state_dict())
-                        save_model(self.model_name_fpr)
-                # pAUC criterion    
-                elif mode == "pauc":
-                    if test_pauc is None:
-                        self.error(f"'test_pauc' must be provided when mode is 'pauc'.")
-                    if test_pauc > self.best_test_pauc:
-                        remove_previous_best(self.model_name_pauc)
-                        self.best_test_pauc = test_pauc
-                        if self.keep_best_models_in_memory:
-                            self.model_pauc.load_state_dict(self.model.state_dict())
-                        save_model(self.model_name_pauc)
                 # Last-epoch criterion
                 elif mode == "last":
                     remove_previous_best(self.model_name)
@@ -1229,7 +1051,6 @@ class ClassificationEngine(Common):
     def finish_train(
         self,
         train_time: float=None,
-        writer: SummaryWriter=False
         ):
 
         """
@@ -1237,11 +1058,7 @@ class ClassificationEngine(Common):
         
         Args:
             train_time: Elapsed time.
-            writer: A SummaryWriter() instance to log model results to.
         """
-
-        # Close the writer
-        writer.close() if writer else None
 
         # Print elapsed time
         self.info(f"Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
@@ -1256,19 +1073,15 @@ class ClassificationEngine(Common):
         train_dataloader: torch.utils.data.DataLoader=None, 
         test_dataloader: torch.utils.data.DataLoader=None,
         apply_validation: bool=True,
-        num_classes: int=2, 
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
-        recall_threshold: float=0.99,
-        recall_threshold_pauc: float=0.0,
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
         enable_clipping: bool=False,
         accumulation_steps: int=1,
         debug_mode: bool=False,
-        writer=False, #: SummaryWriter=False,
         ) -> pd.DataFrame:
 
         """
@@ -1289,10 +1102,7 @@ class ClassificationEngine(Common):
                 such as ".pth", ".pt", ".pkl", ".h5", or ".torch".
             save_best_model (Union[str, List[str]], optional): Criterion(s) for saving the model.
                 Options include:
-                - "loss" (validation loss),
-                - "acc" (validation accuracy),
-                - "fpr" (false positive rate at recall),
-                - "pauc" (partial area under the curve at recall),
+                - "loss" (validation loss),                
                 - "last" (save model at the last epoch),
                 - "all" (save models for all epochs),
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
@@ -1300,50 +1110,34 @@ class ClassificationEngine(Common):
             train_dataloader (torch.utils.data.DataLoader, optional): Dataloader for training the model.
             test_dataloader (torch.utils.data.DataLoader, optional): Dataloader for testing the model.
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
-            num_classes (int, optional): Number of output classes for the model (default is 2).
             optimizer (torch.optim.Optimizer, optional): Optimizer to use during training.
             loss_fn (torch.nn.Module, optional): Loss function used for training.
-            scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler to adjust learning rate during training.
-            recall_threshold (float, optional): The recall threshold used to calculate the False Positive Rate (FPR). Default is 0.95.
-            recall_threshold_pauc (float, optional): The recall threshold used to calculate the partial Area Under the Curve (pAUC). Default is 0.95.
+            scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler to adjust learning rate during training.            
             epochs (int, optional): Number of epochs to train the model. Default is 30.
             plot_curves (bool, optional): Whether to plot training and testing curves. Default is True.
             amp (bool, optional): Whether to use Automatic Mixed Precision (AMP) during training. Default is True.
             enable_clipping (bool, optional): Whether to enable gradient and model output clipping. Default is False.
             accumulation_steps (int, optional): Number of mini-batches to accumulate gradients before an optimizer step. Default is 1 (no accumulation).
             debug_mode (bool, optional): Whether to enable debug mode. If True, it may slow down the training process.
-            writer (bool, optional): A TensorBoard SummaryWriter instance to log the model training results.
 
         Returns:
             pd.DataFrame: A dataframe containing the metrics for training and testing across all epochs.
             The dataframe will have the following columns:
             - epoch: List of epoch numbers.
-            - train_loss: List of training loss values for each epoch.
-            - train_acc: List of training accuracy values for each epoch.
-            - test_loss: List of test loss values for each epoch.
-            - test_acc: List of test accuracy values for each epoch.
-            - train_time: List of training time for each epoch.
-            - test_time: List of testing time for each epoch.
-            - lr: List of learning rate values for each epoch.
-            - train_fpr: List of False Positive Rate values for training set at recall threshold.
-            - test_fpr: List of False Positive Rate values for test set at recall threshold.
-            - train_pauc: List of partial AUC values for training set at recall threshold.
-            - test_pauc: List of partial AUC values for test set at recall threshold.
+            - train_<loss_metrics>: List of training loss values for each epoch.            
+            - test_<loss_metrics>: List of test loss values for each epoch.
+            - train_time: Training_time for each epcoh            
+            - test_time: Testing time for each epoch.
+            - lr: Learning rate value for each epoch.
 
         Example output (for 2 epochs):
         {
             epoch: [1, 2],
-            train_loss: [2.0616, 1.0537],
-            train_acc: [0.3945, 0.3945],
-            test_loss: [1.2641, 1.5706],
-            test_acc: [0.3400, 0.2973],
+            train_loss: [2.0616, 1.0537],            
+            test_loss: [1.2641, 1.5706],            
             train_time: [1.1234, 1.5678],
             test_time: [0.4567, 0.7890],
             lr: [0.001, 0.0005],
-            train_fpr: [0.1234, 0.2345],
-            test_fpr: [0.3456, 0.4567],
-            train_pauc: [0.1254, 0.3445],
-            test_pauc: [0.3154, 0.4817]
         }
         """
 
@@ -1362,15 +1156,12 @@ class ClassificationEngine(Common):
             loss_fn=loss_fn,
             scheduler=scheduler,
             batch_size=train_dataloader.batch_size,
-            recall_threshold=recall_threshold,
-            recall_threshold_pauc=recall_threshold_pauc,
             epochs=epochs, 
             plot_curves=plot_curves,
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,
             debug_mode=debug_mode,
-            writer=writer
             )
 
         # Loop through training and testing steps for a number of epochs
@@ -1378,11 +1169,8 @@ class ClassificationEngine(Common):
 
             # Perform training step and time it
             train_epoch_start_time = time.time()
-            train_loss, train_acc, train_fpr, train_pauc = self.train_step_v2(
-                dataloader=train_dataloader,
-                num_classes=num_classes,
-                recall_threshold=recall_threshold,
-                recall_threshold_pauc=recall_threshold_pauc,
+            train_loss, train_loss_dict = self.train_step_v2(
+                dataloader=train_dataloader,            
                 epoch_number=epoch,
                 amp=amp,
                 enable_clipping=enable_clipping,
@@ -1393,15 +1181,11 @@ class ClassificationEngine(Common):
 
             # Perform test step and time it
             test_epoch_start_time = time.time()
-            test_loss, test_acc, test_fpr, test_pauc = self.test_step(
-                dataloader=test_dataloader,
-                num_classes=num_classes,
-                recall_threshold=recall_threshold,
-                recall_threshold_pauc=recall_threshold_pauc,
+            test_loss, test_loss_dict = self.test_step(
+                dataloader=test_dataloader,            
                 epoch_number=epoch,
                 amp=amp,
                 enable_clipping=enable_clipping,
-                debug_mode=debug_mode
                 )
             test_epoch_time = time.time() - test_epoch_start_time if self.apply_validation else 0.0            
 
@@ -1411,41 +1195,28 @@ class ClassificationEngine(Common):
             self.display_results(
                 epoch=epoch,
                 max_epochs=epochs,
-                train_loss=train_loss,
-                train_acc=train_acc,
-                recall_threshold=recall_threshold,
-                recall_threshold_pauc=recall_threshold_pauc,
-                train_fpr=train_fpr,
-                train_pauc=train_pauc,
+                train_loss=train_loss_dict,                
                 train_epoch_time=train_epoch_time,
-                test_loss=test_loss,
-                test_acc=test_acc,
-                test_fpr=test_fpr,
-                test_pauc=test_pauc,
+                test_loss=test_loss_dict,                
                 test_epoch_time=test_epoch_time,
                 plot_curves=plot_curves,
-                writer=writer
             )
 
             # Scheduler step after the optimizer
             self.scheduler_step(
                 test_loss=test_loss,
-                test_acc=test_acc
             )
 
             # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.
             # If apply_validation is enabled then upate models based on validation results
             df_results = self.update_model(
-                test_loss=test_loss if self.apply_validation else train_loss,
-                test_acc=test_acc if self.apply_validation else train_acc,
-                test_fpr=test_fpr if self.apply_validation else train_fpr,
-                test_pauc=test_pauc if self.apply_validation else train_pauc,
+                test_loss=test_loss if self.apply_validation else train_loss,                
                 epoch=epoch
                 )
 
         # Finish training process
         train_time = time.time() - train_start_time
-        self.finish_train(train_time, writer)
+        self.finish_train(train_time)
 
         return df_results
 
@@ -1453,8 +1224,7 @@ class ClassificationEngine(Common):
         self,
         dataloader: torch.utils.data.DataLoader,
         model_state: str="last",
-        output_type: str="softmax",        
-        ) -> torch.Tensor:
+        ):
 
         """
         Predicts classes for a given dataset using a trained model.
@@ -1469,7 +1239,7 @@ class ClassificationEngine(Common):
         """
  
         # Check model to use
-        valid_modes =  {"loss", "acc", "fpr", "pauc", "last", "all"}
+        valid_modes =  {"loss", "last", "all"}
         assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
@@ -1480,24 +1250,6 @@ class ClassificationEngine(Common):
                 model = self.model
             else:
                 model = self.model_loss
-        elif model_state == "acc":
-            if self.model_acc is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_acc
-        elif model_state == "fpr":
-            if self.model_fpr is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_fpr
-        elif model_state == "pauc":
-            if self.model_pauc is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_pauc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
                 self.info(f"Model epoch {model_state} not found, using default model for prediction.")
@@ -1510,42 +1262,44 @@ class ClassificationEngine(Common):
                     model = self.model_epoch[model_state-1]            
 
 
-        # Check output_max
-        valid_output_types = {"softmax", "argmax", "logits"}
-        assert output_type in valid_output_types, f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}"
-
         y_preds = []
         model.eval()
         model.to(self.device)
 
-        # Attempt a forward pass to check if the shape of X is compatible
-        for batch, (X, y) in enumerate(dataloader):
-            try:
-                # This is where the model will "complain" if the shape is incorrect
-                check = self.get_predictions(self.model(X.to(self.device)))
-            except Exception as e:
-                # If the shape is wrong, reshape X and try again
-                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
-                if match:
-                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
-                else:
-                    self.warning(f"Attempting to reshape X.")
+
+        # Attempt a forward pass to check if the shape of image is compatible
+        #for batch, (images, targets) in enumerate(dataloader):
+
+            #images, targets = self.prepare_data(images, targets)
+
+            #try:
+            #    # This is where the model will "complain" if the shape is incorrect
+            #    check = self.model(images)
+            #except Exception as e:
+            #    # If the shape is wrong, reshape X and try again
+            #    match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+            #    if match:
+            #        self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+            #    else:
+            #        self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
-                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
-                    self.squeeze_dim = True
-                elif X.ndimension() == 2:  # [batch_size, time_steps]
-                    pass  # No change needed
-                else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
-            break
+            #    if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+            #        self.squeeze_dim = True
+            #    elif X.ndimension() == 2:  # [batch_size, time_steps]
+            #        pass  # No change needed
+            #    else:
+            #        self.error(f"Unexpected input shape after exception handling: {X.shape}")
+            #break
 
         # Set inference context
         try:
             inference_context = torch.inference_mode()
             with torch.inference_mode():        
-                for batch, (X, y) in enumerate(dataloader):
-                    check = self.get_predictions(self.model(X.to(self.device)))
+                for images, targets in dataloader:
+                    
+                    images, targets = self.prepare_data(images, targets)
+                    y_pred = model(images)
                     break
         except RuntimeError:
             inference_context = torch.no_grad()
@@ -1553,28 +1307,30 @@ class ClassificationEngine(Common):
 
         # Turn on inference context manager 
         with inference_context:
-            for X, y in tqdm(dataloader, desc="Making predictions"):
+            for images, targets in tqdm(dataloader, desc="Making predictions"):
 
                 # Send data and targets to target device
-                X, y = X.to(self.device), y.to(self.device)
-                X = X.squeeze(1) if self.squeeze_dim else X
-                
+                images, targets = self.prepare_data(images, targets)
+                                
                 # Do the forward pass
-                y_logit = model(X)
+                y_pred = model(images)
+                y_preds.append(y_pred)
 
-                if output_type == "softmax":
-                    y_pred = torch.softmax(y_logit, dim=1)
-                elif output_type == "argmax":
-                    y_pred = torch.softmax(y_logit, dim=1).argmax(dim=1)
-                else:
-                    y_pred = y_logit
+                # Flatten the list of predictions and extract tensors
+                flattened_preds = [pred for batch_preds in y_preds for pred in batch_preds]
 
                 # Put predictions on CPU for evaluation
-                y_preds.append(y_pred.cpu())
+                #y_preds.append([{k: v.cpu() for k, v in pred.items()} for pred in y_pred])
 
+        # Create a new list of dictionaries with tensors on the CPU
+        cpu_preds = []
+        for pred in flattened_preds:
+            cpu_pred = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in pred.items()}
+            cpu_preds.append(cpu_pred)
+        
         # Concatenate list of predictions into a tensor
-        return torch.cat(y_preds)
-
+        return cpu_preds
+    
     def predict_and_store(
         self,
         test_dir: str, 

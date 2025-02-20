@@ -90,9 +90,6 @@ class ProcessDataset(torch.utils.data.Dataset):
         # Remap objects ids to be sequencital from 1 to num_objs
         id_map = {old_id.item(): new_id + 1 for new_id, old_id in enumerate(obj_ids)}
         remapped_ids = torch.tensor([id_map[i.item()] for i in obj_ids], dtype=torch.int64)
-        num_objs2 = len(remapped_ids)
-
-        assert num_objs == num_objs2
 
         # Split the color-encoded mask into a set of binary masks
         masks = (mask == obj_ids[:, None, None]).to(dtype=torch.uint8)

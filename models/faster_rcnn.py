@@ -4,24 +4,31 @@ from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 class FasterRCNN(torch.nn.Module):
+
+    """
+        Ceates a Faster Region-based CNN (RCNN) architecture using predefined backbones: 'resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320'.
+    """
+
     def __init__(
         self,
         num_classes: int = 2,
-        backbone: str = "resnet50",
+        backbone: str = "resnet50", #['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
         weights: str = "DEFAULT",
         hidden_layer: int = 256,
         device: torch.device = "cuda" if torch.cuda.is_available() else "cpu" 
     ):
-        super().__init__()
 
         """
-        Initialization of the FasterRCNN class:
+        Ceates a Faster Region-based CNN (RCNN) architecture using predefined backbones: 'resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320'.
         - num_classes: Number of output classes for detection, excluding background (int). Default is 1.
         - weights: The pretrained weights to load for the backbone (str). Default is "DEFAULT".
-        - backbone: Backbone architecture to use, such as 'resnet50', 'mobilenet_v3_large', etc. Default is 'resnet50'.
+        - backbone: Backbone architecture to use. Default is 'resnet50'. List of supported networks:
+                    ['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
         - hidden_layer: Number of hidden units for the mask prediction head. Default is 256.
         - device: Target device: GPU or CPU
         """
+
+        super().__init__()
         
         # Check if the specified backbone is available
         backbone_list = ['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
@@ -52,9 +59,11 @@ class FasterRCNN(torch.nn.Module):
         self.model.to(device)
 
     def forward(self, images, targets=None):
+
         """
         Forward pass through the model:
         - images: Input images (tensor or list of tensors).
         - targets: Ground truth targets for training (optional, only needed for training).
         """
+        
         return self.model(images, targets)

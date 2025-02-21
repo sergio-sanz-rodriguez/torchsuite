@@ -731,10 +731,6 @@ class ObjectDetectionEngine(Common):
             
             images, targets = self.prepare_data(images, targets)
 
-            # Send data to target device
-            #X, y = X.to(self.device), y.to(self.device)            
-            #X = X.squeeze(1) if self.squeeze_dim else X
-
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
@@ -886,14 +882,6 @@ class ObjectDetectionEngine(Common):
                 for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader, colour='#FF9E2C'):
 
                     images, targets = self.prepare_data(images, targets)
-
-                    # Send data to target device
-                    #X, y = X.to(self.device), y.to(self.device)                    
-                    #X = X.squeeze(1) if self.squeeze_dim else X
-                    
-                    images_tensor = torch.stack(images)
-                    if torch.isnan(images_tensor).any() or torch.isinf(images_tensor).any():
-                        self.warning(f"NaN or Inf detected in test input!")
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():

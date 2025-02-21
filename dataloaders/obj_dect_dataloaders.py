@@ -15,7 +15,7 @@ from torchvision.transforms import v2
 from torchvision.ops.boxes import masks_to_boxes
 from torchvision.transforms.v2 import functional as F
 
-#  Implement a class that processes the database and g
+# Implement a class that processes the database
 class ProcessDataset(torch.utils.data.Dataset):
 
     """

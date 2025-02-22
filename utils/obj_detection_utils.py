@@ -1,3 +1,8 @@
+"""
+Provides utility functions for deep learning object detection workflows in PyTorch.  
+Some functions are based on https://raw.githubusercontent.com/pytorch/vision/main/references/detection/coco_utils.py"
+"""
+
 import datetime
 import errno
 import os

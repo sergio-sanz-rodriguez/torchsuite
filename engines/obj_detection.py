@@ -1,7 +1,5 @@
 """
-Contains classes for training and testing a PyTorch model.  
-Currently, the functionality is limited to classification tasks.  
-Support for other deep learning tasks, such as object segmentation, will be added in the future.
+Contains classes for training and testing a PyTorch model for object detection and segmentation.
 """
 
 import os

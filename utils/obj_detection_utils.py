@@ -15,7 +15,7 @@ import matplotlib.patches as patches
 from typing import List
 from collections import defaultdict, deque
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
-
+from torchvision.transforms.functional import to_pil_image
 
 class SmoothedValue:
     """Track a series of values and provide access to smoothed values over a
@@ -352,32 +352,42 @@ def prune_predictions(
 
 
 # Function to display images with masks and boxes on the ROIs
-def diplay_predictions(
+def diplay_and_save_predictions(
     preds: List=None,
-    dataset: torch.utils.data.DataLoader=None,
+    dataloader: torch.utils.data.Dataset | torch.utils.data.DataLoader = None,
     box_color: str='white',
     mask_color: str='blue',
     width: int=1,
     print_classes: bool=True,
     print_scores: bool=True,
-    label_to_class_dict={1: 'roi'}
+    label_to_class_dict={1: 'roi'},
+    save_dir: str = None
     ):
 
     """
     This function displays images with predicted bounding boxes and segmentation masks.
     Arguments:
         preds (List): A list of predictions, each containing 'boxes', 'labels', 'scores', and optionally 'masks'.
-        dataset (torch.utils.data.DataLoader): A DataLoader object containing the images.
+        dataloader (torch.utils.data.DataLoader): A DataLoader object containing the images.
         box_color (str): Color of the bounding boxes drawn on the image.
         mask_color (str): Color of the segmentation masks drawn on the image.
         width (int): The width of the bounding box lines.
         print_classes (bool): If True, the labels will be printed on the bounding boxes.
         print_scores (bool): If True, the confidence scores will be printed on the bounding boxes.
-        label_to_class_dict
+        label_to_class_dict (dict): Dictionary mapping label indices to class names.
+        save_dir (str, optional): Path to save images. If None, images will not be saved.
     """
 
     plt.close("all")
 
+    # Convert dataset to DataLoader if needed
+    if isinstance(dataloader, torch.utils.data.Dataset):
+        dataloader = torch.utils.data.DataLoader(dataloader, batch_size=1, shuffle=False, collate_fn=collate_fn)
+
+    # Create save directory if saving images
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        
     # Number of images
     num_images = len(preds)
     cols = 3 
@@ -388,7 +398,7 @@ def diplay_predictions(
     axes = axes.flatten()
 
     # Loop through the predictions and process each image
-    for idx, (data, filtered_pred) in enumerate(zip(dataset, preds)):  
+    for idx, (data, filtered_pred) in enumerate(zip(dataloader.dataset, preds)):  
 
         # Get the image from the dataset
         image, _ = data
@@ -425,6 +435,12 @@ def diplay_predictions(
 
             # Draw masks
             output_image = draw_segmentation_masks(output_image, masks.unsqueeze(0), alpha=0.5, colors=mask_color)
+
+        # Save Image (if save_dir is provided)
+        if save_dir:
+            image_pil = to_pil_image(output_image)  # Convert tensor to PIL Image
+            image_path = os.path.join(save_dir, f"prediction_{idx+1}.png")
+            image_pil.save(image_path)
 
         # Plot on the grid
         ax = axes[idx]

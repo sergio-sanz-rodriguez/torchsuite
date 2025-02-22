@@ -1964,6 +1964,8 @@ class ClassificationEngine(Common):
             y_true.append(class_names.index(class_name))
             y_pred.append(pred_label.cpu().item())
 
+            clear_output(wait=True)
+
         # Ensure the labels match the class indices
         label_encoder = LabelEncoder()
         label_encoder.fit(class_names)
@@ -1993,6 +1995,7 @@ class DistillationEngine(Common):
 
     Args:
         model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        log_verbose (boo, optional): if True, activate logger messages.
         device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
@@ -2000,6 +2003,7 @@ class DistillationEngine(Common):
         self,
         student: torch.nn.Module=None,
         teacher: torch.nn.Module=None,
+        log_verbose: bool=True,
         device: str="cuda" if torch.cuda.is_available() else "cpu"
         ):
         super().__init__()
@@ -2021,7 +2025,7 @@ class DistillationEngine(Common):
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
-        #self.get_predictions = Common.get_predictions
+        self.log_verbose = log_verbose
      
         # Create empty results dictionary
         self.results = {

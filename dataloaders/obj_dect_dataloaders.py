@@ -1,6 +1,5 @@
 """
-Contains functionality for creating PyTorch DataLoaders for 
-image classification data.
+Contains functionality for creating PyTorch DataLoaders for object dectection.
 """
 
 import os

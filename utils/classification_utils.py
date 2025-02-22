@@ -29,6 +29,8 @@ from tkinter import Tk
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from sklearn.metrics import f1_score, accuracy_score, roc_curve, auc
+from IPython.core.display import display, HTML
+import IPython.display as ipd
 
 
 # Walk through an image classification directory and find out how many files (images)
@@ -861,3 +863,86 @@ def plot_class_distribution(y, y_pred, labels):
     plt.title('Histogram of Predicted Values for Each Class')
     plt.legend(labels=labels)
    # plt.show()
+
+
+
+def predict_and_play_audio(
+    model: torch.nn.Module=None,
+    waveform_list: list=None,
+    label_list: list=None,
+    sample_rate_list: list=None,
+    class_names: list=None,
+    transform: torch.nn.Sequential=None,
+    device: str="cuda" if torch.cuda.is_available() else "cpu"
+):
+
+    """
+    Reproduces audio predictions by applying a trained model to a list of audio waveforms.
+    
+    Parameters:
+    - model: Trained PyTorch model for classification.
+    - waveform_list: List of audio waveforms as numpy arrays.
+    - label_list: List of actual class labels for each waveform.
+    - sample_rate_list: List of sample rates corresponding to each waveform.
+    - class_names: list with the names of the classes.
+    - transform: Audio transformation to be applied before prediction.
+    - device: Device to run inference on ("cuda" if available, otherwise "cpu").
+    
+    Returns:
+    - Displays an HTML grid of audio samples with actual and predicted labels.
+    """
+
+    # Move model to device
+    model.to(device)
+
+    # Store predictions
+    waveforms = []
+    actual_labels = []
+    predicted_labels = []
+
+    for i, (waveform, actual_label) in enumerate(zip(waveform_list, label_list)):
+         # Convert waveform to tensor and reshape for the model if needed
+        try:                
+            waveform_tensor = torch.tensor(waveform).to(device)
+            _ = model(waveform_tensor)
+        except Exception as e:
+            waveform_tensor = torch.tensor(waveform).unsqueeze(0).to(device)
+        
+        # Apply transformations
+        transform = transform.to(device)
+        waveform_tensor = transform(waveform_tensor).to(device)
+
+        # Get model prediction
+        with torch.no_grad():
+            output = model(waveform_tensor)
+            predicted_label_idx = output.argmax(dim=1).item()
+            predicted_label = class_names[predicted_label_idx]
+        
+        # Store results
+        waveforms.append(waveform)
+        actual_labels.append(actual_label)
+        predicted_labels.append(predicted_label)
+    
+    # Define grid layout parameters
+    num_samples = len(waveform_list)
+    num_cols = 4  # Number of columns in the grid
+    num_rows = (num_samples + num_cols - 1) // num_cols  # Compute required rows
+
+    # Generate HTML for arranging audio players in a grid
+    audio_html = "<table style='width:100%; text-align:center;'><tr>"
+
+    for i in range(num_samples):
+        audio_tag = ipd.Audio(waveforms[i].numpy(), rate=sample_rate_list[i])._repr_html_()
+        label_text = f"Actual: {actual_labels[i]}<br>Predicted: {predicted_labels[i]}"
+        
+        # Wrap each audio player in a table cell
+        audio_html += f"<td style='padding:10px; vertical-align:top;'>{label_text}<br>{audio_tag}</td>"
+        
+        # Add a new row after every `num_cols` elements
+        if (i + 1) % num_cols == 0:
+            audio_html += "</tr><tr>"
+
+    audio_html += "</tr></table>"
+
+    # Display the formatted HTML
+    display(HTML(audio_html))

@@ -1,7 +1,5 @@
 """
-Contains classes for training and testing a PyTorch model.  
-Currently, the functionality is limited to classification tasks.  
-Support for other deep learning tasks, such as object segmentation, will be added in the future.
+Contains classes for training and testing a PyTorch model for classification tasks.  
 """
 
 import os
@@ -34,6 +32,7 @@ from sklearn.metrics import precision_recall_curve, classification_report, roc_c
 from contextlib import nullcontext
 from sklearn.preprocessing import LabelEncoder
 
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -45,21 +44,23 @@ class Colors:
     RED = '\033[31m'
     RESET = '\033[39m'
 
+# Logger class
 class Logger:
-    def __init__(self):
+    def __init__(self, log_verbose: bool=True):
 
         self.info_tag =    f"{Colors.GREEN}[INFO]{Colors.BLACK}"
         self.warning_tag = f"{Colors.ORANGE}[WARNING]{Colors.BLACK}"
         self.error_tag =   f"{Colors.RED}[ERROR]{Colors.BLACK}"
+        self.log_verbose = log_verbose
     
     def info(self, message: str):
-        print(f"{self.info_tag} {message}")
+        print(f"{self.info_tag} {message}") if self.log_verbose else None
     
     def warning(self, message: str):
-        print(f"{self.warning_tag} {message}", file=sys.stderr)
+        print(f"{self.warning_tag} {message}", file=sys.stderr) if self.log_verbose else None
     
     def error(self, message: str):
-        print(f"{self.error_tag} {message}", file=sys.stderr)
+        print(f"{self.error_tag} {message}", file=sys.stderr) if self.log_verbose else None
         raise ValueError(message)
 
 
@@ -237,12 +238,14 @@ class ClassificationEngine(Common):
 
     Args:
         model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        log_verbose (boo, optional): if True, activate logger messages.
         device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
     def __init__(
         self,
         model: torch.nn.Module=None,
+        log_verbose: bool=True,
         device: str="cuda" if torch.cuda.is_available() else "cpu"
         ):
         super().__init__()
@@ -266,10 +269,8 @@ class ClassificationEngine(Common):
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
-        #self.inference_context = None
         self.squeeze_dim = False
-        #self.get_predictions = self.get_predictions
-        #self.set_inference_context = self.set_inference_context
+        self.log_verbose = log_verbose
 
         # Create empty results dictionary
         self.results = {
@@ -1961,6 +1962,8 @@ class ClassificationEngine(Common):
             y_true.append(class_names.index(class_name))
             y_pred.append(pred_label.cpu().item())
 
+            clear_output(wait=True)
+
         # Ensure the labels match the class indices
         label_encoder = LabelEncoder()
         label_encoder.fit(class_names)
@@ -1990,6 +1993,7 @@ class DistillationEngine(Common):
 
     Args:
         model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        log_verbose (boo, optional): if True, activate logger messages.
         device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
@@ -1997,6 +2001,7 @@ class DistillationEngine(Common):
         self,
         student: torch.nn.Module=None,
         teacher: torch.nn.Module=None,
+        log_verbose: bool=True,
         device: str="cuda" if torch.cuda.is_available() else "cpu"
         ):
         super().__init__()
@@ -2018,7 +2023,7 @@ class DistillationEngine(Common):
         self.model_name_acc = None
         self.model_name_fpr = None
         self.model_name_pauc = None
-        #self.get_predictions = Common.get_predictions
+        self.log_verbose = log_verbose
      
         # Create empty results dictionary
         self.results = {

@@ -3,7 +3,6 @@ matplotlib==3.10.0
 numpy==2.2.3
 pandas==2.2.3
 Pillow==11.1.0
-pycocotools==2.0.8
 Requests==2.32.3
 scikit_learn==1.6.1
 torch==2.5.0

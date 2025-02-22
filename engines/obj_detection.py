@@ -128,6 +128,11 @@ class Logger:
             for key, value in test_loss.items():
                 self.results[f"test_{key}"].append(value)
             self.results["test_time [s]"].append(test_epoch_time)
+        else:
+            #`train_loss` always exists, we just need its keys
+            for key in train_loss.keys() if train_loss else ["loss"]: 
+                self.results[f"test_{key}"].append(None)
+            self.results["test_time [s]"].append(None)
         self.results["lr"].append(lr)
         
         # Plot training and test loss curves
@@ -559,6 +564,10 @@ class ObjectDetectionEngine(Common):
         This method sets up the environment for training, ensuring all necessary resources and parameters are prepared.
         """
 
+        # Validate if the train dataloader has been given
+        if not isinstance(dataloader, torch.utils.data.DataLoader) or dataloader is None:
+            self.error(f"The train dataloader has incorrect format or is not specified.")
+
         # Validate keep_best_models_in_memory
         if not isinstance(keep_best_models_in_memory, (bool)):
             self.error(f"'keep_best_models_in_memory' must be True or False.")
@@ -658,9 +667,9 @@ class ObjectDetectionEngine(Common):
                     self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
-                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                if check.ndimension() == 3:  # [batch_size, 1, time_steps]
                     self.squeeze_dim = True
-                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                elif check.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
                     self.error(f"Unexpected input shape after exception handling: {X.shape}")
@@ -915,11 +924,12 @@ class ObjectDetectionEngine(Common):
                 test_loss_dict[loss_name] /= len_dataloader
             test_loss /= len_dataloader
 
+            test_loss_dict.update({"total_loss": test_loss})
+
         # Otherwise set params with initial values
         else:            
-            test_loss = self.best_test_loss            
-
-        test_loss_dict.update({"total_loss": test_loss})
+            test_loss = None
+            test_loss_dict = None            
 
         return test_loss, test_loss_dict
 
@@ -1190,7 +1200,7 @@ class ObjectDetectionEngine(Common):
             # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.
             # If apply_validation is enabled then upate models based on validation results
             df_results = self.update_model(
-                test_loss=test_loss if self.apply_validation else train_loss,                
+                test_loss=test_loss if self.apply_validation or test_loss is not None else train_loss,                
                 epoch=epoch
                 )
 

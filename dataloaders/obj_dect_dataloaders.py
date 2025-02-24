@@ -6,6 +6,7 @@ import os
 import torch
 import pandas as pd
 import numpy as np
+from PIL import Image
 from torchvision import tv_tensors
 from torchvision.io import read_image
 from torch.utils.data import DataLoader, Subset, Dataset
@@ -76,7 +77,12 @@ class ProcessDataset(torch.utils.data.Dataset):
         # Load images and masks
         img_path = os.path.join(self.root, self.image_path, self.imgs[idx])
         mask_path = os.path.join(self.root, self.mask_path, self.masks[idx])
-        img = read_image(img_path)
+
+        # Read image
+        img = Image.open(img_path).convert("RGB")
+        img = F.to_tensor(img)
+
+        # Read mask
         mask = read_image(mask_path)
 
         # Instances are encoded as different colors

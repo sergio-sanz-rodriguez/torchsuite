@@ -659,21 +659,21 @@ class ObjectDetectionEngine(Common):
                 #if not isinstance(check, dict):
                 #    self.error(f"Unknown output metrics from the model.")
 
-                # If the shape is wrong, reshape X and try again
+                # If the shape is wrong, reshape and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
                 if match:
                     self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
                 else:
                     self.warning(f"Attempting to reshape X.")
 
-                # Check the current shape of X and attempt a fix
-                if check.ndimension() == 3:  # [batch_size, 1, time_steps]
+                # Check the current shape and attempt a fix
+                if images[0].ndimension() == 2:
                     self.squeeze_dim = True
-                elif check.ndimension() == 2:  # [batch_size, time_steps]
-                    pass  # No change needed
+                elif images[0].ndimension() == 3:  # [batch_size, width, height]
+                    pass
                 else:
                     self.error(f"Unexpected input shape after exception handling: {X.shape}")
-            break
+            break        
     
         # Initialize the best model and model_epoch list based on the specified mode.
         if self.save_best_model:

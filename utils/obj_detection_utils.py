@@ -352,7 +352,7 @@ def prune_predictions(
 
 
 # Function to display images with masks and boxes on the ROIs
-def diplay_and_save_predictions(
+def display_and_save_predictions(
     preds: List=None,
     dataloader: torch.utils.data.Dataset | torch.utils.data.DataLoader = None,
     box_color: str='white',

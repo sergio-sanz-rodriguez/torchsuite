@@ -32,7 +32,6 @@ from sklearn.metrics import precision_recall_curve, classification_report, roc_c
 from contextlib import nullcontext
 from sklearn.preprocessing import LabelEncoder
 
-
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -226,7 +225,7 @@ class Common(Logger):
         else:
             Logger().error(f"Unexpected model output type: {type(output)}")
 
-
+            
 # Training and prediction engine class
 class ClassificationEngine(Common):
 

@@ -25,301 +25,10 @@ except ImportError:
     from torch.cuda.amp import GradScaler, autocast
 from sklearn.metrics import precision_recall_curve, roc_curve, auc
 from contextlib import nullcontext
+from .common import Common, Colors
 
 import warnings
 warnings.filterwarnings("ignore")
-
-class Colors:
-    BLACK = '\033[30m'
-    BLUE = '\033[34m'
-    ORANGE = '\033[38;5;214m'
-    GREEN = '\033[32m'
-    RED = '\033[31m'
-    RESET = '\033[39m'
-
-class Logger:
-    def __init__(self):
-
-        self.info_tag =    f"{Colors.GREEN}[INFO]{Colors.BLACK}"
-        self.warning_tag = f"{Colors.ORANGE}[WARNING]{Colors.BLACK}"
-        self.error_tag =   f"{Colors.RED}[ERROR]{Colors.BLACK}"
-        
-        # Create empty results dictionary
-        self.results = {}
-    
-    def info(self, message: str):
-        print(f"{self.info_tag} {message}")
-    
-    def warning(self, message: str):
-        print(f"{self.warning_tag} {message}", file=sys.stderr)
-    
-    def error(self, message: str):
-        print(f"{self.error_tag} {message}", file=sys.stderr)
-        raise ValueError(message)
-    
-    def init_results(self, dictionary: dict = None):
-        dictionary = dictionary or {}  # Ensure dictionary is not None
-        self.results.update({
-            "epoch": [],
-            **{f"train_{key}": [] for key in dictionary.keys()},
-            "train_total_loss": [],
-            "train_time [s]": [],
-            **{f"test_{key}": [] for key in dictionary.keys()},
-            "test_total_loss": [],
-            "test_time [s]": [],
-            "lr": []
-        })
-
-    def display_results(
-        self,
-        epoch: int,
-        max_epochs: int,
-        train_loss: Dict[str, float],        
-        train_epoch_time: float,
-        test_loss: Optional[Dict[str, float]] = None,
-        test_epoch_time: Optional[float] = None,
-        plot_curves: bool = False
-        ):
-    
-        """
-        Displays the training and validation results both numerically and visually.
-
-        Functionality:
-        - Outputs key metrics such as training and validation loss, accuracy, and fpr at recall in numerical form.
-        - Generates plots that visualize the training process, such as:
-        - Loss curves (training vs validation loss over epochs).
-        - Accuracy curves (training vs validation accuracy over epochs).
-        - FPR at recall curves
-        """
-
-        # Retrieve the learning rate
-        if self.scheduler is None or isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            lr = self.optimizer.param_groups[0]['lr']
-        else:
-            lr = self.scheduler.get_last_lr()[0]
-        
-        # Format train loss as a string
-        train_loss_str = f"{Colors.BLACK} | ".join(f"{Colors.BLUE}{key}: {value:.4f}" for key, value in train_loss.items())
-
-        print(
-            f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
-            f"{Colors.BLUE}Train: {Colors.BLACK} {train_loss_str} {Colors.BLACK}| "
-            f"{Colors.BLUE}time: {self.sec_to_min_sec(train_epoch_time)} {Colors.BLACK}| "            
-            f"{Colors.BLUE}lr: {lr:.10f}"
-        )
-        if self.apply_validation and test_loss is not None:
-
-            # Format test loss as a string
-            test_loss_str = " | ".join(f"{Colors.ORANGE}{key}: {value:.4f}" for key, value in test_loss.items())
-
-            print(
-                f"{Colors.BLACK}Epoch: {epoch+1}/{max_epochs} | "
-                f"{Colors.ORANGE}Test:  {Colors.BLACK} {test_loss_str} {Colors.BLACK}| "                
-                f"{Colors.ORANGE}time: {self.sec_to_min_sec(test_epoch_time)} {Colors.BLACK}| "            
-                f"{Colors.ORANGE}lr: {lr:.10f}"
-            )
-        
-        # Update results dictionary
-        self.results["epoch"].append(epoch+1)        
-        for key, value in train_loss.items():
-            self.results[f"train_{key}"].append(value)
-        self.results["train_time [s]"].append(train_epoch_time)
-        if test_loss is not None:
-            for key, value in test_loss.items():
-                self.results[f"test_{key}"].append(value)
-            self.results["test_time [s]"].append(test_epoch_time)
-        else:
-            #`train_loss` always exists, we just need its keys
-            for key in train_loss.keys() if train_loss else ["loss"]: 
-                self.results[f"test_{key}"].append(None)
-            self.results["test_time [s]"].append(None)
-        self.results["lr"].append(lr)
-        
-        # Plot training and test loss curves
-        if plot_curves:
-            n_plots = len(train_loss.keys())
-            cols = min(3, n_plots)
-            rows = (n_plots + cols - 1) // cols
-
-            plt.figure(figsize=(20, 6*rows))
-            range_epochs = range(1, len(self.results["epoch"]) + 1)
-
-            for i, key in enumerate(train_loss.keys(), start=1):
-                plt.subplot(rows, cols, i)
-                plt.plot(range_epochs, self.results[f"train_{key}"], label=f"train_{key}")
-                
-                if self.apply_validation and test_loss is not None:
-                    plt.plot(range_epochs, self.results[f"test_{key}"], label=f"test_{key}")
-                
-                plt.title(key)
-                plt.xlabel("Epochs")
-                plt.grid(visible=True, which="both", axis="both")
-                plt.legend()
-
-            plt.show()
-
-
-# Common utility class
-class Common(Logger):
-
-    """A class containing utility functions for classification tasks."""
-
-    @staticmethod
-    def sec_to_min_sec(seconds):
-        """Converts seconds to a formatted string in minutes and seconds."""
-        if not isinstance(seconds, (int, float)) or seconds < 0:
-            Logger().error("Input must be a non-negative number.")
-                    
-        minutes = int(seconds // 60)
-        remaining_seconds = int(seconds % 60)
-
-        return f"{str(minutes).rjust(3)}m{str(remaining_seconds).zfill(2)}s"
-
-    @staticmethod
-    def calculate_accuracy(y_true, y_pred):
-        """Calculates accuracy between truth labels and predictions."""
-        assert len(y_true) == len(y_pred), "Length of y_true and y_pred must be the same."
-        return torch.eq(y_true, y_pred).sum().item() / len(y_true)
-
-    @staticmethod
-    def calculate_fpr_at_recall(y_true, y_pred_probs, recall_threshold):
-        """Calculates the False Positive Rate (FPR) at a specified recall threshold."""
-        if not (0 <= recall_threshold <= 1):
-            Logger().error(f"'recall_threshold' must be between 0 and 1.")
-
-
-        if isinstance(y_pred_probs, list):
-            y_pred_probs = torch.cat(y_pred_probs)
-        if isinstance(y_true, list):
-            y_true = torch.cat(y_true)
-
-        n_classes = y_pred_probs.shape[1]
-        fpr_per_class = []
-
-        for class_idx in range(n_classes):
-            y_true_bin = (y_true == class_idx).int().detach().numpy()
-            y_scores = y_pred_probs[:, class_idx].detach().numpy()
-
-            _, recall, thresholds = precision_recall_curve(y_true_bin, y_scores)
-
-            idx = np.where(recall >= recall_threshold)[0]
-            if len(idx) > 0:
-                threshold = thresholds[idx[-1]]
-                fp = np.sum((y_scores >= threshold) & (y_true_bin == 0))
-                tn = np.sum((y_scores < threshold) & (y_true_bin == 0))
-                fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
-            else:
-                fpr = 0  
-
-            fpr_per_class.append(fpr)
-
-        return np.mean(fpr_per_class)
-
-    @staticmethod
-    def calculate_pauc_at_recall(y_true, y_pred_probs, recall_threshold=0.80, num_classes=101):
-        """Calculates the Partial AUC for multi-class classification at the given recall threshold."""
-        y_true = np.asarray(y_true)
-        y_pred_probs = np.asarray(y_pred_probs)
-
-        partial_auc_values = []
-
-        for class_idx in range(num_classes):
-            y_true_bin = (y_true == class_idx).astype(int)
-            y_scores_class = y_pred_probs[:, class_idx]
-
-            fpr, tpr, _ = roc_curve(y_true_bin, y_scores_class)
-
-            max_fpr = 1 - recall_threshold
-            stop_index = np.searchsorted(fpr, max_fpr, side='right')
-
-            if stop_index < len(fpr):
-                fpr_interp_points = [fpr[stop_index - 1], fpr[stop_index]]
-                tpr_interp_points = [tpr[stop_index - 1], tpr[stop_index]]
-                tpr = np.append(tpr[:stop_index], np.interp(max_fpr, fpr_interp_points, tpr_interp_points))
-                fpr = np.append(fpr[:stop_index], max_fpr)
-            else:
-                tpr = np.append(tpr, 1.0)
-                fpr = np.append(fpr, max_fpr)
-
-            partial_auc_value = auc(fpr, tpr)
-            partial_auc_values.append(partial_auc_value)
-
-        return np.mean(partial_auc_values)
-
-    @staticmethod
-    def save_model(model: torch.nn.Module, target_dir: str, model_name: str):
-
-        """Saves a PyTorch model to a target directory.
-
-        Args:
-            model: A target PyTorch model to save.
-            target_dir: A directory for saving the model to.
-            model_name: A filename for the saved model. Should include
-            ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
-
-        Example usage:
-            save_model(model=model_0,
-                    target_dir="models",
-                    model_name="05_going_modular_tingvgg_model.pth")
-        """
-
-        # Create target directory
-        target_dir_path = Path(target_dir)
-        target_dir_path.mkdir(parents=True,
-                            exist_ok=True)
-
-        # Define the list of valid extensions
-        valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
-
-        # Create model save path
-        assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
-        model_save_path = Path(target_dir) / model_name
-
-        # Save the model state_dict()
-        print(f"Saving best model to: {model_save_path}")
-        torch.save(obj=model.state_dict(), f=model_save_path)
-
-    @staticmethod
-    def load_model(model: torch.nn.Module, target_dir: str, model_name: str):
-        
-        """Loads a PyTorch model from a target directory.
-
-        Args:
-            model: A target PyTorch model to load.
-            target_dir: A directory where the model is located.
-            model_name: The name of the model to load. Should include
-            ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
-
-        Example usage:
-            model = load_model(model=model,
-                            target_dir="models",
-                            model_name="model.pth")
-
-        Returns:
-        The loaded PyTorch model.
-        """
-
-        # Define the list of valid extensions
-        valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
-
-        # Create model save path
-        assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
-        model_save_path = Path(target_dir) / model_name
-
-        # Load the model
-        Logger().info(f"Loading model from: {model_save_path}")
-        model.load_state_dict(torch.load(model_save_path, weights_only=True))
-        
-        return model
-    
-    @staticmethod
-    def get_predictions(output):
-        if isinstance(output, torch.Tensor):
-            return output.contiguous()
-        elif hasattr(output, "logits"):            
-            return output.logits.contiguous()
-        else:
-            Logger().error(f"Unexpected model output type: {type(output)}")
 
 
 # Training and prediction engine class
@@ -333,12 +42,14 @@ class ObjectDetectionEngine(Common):
 
     Args:
         model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        color_map (dict, optional): Specifies the colors for the training and evaluation curves
         device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
     def __init__(
         self,
         model: torch.nn.Module=None,
+        color_map: dict=None,
         device: str="cuda" if torch.cuda.is_available() else "cpu"
         ):
         super().__init__()
@@ -357,6 +68,23 @@ class ObjectDetectionEngine(Common):
         self.model_name = None
         self.model_name_loss = None        
         self.squeeze_dim = False
+
+        # Initialize colors
+        default_color_map = {'train': 'blue', 'eval': 'orange', 'other': 'black'}
+        # If the user provides a color_map, update the default with it
+        if color_map is None:
+            color_map = default_color_map # Use defaults if no user input
+        else:
+            color_map = {**default_color_map, **color_map} # Merge user input with defaults
+
+        self.color_train = Colors.get_console_color(color_map['train'])
+        self.color_eval =  Colors.get_console_color(color_map['eval'])
+        self.color_other = Colors.get_console_color(color_map['other'])
+        self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
+        self.color_eval_plt =  Colors.get_matplotlib_color(color_map['eval'])
+
+        # Initialize result logs
+        self.results = {}
         
         # Check if model is provided
         if self.model is None:
@@ -505,6 +233,110 @@ class ObjectDetectionEngine(Common):
 
         return images, targets
 
+
+    def init_results(self, dictionary: dict = None):
+
+        """Initializes the dictionary for the results"""
+        
+        dictionary = dictionary or {}  # Ensure dictionary is not None
+        self.results.update({
+            "epoch": [],
+            **{f"train_{key}": [] for key in dictionary.keys()},
+            "train_total_loss": [],
+            "train_time [s]": [],
+            **{f"eval_{key}": [] for key in dictionary.keys()},
+            "eval_total_loss": [],
+            "eval_time [s]": [],
+            "lr": []
+        })
+
+    def display_results(
+        self,
+        epoch: int,
+        max_epochs: int,
+        train_loss: Dict[str, float],        
+        train_epoch_time: float,
+        eval_loss: Optional[Dict[str, float]] = None,
+        eval_epoch_time: Optional[float] = None,
+        plot_curves: bool = False
+        ):
+    
+        """
+        Displays the training and validation results both numerically and visually.
+
+        Functionality:
+        - Outputs key metrics such as training and validation loss, accuracy, and fpr at recall in numerical form.
+        - Generates plots that visualize the training process, such as:
+        - Loss curves (training vs validation loss over epochs).
+        - Accuracy curves (training vs validation accuracy over epochs).
+        - FPR at recall curves
+        """
+
+        # Retrieve the learning rate
+        if self.scheduler is None or isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            lr = self.optimizer.param_groups[0]['lr']
+        else:
+            lr = self.scheduler.get_last_lr()[0]
+        
+        # Format train loss as a string
+        train_loss_str = f"{self.color_other} | ".join(f"{self.color_train}{key}: {value:.4f}" for key, value in train_loss.items())
+
+        print(
+            f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
+            f"{self.color_train}Train: {self.color_other} {train_loss_str} {self.color_other}| "
+            f"{self.color_train}time: {self.sec_to_min_sec(train_epoch_time)} {self.color_other}| "            
+            f"{self.color_train}lr: {lr:.10f}"
+        )
+        if self.apply_validation and eval_loss is not None:
+
+            # Format test loss as a string
+            eval_loss_str = f"{self.color_other} | ".join(f"{self.color_eval}{key}: {value:.4f}" for key, value in eval_loss.items())
+
+            print(
+                f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
+                f"{self.color_eval}Eval:  {self.color_other} {eval_loss_str} {self.color_other}| "                
+                f"{self.color_eval}time: {self.sec_to_min_sec(eval_epoch_time)} {self.color_other}| "            
+                f"{self.color_eval}lr: {lr:.10f}"
+            )
+        
+        # Update results dictionary
+        self.results["epoch"].append(epoch+1)        
+        for key, value in train_loss.items():
+            self.results[f"train_{key}"].append(value)
+        self.results["train_time [s]"].append(train_epoch_time)
+        if eval_loss is not None:
+            for key, value in eval_loss.items():
+                self.results[f"eval_{key}"].append(value)
+            self.results["eval_time [s]"].append(eval_epoch_time)
+        else:
+            #`train_loss` always exists, we just need its keys
+            for key in train_loss.keys() if train_loss else ["loss"]: 
+                self.results[f"eval_{key}"].append(None)
+            self.results["eval_time [s]"].append(None)
+        self.results["lr"].append(lr)
+        
+        # Plot training and test loss curves
+        if plot_curves:
+            n_plots = len(train_loss.keys())
+            cols = min(3, n_plots)
+            rows = (n_plots + cols - 1) // cols
+
+            plt.figure(figsize=(20, 6*rows))
+            range_epochs = range(1, len(self.results["epoch"]) + 1)
+
+            for i, key in enumerate(train_loss.keys(), start=1):
+                plt.subplot(rows, cols, i)
+                plt.plot(range_epochs, self.results[f"train_{key}"], label=f"train_{key}", color=self.color_train_plt)
+                
+                if self.apply_validation and eval_loss is not None:
+                    plt.plot(range_epochs, self.results[f"eval_{key}"], label=f"eval_{key}", color=self.color_eval_plt)
+                
+                plt.title(key)
+                plt.xlabel("Epochs")
+                plt.grid(visible=True, which="both", axis="both")
+                plt.legend()
+
+            plt.show()   
 
     def init_train(
         self,
@@ -688,7 +520,7 @@ class ObjectDetectionEngine(Common):
                     for k in range(epochs):
                         self.model_epoch.append(copy.deepcopy(self.model))
                         self.model_epoch[k].to(self.device)
-            self.best_test_loss = float("inf")         
+            self.best_eval_loss = float("inf")         
     
     
     # This train step function includes gradient accumulation (experimental)
@@ -836,7 +668,7 @@ class ObjectDetectionEngine(Common):
 
         return train_loss, train_loss_dict
 
-    def test_step(
+    def eval_step(
         self,
         dataloader: torch.utils.data.DataLoader,
         epoch_number: int = 1,
@@ -867,8 +699,8 @@ class ObjectDetectionEngine(Common):
 
             # Setup test loss and test accuracy values
             len_dataloader = len(dataloader)
-            test_loss = 0
-            test_loss_dict = {} 
+            eval_loss = 0
+            eval_loss_dict = {} 
 
             # Set inference context
             try:
@@ -913,31 +745,31 @@ class ObjectDetectionEngine(Common):
 
                          # Accumulate individual component losses
                         for loss_name, loss_value in loss_dict.items():
-                            if loss_name in test_loss_dict:
-                                test_loss_dict[loss_name] += loss_value.item()
+                            if loss_name in eval_loss_dict:
+                                eval_loss_dict[loss_name] += loss_value.item()
                             else:
-                                test_loss_dict[loss_name] = loss_value.item()
-                        test_loss += loss.item()                    
+                                eval_loss_dict[loss_name] = loss_value.item()
+                        eval_loss += loss.item()                    
 
             # Adjust metrics to get average losses per batch 
-            for loss_name in test_loss_dict:
-                test_loss_dict[loss_name] /= len_dataloader
-            test_loss /= len_dataloader
+            for loss_name in eval_loss_dict:
+                eval_loss_dict[loss_name] /= len_dataloader
+            eval_loss /= len_dataloader
 
-            test_loss_dict.update({"total_loss": test_loss})
+            eval_loss_dict.update({"total_loss": eval_loss})
 
         # Otherwise set params with initial values
         else:            
-            test_loss = None
-            test_loss_dict = None            
+            eval_loss = None
+            eval_loss_dict = None            
 
-        return test_loss, test_loss_dict
+        return eval_loss, eval_loss_dict
 
 
     # Scheduler step after the optimizer
     def scheduler_step(
         self,
-        test_loss: float=None,
+        eval_loss: float=None,
         ):
 
         """
@@ -945,18 +777,18 @@ class ObjectDetectionEngine(Common):
 
         Parameters:
         - scheduler (torch.optim.lr_scheduler): The learning rate scheduler.
-        - test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
-        - test_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
+        - eval_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
+        - eval_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
         """
             
         if self.scheduler:
             if self.apply_validation and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 # Check whether scheduler is configured for "min" or "max"
-                if self.scheduler.mode == "min" and test_loss is not None:
-                    self.scheduler.step(test_loss)  # Minimize test_loss                
+                if self.scheduler.mode == "min" and eval_loss is not None:
+                    self.scheduler.step(eval_loss)  # Minimize eval_loss                
                 else:
                     self.error(
-                        f"The scheduler requires either `test_loss` or `test_acc` "
+                        f"The scheduler requires either `eval_loss` or `eval_acc` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -965,7 +797,7 @@ class ObjectDetectionEngine(Common):
     # Updates and saves the best model and model_epoch list based on the specified mode.
     def update_model(
         self,
-        test_loss: float = None,        
+        eval_loss: float = None,        
         epoch: int = None,
     ) -> pd.DataFrame:
 
@@ -973,7 +805,7 @@ class ObjectDetectionEngine(Common):
         Updates and saves the best model and model_epoch list based on the specified mode(s), as well as the last-epoch model.
 
         Parameters:
-        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).       
+        - eval_loss (float, optional): Test loss for the current epoch (used in "loss" mode).       
         - epoch (int, optional): Current epoch index, used for naming models when saving all epochs in "all" mode.
 
         Functionality:
@@ -1010,11 +842,11 @@ class ObjectDetectionEngine(Common):
             for mode in self.mode:
                 # Loss criterion
                 if mode == "loss":
-                    if test_loss is None:
-                        self.error(f"'test_loss' must be provided when mode is 'loss'.")
-                    if test_loss < self.best_test_loss:
+                    if eval_loss is None:
+                        self.error(f"'eval_loss' must be provided when mode is 'loss'.")
+                    if eval_loss < self.best_eval_loss:
                         remove_previous_best(self.model_name_loss)
-                        self.best_test_loss = test_loss
+                        self.best_eval_loss = eval_loss
                         if self.keep_best_models_in_memory:
                             self.model_loss.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_loss)
@@ -1115,18 +947,18 @@ class ObjectDetectionEngine(Common):
             The dataframe will have the following columns:
             - epoch: List of epoch numbers.
             - train_<loss_metrics>: List of training loss values for each epoch.            
-            - test_<loss_metrics>: List of test loss values for each epoch.
+            - eval_<loss_metrics>: List of test loss values for each epoch.
             - train_time: Training_time for each epcoh            
-            - test_time: Testing time for each epoch.
+            - eval_time: Testing time for each epoch.
             - lr: Learning rate value for each epoch.
 
         Example output (for 2 epochs):
         {
             epoch: [1, 2],
             train_loss: [2.0616, 1.0537],            
-            test_loss: [1.2641, 1.5706],            
+            eval_loss: [1.2641, 1.5706],            
             train_time: [1.1234, 1.5678],
-            test_time: [0.4567, 0.7890],
+            eval_time: [0.4567, 0.7890],
             lr: [0.001, 0.0005],
         }
         """
@@ -1170,14 +1002,14 @@ class ObjectDetectionEngine(Common):
             train_epoch_time = time.time() - train_epoch_start_time
 
             # Perform test step and time it
-            test_epoch_start_time = time.time()
-            test_loss, test_loss_dict = self.test_step(
+            eval_epoch_start_time = time.time()
+            eval_loss, eval_loss_dict = self.eval_step(
                 dataloader=test_dataloader,            
                 epoch_number=epoch,
                 amp=amp,
                 enable_clipping=enable_clipping,
                 )
-            test_epoch_time = time.time() - test_epoch_start_time if self.apply_validation else 0.0            
+            eval_epoch_time = time.time() - eval_epoch_start_time if self.apply_validation else 0.0            
 
             clear_output(wait=True)
 
@@ -1187,20 +1019,20 @@ class ObjectDetectionEngine(Common):
                 max_epochs=epochs,
                 train_loss=train_loss_dict,                
                 train_epoch_time=train_epoch_time,
-                test_loss=test_loss_dict,                
-                test_epoch_time=test_epoch_time,
+                eval_loss=eval_loss_dict,                
+                eval_epoch_time=eval_epoch_time,
                 plot_curves=plot_curves,
             )
 
             # Scheduler step after the optimizer
             self.scheduler_step(
-                test_loss=test_loss,
+                eval_loss=eval_loss,
             )
 
             # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.
             # If apply_validation is enabled then upate models based on validation results
             df_results = self.update_model(
-                test_loss=test_loss if self.apply_validation or test_loss is not None else train_loss,                
+                eval_loss=eval_loss if self.apply_validation or eval_loss is not None else train_loss,                
                 epoch=epoch
                 )
 

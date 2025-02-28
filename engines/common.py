@@ -19,7 +19,7 @@ class Colors:
     ORANGE = '\033[38;5;214m'
     GREEN = '\033[32m'
     RED = '\033[31m'
-    YELLOW = '\033[33m'
+    YELLOW = '\033[38;2;255;215;0m' #'\033[33m'
     MAGENTA = '\033[35m'
     CYAN = '\033[36m'
     WHITE = '\033[37m'

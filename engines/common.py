@@ -104,6 +104,30 @@ class Common(Logger):
         """Calculates accuracy between truth labels and predictions."""
         assert len(y_true) == len(y_pred), "Length of y_true and y_pred must be the same."
         return torch.eq(y_true, y_pred).sum().item() / len(y_true)
+    
+    @staticmethod
+    def calculate_f1_score(y_true, y_pred):
+        """Calculates the F1 score between truth labels and predictions."""
+        assert len(y_true) == len(y_pred), "Length of y_true and y_pred must be the same."
+
+        # Convert tensors to binary values (assuming y_pred contains logits or probabilities)
+        y_true = y_true.int()
+        y_pred = y_pred.int()
+
+        # True Positives, False Positives, False Negatives
+        tp = torch.sum((y_true == 1) & (y_pred == 1)).item()
+        fp = torch.sum((y_true == 0) & (y_pred == 1)).item()
+        fn = torch.sum((y_true == 1) & (y_pred == 0)).item()
+
+        # Compute Precision and Recall
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+        # Compute F1 Score
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        return f1
+
 
     @staticmethod
     def calculate_fpr_at_recall(y_true, y_pred_probs, recall_threshold):

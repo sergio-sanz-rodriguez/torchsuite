@@ -22,12 +22,14 @@ Currently, TorchSuite is fully optimized for **image and audio classification ta
 
 ## Modules  
 
-- **Training and inference engine:** A robust `classification.py` module for seamless training and evaluation workflows.  
-- **Flexible data loading:** `dataloaders.py` simplifies dataset preparation and augmentation.  
-- **Utility functions:** `helper_functions.py` offers a collection of tools to enhance productivity.  
+- **Training and inference engines:** `classification.py` and `obj_detection.py` for seamless training and evaluation workflows.
+- **Flexible data loading:** `image/audio/obj_dect_dataloaders.py` to streamline dataset preparation and augmentation.
+- **Utility functions:** `classification/obj_detection_utils.py` offering a collection of utility functions to enhance productivity.
+- **Vision Transformer (ViT) support:** `vision_transformer.py` for implementing ViTs with PyTorch.
+- **Region-based CNN (R-CNN) support:** `faster_rcnn.py` to create deep learning networks for object detection.
 - **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies. Some classes have been taken from [kamrulhasanrony](https://github.com/kamrulhasanrony/Vision-Transformer-based-Food-Classification/tree/master). 
-- **Vision Transformer (ViT) support:** `vision_transformer.py` enables ViT implementations with PyTorch.  
-- **Custom loss functions:** `loss_functions.py` includes various loss formulations for different tasks.
+- **Custom loss functions:** `loss_functions.py` including various loss formulations for different tasks.
+- **Code examples:** a series of notebooks demonstrating Python code for training deep learning models
 
 ## Installation
 

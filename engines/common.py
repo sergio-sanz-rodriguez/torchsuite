@@ -19,7 +19,7 @@ class Colors:
     ORANGE = '\033[38;5;214m'
     GREEN = '\033[32m'
     RED = '\033[31m'
-    YELLOW = '\033[33m'
+    YELLOW = '\033[38;2;255;215;0m' #'\033[33m'
     MAGENTA = '\033[35m'
     CYAN = '\033[36m'
     WHITE = '\033[37m'
@@ -101,13 +101,79 @@ class Common(Logger):
 
     @staticmethod
     def calculate_accuracy(y_true, y_pred):
-        """Calculates accuracy between truth labels and predictions."""
-        assert len(y_true) == len(y_pred), "Length of y_true and y_pred must be the same."
+
+        """
+        Calculates accuracy between truth labels and predictions.
+        """
+
+        if len(y_true) != len(y_pred):
+            raise ValueError(f"Length of y_true and y_pred for accuracy calculation must be the same.")
+
         return torch.eq(y_true, y_pred).sum().item() / len(y_true)
+    
+    @staticmethod
+    def calculate_f1_score(y_true, y_pred, num_classes, average="macro"):
+        """Calculates the F1 score for multi-class classification.
+
+        Args:
+            y_true (torch.Tensor): Ground truth labels (shape: [batch_size]).
+            y_pred (torch.Tensor): Predicted labels (shape: [batch_size]).
+            num_classes (int): Number of classes.
+            average (str): 'macro' for macro-average, 'weighted' for weighted-average, 'micro' for micro-average.
+
+        Returns:
+            float: Computed F1 score.
+        """
+
+        if len(y_true) != len(y_pred):
+            raise ValueError(f"Length of y_true and y_pred for F1-score calculation must be the same.")
+
+        # Convert tensors to integer labels
+        y_true = y_true.int()
+        y_pred = y_pred.int()
+        f1_scores = []
+
+        # Calculate metrics per class
+        for class_idx in range(num_classes):
+            tp = torch.sum((y_true == class_idx) & (y_pred == class_idx)).item()
+            fp = torch.sum((y_true != class_idx) & (y_pred == class_idx)).item()
+            fn = torch.sum((y_true == class_idx) & (y_pred != class_idx)).item()
+
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+            f1_scores.append(f1)
+
+        f1_scores = torch.tensor(f1_scores, dtype=torch.float)
+
+        # Calculate the average
+        if average == "macro":
+            return torch.mean(f1_scores).item()
+        elif average == "weighted":
+            class_counts = torch.tensor([(y_true == i).sum().item() for i in range(num_classes)], dtype=torch.float)
+            total_samples = class_counts.sum()
+            return (f1_scores * (class_counts / total_samples)).sum().item() if total_samples > 0 else 0
+        elif average == "micro":
+            total_tp = sum(torch.sum((y_true == i) & (y_pred == i)).item() for i in range(num_classes))
+            total_fp = sum(torch.sum((y_true != i) & (y_pred == i)).item() for i in range(num_classes))
+            total_fn = sum(torch.sum((y_true == i) & (y_pred != i)).item() for i in range(num_classes))
+
+            precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
+            recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
+
+            return 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+        else:
+            raise ValueError("Invalid value for 'average'. Choose 'macro', 'weighted', or 'micro'.")
 
     @staticmethod
     def calculate_fpr_at_recall(y_true, y_pred_probs, recall_threshold):
-        """Calculates the False Positive Rate (FPR) at a specified recall threshold."""
+        
+        """
+        Calculates the False Positive Rate (FPR) at a specified recall threshold.
+        """
+
         if not (0 <= recall_threshold <= 1):
             Logger().error(f"'recall_threshold' must be between 0 and 1.")
 
@@ -141,7 +207,11 @@ class Common(Logger):
 
     @staticmethod
     def calculate_pauc_at_recall(y_true, y_pred_probs, recall_threshold=0.80, num_classes=101):
-        """Calculates the Partial AUC for multi-class classification at the given recall threshold."""
+        
+        """
+        Calculates the Partial AUC for multi-class classification at the given recall threshold.
+        """
+
         y_true = np.asarray(y_true)
         y_pred_probs = np.asarray(y_pred_probs)
 

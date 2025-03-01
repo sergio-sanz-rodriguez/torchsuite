@@ -89,7 +89,7 @@ class ClassificationEngine(Common):
         self.log_verbose = log_verbose
 
         # Initialize colors
-        default_color_map = {'train': 'blue', 'eval': 'orange', 'other': 'black'}
+        default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
 
         # If the user provides a color_map, update the default with it
         if color_map is None:
@@ -432,7 +432,7 @@ class ClassificationEngine(Common):
         if plot_curves:
         
             n_plots = 5
-            plt.figure(figsize=(20, 6))
+            plt.figure(figsize=(25, 6))
             range_epochs = range(1, len(self.results["train_loss"])+1)
 
             # Plot loss
@@ -1953,7 +1953,8 @@ class DistillationEngine(Common):
         self.log_verbose = log_verbose
      
         # Initialize colors
-        default_color_map = {'train': 'blue', 'eval': 'orange', 'other': 'black'}
+        default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
+        
         # If the user provides a color_map, update the default with it
         if color_map is None:
             color_map = default_color_map # Use defaults if no user input
@@ -2297,7 +2298,7 @@ class DistillationEngine(Common):
         if plot_curves:
         
             n_plots = 5
-            plt.figure(figsize=(20, 6))
+            plt.figure(figsize=(25, 6))
             range_epochs = range(1, len(self.results["train_loss"])+1)
 
             # Plot loss

@@ -70,7 +70,7 @@ class ObjectDetectionEngine(Common):
         self.squeeze_dim = False
 
         # Initialize colors
-        default_color_map = {'train': 'blue', 'eval': 'orange', 'other': 'black'}
+        default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
         # If the user provides a color_map, update the default with it
         if color_map is None:
             color_map = default_color_map # Use defaults if no user input
@@ -78,10 +78,10 @@ class ObjectDetectionEngine(Common):
             color_map = {**default_color_map, **color_map} # Merge user input with defaults
 
         self.color_train = Colors.get_console_color(color_map['train'])
-        self.color_eval =  Colors.get_console_color(color_map['eval'])
+        self.color_test =  Colors.get_console_color(color_map['test'])
         self.color_other = Colors.get_console_color(color_map['other'])
         self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
-        self.color_eval_plt =  Colors.get_matplotlib_color(color_map['eval'])
+        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
 
         # Initialize result logs
         self.results = {}
@@ -244,9 +244,9 @@ class ObjectDetectionEngine(Common):
             **{f"train_{key}": [] for key in dictionary.keys()},
             "train_total_loss": [],
             "train_time [s]": [],
-            **{f"eval_{key}": [] for key in dictionary.keys()},
-            "eval_total_loss": [],
-            "eval_time [s]": [],
+            **{f"test_{key}": [] for key in dictionary.keys()},
+            "test_total_loss": [],
+            "test_time [s]": [],
             "lr": []
         })
 
@@ -256,8 +256,8 @@ class ObjectDetectionEngine(Common):
         max_epochs: int,
         train_loss: Dict[str, float],        
         train_epoch_time: float,
-        eval_loss: Optional[Dict[str, float]] = None,
-        eval_epoch_time: Optional[float] = None,
+        test_loss: Optional[Dict[str, float]] = None,
+        test_epoch_time: Optional[float] = None,
         plot_curves: bool = False
         ):
     
@@ -287,16 +287,16 @@ class ObjectDetectionEngine(Common):
             f"{self.color_train}time: {self.sec_to_min_sec(train_epoch_time)} {self.color_other}| "            
             f"{self.color_train}lr: {lr:.10f}"
         )
-        if self.apply_validation and eval_loss is not None:
+        if self.apply_validation and test_loss is not None:
 
             # Format test loss as a string
-            eval_loss_str = f"{self.color_other} | ".join(f"{self.color_eval}{key}: {value:.4f}" for key, value in eval_loss.items())
+            test_loss_str = f"{self.color_other} | ".join(f"{self.color_test}{key}: {value:.4f}" for key, value in test_loss.items())
 
             print(
                 f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
-                f"{self.color_eval}Eval:  {self.color_other} {eval_loss_str} {self.color_other}| "                
-                f"{self.color_eval}time: {self.sec_to_min_sec(eval_epoch_time)} {self.color_other}| "            
-                f"{self.color_eval}lr: {lr:.10f}"
+                f"{self.color_test}test:  {self.color_other} {test_loss_str} {self.color_other}| "                
+                f"{self.color_test}time: {self.sec_to_min_sec(test_epoch_time)} {self.color_other}| "            
+                f"{self.color_test}lr: {lr:.10f}"
             )
         
         # Update results dictionary
@@ -304,32 +304,32 @@ class ObjectDetectionEngine(Common):
         for key, value in train_loss.items():
             self.results[f"train_{key}"].append(value)
         self.results["train_time [s]"].append(train_epoch_time)
-        if eval_loss is not None:
-            for key, value in eval_loss.items():
-                self.results[f"eval_{key}"].append(value)
-            self.results["eval_time [s]"].append(eval_epoch_time)
+        if test_loss is not None:
+            for key, value in test_loss.items():
+                self.results[f"test_{key}"].append(value)
+            self.results["test_time [s]"].append(test_epoch_time)
         else:
             #`train_loss` always exists, we just need its keys
             for key in train_loss.keys() if train_loss else ["loss"]: 
-                self.results[f"eval_{key}"].append(None)
-            self.results["eval_time [s]"].append(None)
+                self.results[f"test_{key}"].append(None)
+            self.results["test_time [s]"].append(None)
         self.results["lr"].append(lr)
         
         # Plot training and test loss curves
         if plot_curves:
             n_plots = len(train_loss.keys())
-            cols = min(3, n_plots)
+            cols = min(5, n_plots)
             rows = (n_plots + cols - 1) // cols
 
-            plt.figure(figsize=(20, 6*rows))
+            plt.figure(figsize=(25, 6*rows))
             range_epochs = range(1, len(self.results["epoch"]) + 1)
 
             for i, key in enumerate(train_loss.keys(), start=1):
                 plt.subplot(rows, cols, i)
                 plt.plot(range_epochs, self.results[f"train_{key}"], label=f"train_{key}", color=self.color_train_plt)
                 
-                if self.apply_validation and eval_loss is not None:
-                    plt.plot(range_epochs, self.results[f"eval_{key}"], label=f"eval_{key}", color=self.color_eval_plt)
+                if self.apply_validation and test_loss is not None:
+                    plt.plot(range_epochs, self.results[f"test_{key}"], label=f"test_{key}", color=self.color_test_plt)
                 
                 plt.title(key)
                 plt.xlabel("Epochs")
@@ -520,7 +520,7 @@ class ObjectDetectionEngine(Common):
                     for k in range(epochs):
                         self.model_epoch.append(copy.deepcopy(self.model))
                         self.model_epoch[k].to(self.device)
-            self.best_eval_loss = float("inf")         
+            self.best_test_loss = float("inf")         
     
     
     # This train step function includes gradient accumulation (experimental)
@@ -668,7 +668,7 @@ class ObjectDetectionEngine(Common):
 
         return train_loss, train_loss_dict
 
-    def eval_step(
+    def test_step(
         self,
         dataloader: torch.utils.data.DataLoader,
         epoch_number: int = 1,
@@ -699,8 +699,8 @@ class ObjectDetectionEngine(Common):
 
             # Setup test loss and test accuracy values
             len_dataloader = len(dataloader)
-            eval_loss = 0
-            eval_loss_dict = {} 
+            test_loss = 0
+            test_loss_dict = {} 
 
             # Set inference context
             try:
@@ -745,31 +745,31 @@ class ObjectDetectionEngine(Common):
 
                          # Accumulate individual component losses
                         for loss_name, loss_value in loss_dict.items():
-                            if loss_name in eval_loss_dict:
-                                eval_loss_dict[loss_name] += loss_value.item()
+                            if loss_name in test_loss_dict:
+                                test_loss_dict[loss_name] += loss_value.item()
                             else:
-                                eval_loss_dict[loss_name] = loss_value.item()
-                        eval_loss += loss.item()                    
+                                test_loss_dict[loss_name] = loss_value.item()
+                        test_loss += loss.item()                    
 
             # Adjust metrics to get average losses per batch 
-            for loss_name in eval_loss_dict:
-                eval_loss_dict[loss_name] /= len_dataloader
-            eval_loss /= len_dataloader
+            for loss_name in test_loss_dict:
+                test_loss_dict[loss_name] /= len_dataloader
+            test_loss /= len_dataloader
 
-            eval_loss_dict.update({"total_loss": eval_loss})
+            test_loss_dict.update({"total_loss": test_loss})
 
         # Otherwise set params with initial values
         else:            
-            eval_loss = None
-            eval_loss_dict = None            
+            test_loss = None
+            test_loss_dict = None            
 
-        return eval_loss, eval_loss_dict
+        return test_loss, test_loss_dict
 
 
     # Scheduler step after the optimizer
     def scheduler_step(
         self,
-        eval_loss: float=None,
+        test_loss: float=None,
         ):
 
         """
@@ -777,18 +777,18 @@ class ObjectDetectionEngine(Common):
 
         Parameters:
         - scheduler (torch.optim.lr_scheduler): The learning rate scheduler.
-        - eval_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
-        - eval_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
+        - test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
+        - test_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
         """
             
         if self.scheduler:
             if self.apply_validation and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 # Check whether scheduler is configured for "min" or "max"
-                if self.scheduler.mode == "min" and eval_loss is not None:
-                    self.scheduler.step(eval_loss)  # Minimize eval_loss                
+                if self.scheduler.mode == "min" and test_loss is not None:
+                    self.scheduler.step(test_loss)  # Minimize test_loss                
                 else:
                     self.error(
-                        f"The scheduler requires either `eval_loss` or `eval_acc` "
+                        f"The scheduler requires either `test_loss` or `test_acc` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -797,7 +797,7 @@ class ObjectDetectionEngine(Common):
     # Updates and saves the best model and model_epoch list based on the specified mode.
     def update_model(
         self,
-        eval_loss: float = None,        
+        test_loss: float = None,        
         epoch: int = None,
     ) -> pd.DataFrame:
 
@@ -805,13 +805,13 @@ class ObjectDetectionEngine(Common):
         Updates and saves the best model and model_epoch list based on the specified mode(s), as well as the last-epoch model.
 
         Parameters:
-        - eval_loss (float, optional): Test loss for the current epoch (used in "loss" mode).       
+        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).       
         - epoch (int, optional): Current epoch index, used for naming models when saving all epochs in "all" mode.
 
         Functionality:
         - Saves the last-epoch model.
         - Saves the logs (self.results).
-        - Saves the best-performing model during training based on the specified evaluation mode.
+        - Saves the best-performing model during training based on the specified testuation mode.
         - If mode is "all", saves the model for every epoch.
         - Updates `self.model_<loss, acc, fpr, pauc, epoch>` accordingly.
 
@@ -842,11 +842,11 @@ class ObjectDetectionEngine(Common):
             for mode in self.mode:
                 # Loss criterion
                 if mode == "loss":
-                    if eval_loss is None:
-                        self.error(f"'eval_loss' must be provided when mode is 'loss'.")
-                    if eval_loss < self.best_eval_loss:
+                    if test_loss is None:
+                        self.error(f"'test_loss' must be provided when mode is 'loss'.")
+                    if test_loss < self.best_test_loss:
                         remove_previous_best(self.model_name_loss)
-                        self.best_eval_loss = eval_loss
+                        self.best_test_loss = test_loss
                         if self.keep_best_models_in_memory:
                             self.model_loss.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_loss)
@@ -930,7 +930,7 @@ class ObjectDetectionEngine(Common):
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
             keep_best_models_in_memory (bool, optional): If True, the best models are kept in memory for future inference. The model state from the last epoch will always be kept in memory.
             train_dataloader (torch.utils.data.DataLoader, optional): Dataloader for training the model.
-            test_dataloader (torch.utils.data.DataLoader, optional): Dataloader for testing the model.
+            test_dataloader (torch.utils.data.DataLoader, optional): Dataloader for testing or validating the model.
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
             optimizer (torch.optim.Optimizer, optional): Optimizer to use during training.
             loss_fn (torch.nn.Module, optional): Loss function used for training.
@@ -947,18 +947,18 @@ class ObjectDetectionEngine(Common):
             The dataframe will have the following columns:
             - epoch: List of epoch numbers.
             - train_<loss_metrics>: List of training loss values for each epoch.            
-            - eval_<loss_metrics>: List of test loss values for each epoch.
+            - test_<loss_metrics>: List of test loss values for each epoch.
             - train_time: Training_time for each epcoh            
-            - eval_time: Testing time for each epoch.
+            - test_time: Testing time for each epoch.
             - lr: Learning rate value for each epoch.
 
         Example output (for 2 epochs):
         {
             epoch: [1, 2],
             train_loss: [2.0616, 1.0537],            
-            eval_loss: [1.2641, 1.5706],            
+            test_loss: [1.2641, 1.5706],            
             train_time: [1.1234, 1.5678],
-            eval_time: [0.4567, 0.7890],
+            test_time: [0.4567, 0.7890],
             lr: [0.001, 0.0005],
         }
         """
@@ -1002,14 +1002,14 @@ class ObjectDetectionEngine(Common):
             train_epoch_time = time.time() - train_epoch_start_time
 
             # Perform test step and time it
-            eval_epoch_start_time = time.time()
-            eval_loss, eval_loss_dict = self.eval_step(
+            test_epoch_start_time = time.time()
+            test_loss, test_loss_dict = self.test_step(
                 dataloader=test_dataloader,            
                 epoch_number=epoch,
                 amp=amp,
                 enable_clipping=enable_clipping,
                 )
-            eval_epoch_time = time.time() - eval_epoch_start_time if self.apply_validation else 0.0            
+            test_epoch_time = time.time() - test_epoch_start_time if self.apply_validation else 0.0            
 
             clear_output(wait=True)
 
@@ -1019,20 +1019,20 @@ class ObjectDetectionEngine(Common):
                 max_epochs=epochs,
                 train_loss=train_loss_dict,                
                 train_epoch_time=train_epoch_time,
-                eval_loss=eval_loss_dict,                
-                eval_epoch_time=eval_epoch_time,
+                test_loss=test_loss_dict,                
+                test_epoch_time=test_epoch_time,
                 plot_curves=plot_curves,
             )
 
             # Scheduler step after the optimizer
             self.scheduler_step(
-                eval_loss=eval_loss,
+                test_loss=test_loss,
             )
 
             # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.
             # If apply_validation is enabled then upate models based on validation results
             df_results = self.update_model(
-                eval_loss=eval_loss if self.apply_validation or eval_loss is not None else train_loss,                
+                test_loss=test_loss if self.apply_validation or test_loss is not None else train_loss,                
                 epoch=epoch
                 )
 

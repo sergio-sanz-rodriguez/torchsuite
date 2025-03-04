@@ -113,18 +113,17 @@ def COCO_2_PennFundanPed(coco_images_path, coco_annotations_path, output_images_
 
 
 def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, output_masks_dir, 
-                  selected_categories="all", reset_category_ids=True, label=""):
+                  class_dictionary="all", label=""):
     """
     Converts the COCO dataset to a folder format with images and segmentation masks.
-    Allows filtering specific categories and optionally remaps category IDs to a sequential range.
+    Allows filtering specific categories via a dictionary, or 'all' to use all categories.
 
     Parameters:
     - coco_images_path (str): Path to the COCO images directory.
     - coco_annotations_path (str): Path to the COCO annotation JSON file.
     - output_images_dir (str): Directory to save converted images.
-    - output_masks_dir (str): Directory to save corresponding masks.
-    - selected_categories (list of str or "all"): List of category names to include, or "all" for all categories.
-    - reset_category_ids (bool): If True, resets category IDs to a sequential range (0 to N-1).
+    - output_masks_dir (str): Directory to save corresponding masks.    
+    - class_dictionary (dict or "all"): A dictionary mapping category IDs to class names, or "all" for all categories.
     - label (str): Optional label to append to filenames.
     """
 
@@ -137,27 +136,33 @@ def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, ou
     with open(coco_annotations_path, 'r') as f:
         coco_data = json.load(f)
 
-    #category_mapping = {cat["id"]: cat["name"] for cat in coco_data["categories"]}
-
     # If "all" is selected, include all available categories
-    if selected_categories == "all":
-        selected_category_ids = {cat["id"]: cat["name"] for cat in coco_data["categories"]}
-    else:
-        selected_category_ids = {cat["id"]: cat["name"] for cat in coco_data["categories"] if cat["name"] in selected_categories}
+    if class_dictionary  == "all":
+        class_dictionary = {cat["id"]: cat["name"] for cat in coco_data["categories"]}
+    
+    # Check if class_dictionary is actually a dictionary
+    if not isinstance(class_dictionary, dict):
+        raise ValueError("`class_dictionary` must be a dictionary or 'all'.")
 
-    # Reset category IDs if enabled, starting from 1 (0 is background)
-    if reset_category_ids:
-        new_id_mapping = {old_id: new_id+1 for new_id, old_id in enumerate(selected_category_ids.keys())}
-    else:
-        new_id_mapping = {old_id: old_id for old_id in selected_category_ids.keys()}
+    # Map the ids n class_dictionary with the original ids in the coco dataset
+    selected_category_ids = {cat["id"]: cat["name"] for cat in coco_data["categories"] if cat["name"] in class_dictionary.values()}
+    category_id_mapping = {
+        coco_id: key
+        for key, value in class_dictionary.items()
+        for coco_id, coco_name in selected_category_ids.items()        
+        if coco_name == value
+    }
 
-    image_count = 0  # Counter for filenames
+    print(f"Category ID Mapping: {category_id_mapping}")
+
+    # Initialize counter for filenames
+    image_count = 0  
 
     for idx in range(len(dataset)):
         img, annotations = dataset[idx]
 
         # Filter only selected categories
-        valid_annotations = [ann for ann in annotations if ann["category_id"] in selected_category_ids]
+        valid_annotations = [ann for ann in annotations if ann["category_id"] in category_id_mapping]
 
         # Skip if no selected categories are present
         if not valid_annotations:
@@ -177,15 +182,23 @@ def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, ou
 
         for ann in valid_annotations:
             if not ann["segmentation"]:
-                continue  
-
+                continue
+            
+            # Get old category_id from the dataset
             category_id = ann["category_id"]
-            new_id = new_id_mapping[category_id]  # Get remapped ID
+            
+            # Check if category_id exists in the new mapping
+            if category_id not in category_id_mapping:
+                print(f"Warning: Category ID {category_id} not found in the new mapping. Skipping this annotation.")
+                continue  # Skip if category_id is not in the new mapping
+ 
+            # Get the new category ID using the mapping
+            internal_key = category_id_mapping[category_id]
 
             for seg in ann["segmentation"]:
                 if isinstance(seg, list) and len(seg) >= 6:  
                     polygon = [tuple(map(int, seg[i:i + 2])) for i in range(0, len(seg), 2)]
-                    draw.polygon(polygon, outline=new_id, fill=new_id)  # Use remapped ID for mask
+                    draw.polygon(polygon, outline=internal_key, fill=internal_key)  # Use remapped ID for mask
 
                     has_valid_segmentation = True
 
@@ -196,6 +209,10 @@ def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, ou
             os.remove(os.path.join(output_images_dir, filename))  
 
     print(f"Dataset conversion completed: {image_count} images and masks saved.")
+
+    return category_id_mapping # Return the mapping of COCO category IDs to internal category IDs
+
+
 
 
 def select_and_copy_samples(input_images_dir, input_masks_dir, output_images_dir, output_masks_dir, num_samples, seed=42):

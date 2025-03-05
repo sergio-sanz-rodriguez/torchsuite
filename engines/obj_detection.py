@@ -566,7 +566,7 @@ class ObjectDetectionEngine(Common):
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader):
+        for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_train_plt):
             
             images, targets = self.prepare_data(images, targets)
 
@@ -718,7 +718,7 @@ class ObjectDetectionEngine(Common):
             # Turn on inference context manager 
             with inference_context:
                 # Loop through DataLoader batches
-                for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader, colour='#FF9E2C'):
+                for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_test_plt):
 
                     images, targets = self.prepare_data(images, targets)
 

@@ -75,9 +75,10 @@ class UpConvert(nn.Module):
     def forward(self, x1, x2):
 
         # Perform upsampling and concatenate with the corresponding downsampled features
-        return self.conv(torch.cat([x2, self.up(x1)], dim=1))
+        x1 = self.up(x1)
+        return self.conv(torch.cat([x1, x2], dim=1))
 
-class UNet(nn.Module):
+class UNetFlexible(nn.Module):
     
     """
     The main U-Net architecture, consisting of an encoder-decoder structure with skip connections.
@@ -110,12 +111,12 @@ class UNet(nn.Module):
 
         # Last downsampling layer (without max pooling, only convolution)
         self.last_layer = DoubleConv2D(
-            in_channels=2**(num_layers-1) * 64,
-            out_channels=2**num_layers * 64,
+            in_channels=2**(num_layers-2) * 64,
+            out_channels=2**(num_layers-1) * 64,
             batch_norm=batch_norm)
 
         # Create the upsampling layers
-        for i in range(num_layers-1, 0, -1):
+        for i in range(num_layers-1, 0, -1): #[4, 3, 2, 1]
             self.up_convs.append(UpConvert(
                 in_channels=2**i * 64,
                 out_channels=2**(i-1) * 64,
@@ -141,6 +142,9 @@ class UNet(nn.Module):
             c, x = down(x)
             convs.append(c)
         
+        # Last layer
+        x = self.last_layer(x)
+
         # Forward pass through the upsampling layers with skip connections
         for i in range(len(self.up_convs)):
             x = self.up_convs[i](x, convs[-(i + 1)])
@@ -149,4 +153,35 @@ class UNet(nn.Module):
         return self.output(x)
 
 
-    
+class UNetStandard(nn.Module):
+    def __init__(self, in_channels, num_classes):
+        super().__init__()
+        self.down_convolution_1 = DownConvert(in_channels, 64)
+        self.down_convolution_2 = DownConvert(64, 128)
+        self.down_convolution_3 = DownConvert(128, 256)
+        self.down_convolution_4 = DownConvert(256, 512)
+
+        self.bottle_neck = DoubleConv2D(512, 1024)
+
+        self.up_convolution_1 = UpConvert(1024, 512)
+        self.up_convolution_2 = UpConvert(512, 256)
+        self.up_convolution_3 = UpConvert(256, 128)
+        self.up_convolution_4 = UpConvert(128, 64)
+
+        self.out = nn.Conv2d(in_channels=64, out_channels=num_classes, kernel_size=1)
+
+    def forward(self, x):
+        down_1, p1 = self.down_convolution_1(x)
+        down_2, p2 = self.down_convolution_2(p1)
+        down_3, p3 = self.down_convolution_3(p2)
+        down_4, p4 = self.down_convolution_4(p3)
+
+        b = self.bottle_neck(p4)
+
+        up_1 = self.up_convolution_1(b, down_4)
+        up_2 = self.up_convolution_2(up_1, down_3)
+        up_3 = self.up_convolution_3(up_2, down_2)
+        up_4 = self.up_convolution_4(up_3, down_1)
+
+        out = self.out(up_4)
+        return out

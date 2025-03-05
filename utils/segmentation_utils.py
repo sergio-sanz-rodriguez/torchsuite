@@ -118,3 +118,28 @@ def collapse_one_hot_mask (mask: torch.Tensor) -> torch.Tensor:
     collapsed_mask = torch.argmax(mask_with_extra, dim=0)
     
     return collapsed_mask
+
+
+def create_label_class_dict(mask, target_categories):
+    """
+    Creates a dictionary mapping label values to class names from a segmentation mask.
+
+    Args:
+        mask (Tensor): Segmentation mask (1D or 2D Tensor).
+        target_categories (dict): A dictionary that maps label values to class names.
+
+    Returns:
+        dict: A dictionary with label as keys and class names as values.
+    """
+    
+    # Pass subplot axes to the function
+    mask = collapse_one_hot_mask(mask)    
+    
+    # Identify nonzero categories
+    unique_labels = mask.unique()
+    unique_labels = unique_labels[unique_labels != 0]
+    
+    # Create the dictionary mapping labels to class names
+    label_class_dict = {label.item(): target_categories.get(label.item(), 'Unknown') for label in unique_labels}
+    
+    return label_class_dict

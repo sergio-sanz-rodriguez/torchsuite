@@ -1,3 +1,5 @@
+import os
+import shutil
 import torch
 from torch import nn
 
@@ -185,3 +187,146 @@ class UNetStandard(nn.Module):
 
         out = self.out(up_4)
         return out
+
+def remove_read_only_attribute(path):
+    
+    """
+    Removes the read-only attribute from a file or directory.
+
+    This function ensures that all files and subdirectories within a given 
+    path have their permissions set to be writable.
+
+    Args:
+        path (str): The path to the file or directory.
+    """
+
+    if os.path.exists(path):
+        os.chmod(path, 0o777)  # Make sure the file is writable
+        if os.path.isdir(path):
+            for root, dirs, files in os.walk(path, topdown=False):
+                for name in files + dirs:
+                    filepath = os.path.join(root, name)
+                    os.chmod(filepath, 0o777)
+        else:
+            os.chmod(path, 0o777)
+
+def clone_and_move_repo():
+    
+    """
+    Clones the pretrained UNet repository if not already cloned and moves the required files.
+
+    If the `unet_mberkay0.py` model file does not exist in the `models/` directory, 
+    this function will:
+    - Clone the GitHub repository containing the pretrained backbones.
+    - Move the required model files to `models/`.
+    - Remove the cloned repository after copying the necessary files.
+    """
+
+    repo_url = "https://github.com/mberkay0/pretrained-backbones-unet.git"
+    repo_name = "tmp"
+    models_dir = "models"
+    backbones_dir = os.path.join("backbones_unet")
+    
+    # Ensure models directory exists
+    os.makedirs(models_dir, exist_ok=True)
+
+    # If already cloned, avoid re-downloading
+    if not os.path.exists(backbones_dir):
+
+        # Clone repository
+        print(f"Cloning {repo_url}...")
+        os.system(f"git clone {repo_url} {repo_name}")
+        print("Repository cloned successfully.")        
+
+        # Move `backbones_unet` folder to `models/`
+        shutil.move(os.path.join(repo_name, "backbones_unet"), ".")
+        shutil.move(os.path.join(backbones_dir, "model", "unet.py"), os.path.join(models_dir, "unet_mberkay0.py"))
+
+        # Remove read-only attributes and delete the temp repo
+        if os.path.exists(repo_name):
+            remove_read_only_attribute(repo_name)
+            shutil.rmtree(repo_name)
+
+    try:
+        from backbones_unet.__init__ import __available_models__
+    except ImportError as e:
+        print(f"Error importing __available_models__: {e}")
+        __available_models__ = []
+    
+    # Remove backbones_unet
+    if os.path.exists(backbones_dir):
+        remove_read_only_attribute(backbones_dir)
+        shutil.rmtree(backbones_dir)
+
+    return __available_models__
+
+def create_unet(
+    model_type='standard',
+    in_channels=3,
+    num_classes=1,
+    print_available_models=False,
+    **kwargs)
+    :
+    
+    """
+    Creates a UNet model based on the specified type.
+
+    This function supports three types of UNet models:
+    - 'flexible': Instantiates `UNetFlexible`.
+        Kwargs: num_layers (default: 5), batch_norm (default=True)
+    - 'standard': Instantiates `UNetStandard`.
+    - 'pretrained': Loads a pretrained UNet model from an external repository.
+        https://github.com/mberkay0/pretrained-backbones-unet.git
+        Kwargs (some): backbone (default: 'resnet50'), pretrained (default: True), encoder_freeze (default: False)
+    If `model_type` is 'pretrained', it ensures the required model file is 
+    available by cloning the repository if necessary.
+
+    Args:
+        model_type (str): The type of UNet model to create ('flexible', 'standard', or 'pretrained').
+        in_channels (int): The number of input channels for the model.
+        num_classes (int): The number of output classes for segmentation.
+        print_available_models (bool, optional): Whether to print available models when using 'pretrained'. Default is False.
+        **kwargs: Additional parameters for model configuration.
+
+    Returns:
+        model: An instance of the selected UNet model.
+
+    Raises:
+        ValueError: If an invalid `model_type` is provided.
+    """
+
+    if model_type == "flexible":
+        model = UNetFlexible(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            **kwargs
+        )
+    elif model_type == "standard":
+        model = UNetStandard(
+            in_channels=in_channels,
+            num_classes=num_classes
+        )
+    
+    elif model_type == "pretrained":
+        # Clone and move repo files if not already done
+        available_models = clone_and_move_repo()
+
+        from models import unet_mberkay0
+        #from models.__init__ import __available_models__
+        
+        # Print available models
+        if print_available_models:
+            print(f"Available backbones: {available_models}")
+        
+        # Create the U-Net model with pretrained backbones
+        model = unet_mberkay0.Unet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            **kwargs
+        )
+    else:
+        raise ValueError(f"Invalid model_type: {model_type}. Choose from 'flexible', 'standard', or 'pretrained'.")
+    
+    print(f"Model ``{model_type}`` created sucessfully!")
+
+    return model

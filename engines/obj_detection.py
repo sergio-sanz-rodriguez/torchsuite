@@ -11,7 +11,6 @@ import pandas as pd
 import copy
 import warnings
 import re
-import sys
 import torchvision.ops as ops
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -23,7 +22,7 @@ try:
     from torch.amp import GradScaler, autocast
 except ImportError:
     from torch.cuda.amp import GradScaler, autocast
-from sklearn.metrics import precision_recall_curve, roc_curve, auc
+#from sklearn.metrics import precision_recall_curve, roc_curve, auc
 from contextlib import nullcontext
 from .common import Common, Colors
 

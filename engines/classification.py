@@ -14,12 +14,11 @@ import pandas as pd
 import copy
 import warnings
 import re
-import sys
 from datetime import datetime
 from typing import Tuple, Dict, Any, List, Union, Optional
 from tqdm.auto import tqdm 
 from torch.utils.tensorboard import SummaryWriter
-from torcheval.metrics.functional import multiclass_f1_score
+#from torcheval.metrics.functional import multiclass_f1_score
 from IPython.display import clear_output
 import matplotlib.pyplot as plt
 from pathlib import Path

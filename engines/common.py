@@ -113,6 +113,7 @@ class Common(Logger):
     
     @staticmethod
     def calculate_f1_score(y_true, y_pred, num_classes, average="macro"):
+
         """Calculates the F1 score for multi-class classification.
 
         Args:
@@ -239,6 +240,138 @@ class Common(Logger):
             partial_auc_values.append(partial_auc_value)
 
         return np.mean(partial_auc_values)
+
+    @staticmethod
+    def dice_coefficient_(y_true, y_pred, threshold=0.5, eps=1e-6):
+
+        """
+        Computes Dice Coefficient for binary or multi-class segmentation.
+        """
+        
+        # Multiclass case, apply softmax
+        if y_pred.dim() == 4 and y_pred.shape[1] > 1:
+            y_pred = torch.argmax(y_pred, dim=1)  # Take the class with the highest probability
+        
+        # For binary case, apply sigmoid
+        else:
+            y_pred = torch.sigmoid(y_pred)
+
+        # Convert predictions to binary
+        y_pred = y_pred > threshold
+        
+        # Flatten the tensors
+        y_true = y_true.view(-1)
+        y_pred = y_pred.view(-1)
+
+        # Calculate the intersection and the union
+        intersection = torch.sum(y_pred * y_true)
+        union = torch.sum(y_pred) + torch.sum(y_true)
+
+        # Compute the Dice coefficient
+        dice = (2. * intersection + eps) / (union + eps)
+
+        return dice
+
+    @staticmethod
+    def dice_coefficient(y_true, y_pred, num_classes=1, from_logits=True, threshold=0.5, eps=1e-6, reduction='mean'):
+        
+        """
+        Computes the Dice Coefficient for binary or multi-class segmentation.
+        """
+        
+        # For binary segmentation apply sigmoid
+        if num_classes == 1:
+            if from_logits:
+                y_pred = torch.sigmoid(y_pred)
+            else:
+                y_pred = torch.clamp(y_pred, 0, 1)            
+            y_pred = y_pred > threshold
+            #y_true = (y_true > 0).float()
+
+        # For multi-class segmentation apply softmax        
+        else:            
+            if from_logits:
+                y_pred = torch.softmax(y_pred, dim=1)
+            y_pred = torch.argmax(y_pred, dim=1)            
+        
+        dice_scores = []
+        
+        # Loop through all classes
+        for i in range(num_classes):
+            if num_classes == 1:
+                true_class = y_true
+                pred_class = y_pred
+            else:
+                true_class = y_true[:, i, :, :].float()
+                pred_class = (y_pred == i).float()
+            
+            intersection = torch.sum(true_class * pred_class)
+            union = torch.sum(true_class) + torch.sum(pred_class)
+            
+            # Calculate Dice score for each class
+            dice = (2. * intersection + eps) / (union + eps)
+            dice_scores.append(dice)
+        
+        # Reduce across classes
+        if reduction == 'mean':
+            return torch.mean(torch.tensor(dice_scores))
+        elif reduction == 'sum':
+            return torch.sum(torch.tensor(dice_scores))
+        elif reduction is None:
+            return torch.stack(dice_scores)
+        else:
+            raise ValueError(f"Unexpected reduction method: {reduction}")
+
+
+    @staticmethod
+    def intersection_over_union(y_true, y_pred, num_classes=1, from_logits=True, threshold=0.5, eps=1e-6, reduction='mean'):
+
+        """
+        Computes the Intersection over Union (IoU) score for binary or multi-class segmentation.
+        """
+        
+        # For binary segmentation apply sigmoid
+        if num_classes == 1:
+            if from_logits:
+                y_pred = torch.sigmoid(y_pred)
+            else:
+                y_pred = torch.clamp(y_pred, 0, 1)            
+            y_pred = y_pred > threshold
+            #y_true = (y_true > 0).float()
+
+        # For multi-class segmentation apply softmax        
+        else:            
+            if from_logits:
+                y_pred = torch.softmax(y_pred, dim=1)
+            y_pred = torch.argmax(y_pred, dim=1)
+
+        iou_scores = []
+
+        # Loop through all classes
+        for i in range(num_classes):
+            if num_classes == 1:
+                true_class = y_true
+                pred_class = y_pred
+            else:
+                true_class = y_true[:, i, :, :].float()
+                pred_class = (y_pred == i).float()
+
+            intersection = torch.sum(true_class * pred_class)
+            union = torch.sum(true_class) + torch.sum(pred_class) - intersection
+
+            # Calculate IoU score for each class
+            iou = (intersection + eps) / (union + eps)
+            iou_scores.append(iou)
+
+        # Reduce across classes
+        if reduction == 'mean':
+            return torch.mean(torch.tensor(iou_scores))
+        elif reduction == 'sum':
+            return torch.sum(torch.tensor(iou_scores))
+        elif reduction is None:
+            return torch.stack(iou_scores)
+        else:
+            raise ValueError(f"Unexpected reduction method: {reduction}")
 
     @staticmethod
     def save_model(model: torch.nn.Module, target_dir: str, model_name: str):

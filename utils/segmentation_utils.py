@@ -97,7 +97,7 @@ def visualize_original_and_transformed(img_nt, target_nt, img_t, target_t, alpha
     plt.show()
 
 
-def collapse_one_hot_mask (mask: torch.Tensor) -> torch.Tensor:
+def collapse_one_hot_mask(mask: torch.Tensor) -> torch.Tensor:
     """
     Converts a one-hot encoded mask (C, H, W) to a single-channel mask (H, W).
     

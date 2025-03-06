@@ -79,6 +79,8 @@ def roc_curve_gpu(y_true, y_score):
 
     return fpr, tpr
 
+
+# Image Classification: Cross-Entropy + pAUC Loss
 class CrossEntropyPAUCLoss(nn.Module):
 
     """
@@ -202,7 +204,7 @@ class CrossEntropyPAUCLoss(nn.Module):
 
         return total_loss
 
-
+# Image classification: Cross-Entropy + FPR Loss
 class CrossEntropyFPRLoss(nn.Module):
 
     """
@@ -335,7 +337,7 @@ class CrossEntropyFPRLoss(nn.Module):
             return 0
         
 
-# Define knowledge distillation loss
+# Image distillation (classification) Loss
 class DistillationLoss(nn.Module):
 
     """
@@ -398,3 +400,106 @@ class DistillationLoss(nn.Module):
         )
         hard_loss = self.ce_loss(student_logits, labels)
         return self.alpha * hard_loss + (1 - self.alpha) * soft_loss
+
+
+# Image segmentation: Dice Loss
+class DiceLoss(nn.Module):
+    def __init__(self, num_classes=1, from_logits=True, threshold=0.5, eps=1e-6, reduction='mean'):
+        
+        """
+        Dice Loss for binary and multi-class segmentation.
+        Args:
+            num_classes (int): Number of classes (1 for binary segmentation).
+            from_logits (bool): Whether the predictions are raw logits (True) or probabilities (False).
+            threshold (float): Threshold for binary segmentation, to convert predictions to binary masks.
+            eps (float): Small constant for numerical stability.
+            reduction (str): Specifies the reduction to apply to the output ('mean', 'sum', or None).
+        """
+        
+        super(DiceLoss, self).__init__()
+        self.num_classes = num_classes
+        self.from_logits = from_logits
+        self.threshold = threshold
+        self.eps = eps
+        self.reduction = reduction
+
+    def forward(self, y_pred, y_true):
+        
+        """
+        Computes the Dice Loss.
+
+        Args:
+            y_pred: Model predictions (logits) [batch, num_classes, H, W] (multi-class) or [batch, 1, H, W] (binary)
+            y_true: Ground truth labels [batch, H, W] (multi-class) or [batch, 1, H, W] (binary)
+
+        Returns:
+            Dice Loss value (lower is better)
+        """
+
+        if self.num_classes == 1:
+            # Binary segmentation
+            if self.from_logits:
+                y_pred = torch.sigmoid(y_pred)
+            y_pred = (y_pred > self.threshold).float()  # Convert to binary mask
+            #y_true = (y_true > 0).float()  # Convert to binary
+
+        else:
+            # Multi-class segmentation
+            if self.from_logits:
+                y_pred = torch.softmax(y_pred, dim=1)
+            y_pred = torch.argmax(y_pred, dim=1)
+                        
+
+        dice_scores = []
+        for i in range(self.num_classes):
+            if self.num_classes == 1:
+                true_class = y_true
+                pred_class = y_pred
+            else:
+                true_class = y_true[:, i, :, :].float()
+                pred_class = (y_pred == i).float()
+
+            intersection = torch.sum(true_class * pred_class)
+            union = torch.sum(true_class) + torch.sum(pred_class)
+
+            dice = 1 - (2. * intersection + self.eps) / (union + self.eps)
+            dice_scores.append(dice)
+
+        # Reduce across classes
+        if self.reduction == 'mean':
+            return torch.mean(torch.tensor(dice_scores))
+        elif self.reduction == 'sum':
+            return torch.sum(torch.tensor(dice_scores))
+        elif self.reduction is None:
+            return torch.stack(dice_scores)
+        else:
+            raise ValueError(f"Unexpected reduction method: {self.reduction}")
+
+# Image Segmentation: Dice + Cross-Entropy Loss
+class DiceCrossEntropyLoss(nn.Module):
+    def __init__(self, num_classes=1, alpha=0.5, threshold=0.5, eps=1e-6, label_smoothing=0.1):
+        
+        """
+        Combines Dice Loss and Cross-Entropy Loss.
+        
+        - alpha: weight factor (default: 0.5 means equal weight)
+        """
+
+        super(DiceCrossEntropyLoss, self).__init__()
+        self.num_classes = num_classes
+        self.alpha = alpha
+        self.threshold = threshold
+        self.eps = eps
+        self.label_smoothing = label_smoothing        
+
+        # For multi-class: CrossEntropyLoss, for binary classification: BCEWithLogitsLoss
+        if self.num_classes > 1:
+            self.ce_loss = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
+        else:
+            self.ce_loss = nn.BCEWithLogitsLoss()
+
+    def forward(self, y_pred, y_true):
+        dice_loss = DiceLoss(self.num_classes, self.threshold, self.eps)(y_pred, y_true)
+        ce_loss = self.ce_loss(y_pred, y_true.float())
+        
+        return self.alpha * dice_loss + (1 - self.alpha) * ce_loss

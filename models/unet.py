@@ -156,6 +156,28 @@ class UNetFlexible(nn.Module):
 
 
 class UNetStandard(nn.Module):
+
+    """
+    A standard U-Net model for image segmentation.
+
+    This model consists of:
+    - A contracting path (encoder) with downsampling and feature extraction.
+    - A bottleneck layer for deep feature representation.
+    - An expansive path (decoder) for upsampling and feature reconstruction.
+    - A final output layer to generate segmentation maps.
+
+    Parameters:
+    -----------
+    in_channels : int
+        Number of input channels (e.g., 3 for RGB images).
+    num_classes : int
+        Number of output classes for segmentation.
+
+    Example Usage:
+    --------------
+    model = UNetStandard(in_channels=3, num_classes=1)
+    """   
+
     def __init__(self, in_channels, num_classes):
         super().__init__()
         self.down_convolution_1 = DownConvert(in_channels, 64)
@@ -173,6 +195,21 @@ class UNetStandard(nn.Module):
         self.out = nn.Conv2d(in_channels=64, out_channels=num_classes, kernel_size=1)
 
     def forward(self, x):
+
+        """
+        Forward pass of the U-Net model.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, in_channels, height, width).
+
+        Returns:
+        --------
+        torch.Tensor
+            Output tensor of shape (batch_size, num_classes, height, width).
+        """
+        
         down_1, p1 = self.down_convolution_1(x)
         down_2, p2 = self.down_convolution_2(p1)
         down_3, p3 = self.down_convolution_3(p2)

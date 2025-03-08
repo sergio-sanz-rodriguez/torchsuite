@@ -80,11 +80,14 @@ class UpConvert(nn.Module):
         x1 = self.up(x1)
         return self.conv(torch.cat([x1, x2], dim=1))
 
-class UNetFlexible(nn.Module):
+class UNetEnhanced(nn.Module):
     
     """
-    The main U-Net architecture, consisting of an encoder-decoder structure with skip connections.
-    It includes:
+    The U-Net architecture, consisting of an encoder-decoder structure with skip connections.
+    Unlike the vanilla implementation, the model allows to configure the number of layers and
+    enable batch normalization.
+
+    The model includes:
     1. Downsampling (encoder) part to capture context.
     2. Upsampling (decoder) part to recover spatial resolution.
     3. Skip connections to preserve high-resolution features from the encoder.
@@ -155,10 +158,10 @@ class UNetFlexible(nn.Module):
         return self.output(x)
 
 
-class UNetStandard(nn.Module):
+class UNetVanilla(nn.Module):
 
     """
-    A standard U-Net model for image segmentation.
+    The vanilla U-Net model for image segmentation.
 
     This model consists of:
     - A contracting path (encoder) with downsampling and feature extraction.
@@ -209,7 +212,7 @@ class UNetStandard(nn.Module):
         torch.Tensor
             Output tensor of shape (batch_size, num_classes, height, width).
         """
-        
+
         down_1, p1 = self.down_convolution_1(x)
         down_2, p2 = self.down_convolution_2(p1)
         down_3, p3 = self.down_convolution_3(p2)
@@ -302,16 +305,15 @@ def create_unet(
     in_channels=3,
     num_classes=1,
     print_available_models=False,
-    **kwargs)
-    :
+    **kwargs):
     
     """
     Creates a UNet model based on the specified type.
 
     This function supports three types of UNet models:
-    - 'flexible': Instantiates `UNetFlexible`.
+    - 'enhanced': Instantiates `UNetEnhanced`.
         Kwargs: num_layers (default: 5), batch_norm (default=True)
-    - 'standard': Instantiates `UNetStandard`.
+    - 'vanilla': Instantiates `UNetVanilla`.
     - 'pretrained': Loads a pretrained UNet model from an external repository.
         https://github.com/mberkay0/pretrained-backbones-unet.git
         Kwargs (some): backbone (default: 'resnet50'), pretrained (default: True), encoder_freeze (default: False)
@@ -319,7 +321,7 @@ def create_unet(
     available by cloning the repository if necessary.
 
     Args:
-        model_type (str): The type of UNet model to create ('flexible', 'standard', or 'pretrained').
+        model_type (str): The type of UNet model to create ('enhanced', 'vanilla', or 'pretrained').
         in_channels (int): The number of input channels for the model.
         num_classes (int): The number of output classes for segmentation.
         print_available_models (bool, optional): Whether to print available models when using 'pretrained'. Default is False.
@@ -332,13 +334,13 @@ def create_unet(
         ValueError: If an invalid `model_type` is provided.
     """
 
-    if model_type == "flexible":
+    if model_type == "enhanced":
         model = UNetFlexible(
             in_channels=in_channels,
             num_classes=num_classes,
             **kwargs
         )
-    elif model_type == "standard":
+    elif model_type == "vanilla":
         model = UNetStandard(
             in_channels=in_channels,
             num_classes=num_classes

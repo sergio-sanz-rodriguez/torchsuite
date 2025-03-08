@@ -404,76 +404,70 @@ class DistillationLoss(nn.Module):
 
 # Image segmentation: Dice Loss
 class DiceLoss(nn.Module):
-    def __init__(self, num_classes=1, from_logits=True, threshold=0.5, eps=1e-6, reduction='mean'):
+    def __init__(self, num_classes=1, from_logits=True, eps=1e-6, reduction='mean'):
         
         """
-        Dice Loss for binary and multi-class segmentation.
+        Dice Loss for binary and multi-class segmentation (flattened version for global calculation).
+        
         Args:
-            num_classes (int): Number of classes (1 for binary segmentation).
-            from_logits (bool): Whether the predictions are raw logits (True) or probabilities (False).
-            threshold (float): Threshold for binary segmentation, to convert predictions to binary masks.
+            num_classes (int): Number of classes (1 for binary segmentation, >1 for multi-class).
+            from_logits (bool): If True, applies sigmoid activation to predictions.
             eps (float): Small constant for numerical stability.
-            reduction (str): Specifies the reduction to apply to the output ('mean', 'sum', or None).
+            reduction (str): Specifies the reduction method ('mean', 'sum', or None).
         """
         
         super(DiceLoss, self).__init__()
         self.num_classes = num_classes
         self.from_logits = from_logits
-        self.threshold = threshold
         self.eps = eps
         self.reduction = reduction
 
-    def forward(self, y_pred, y_true):
-        
+    def forward(self, y_true, y_pred):
+
         """
-        Computes the Dice Loss.
+        Computes the Dice Loss by flattening both predictions and ground truth.
 
         Args:
-            y_pred: Model predictions (logits) [batch, num_classes, H, W] (multi-class) or [batch, 1, H, W] (binary)
-            y_true: Ground truth labels [batch, H, W] (multi-class) or [batch, 1, H, W] (binary)
+            y_true: Ground truth labels (one-hot encoded for multi-class) -> shape (N, C, H, W)
+            y_pred: Model predictions (logits if from_logits=True) -> shape (N, C, H, W)
 
         Returns:
-            Dice Loss value (lower is better)
+            Dice Loss value (lower is better).
         """
 
-        if self.num_classes == 1:
-            # Binary segmentation
-            if self.from_logits:
-                y_pred = torch.sigmoid(y_pred)
-            y_pred = (y_pred > self.threshold).float()  # Convert to binary mask
-            #y_true = (y_true > 0).float()  # Convert to binary
+        # Apply sigmoid activation for binary segmentation
+        if self.from_logits:
+            y_pred = torch.sigmoid(y_pred)
 
-        else:
-            # Multi-class segmentation
-            if self.from_logits:
-                y_pred = torch.softmax(y_pred, dim=1)
-            y_pred = torch.argmax(y_pred, dim=1)
-                        
+        # Ensure ground truth is float for stability
+        y_true = y_true.float()  
 
-        dice_scores = []
+        # Compute the Dice loss per class
+        dice_losses = []
         for i in range(self.num_classes):
-            if self.num_classes == 1:
-                true_class = y_true
-                pred_class = y_pred
-            else:
-                true_class = y_true[:, i, :, :].float()
-                pred_class = (y_pred == i).float()
+            pred_class = y_pred[:, i, :, :]  # Probability map for class i
+            true_class = y_true[:, i, :, :]  # Ground-truth mask for class i
 
             intersection = torch.sum(true_class * pred_class)
             union = torch.sum(true_class) + torch.sum(pred_class)
 
-            dice = 1 - (2. * intersection + self.eps) / (union + self.eps)
-            dice_scores.append(dice)
+            dice = (2. * intersection + self.eps) / (union + self.eps)
+            dice_loss = 1 - dice
+            if dice < 0 or dice > 1:
+                print(f"Warning: Dice coefficient out of range for class {i}: {dice}")
+            dice_losses.append(dice_loss)
+
+        # Stack class-wise dice scores
+        dice_losses = torch.stack(dice_losses)  
 
         # Reduce across classes
         if self.reduction == 'mean':
-            return torch.mean(torch.tensor(dice_scores))
+            return torch.mean(dice_losses)
         elif self.reduction == 'sum':
-            return torch.sum(torch.tensor(dice_scores))
-        elif self.reduction is None:
-            return torch.stack(dice_scores)
+            return torch.sum(dice_losses)
         else:
-            raise ValueError(f"Unexpected reduction method: {self.reduction}")
+            return dice_losses
+
 
 # Image Segmentation: Dice + Cross-Entropy Loss
 class DiceCrossEntropyLoss(nn.Module):
@@ -498,8 +492,8 @@ class DiceCrossEntropyLoss(nn.Module):
         else:
             self.ce_loss = nn.BCEWithLogitsLoss()
 
-    def forward(self, y_pred, y_true):
-        dice_loss = DiceLoss(self.num_classes, self.threshold, self.eps)(y_pred, y_true)
+    def forward(self, y_true, y_pred):
+        dice_loss = DiceLoss(self.num_classes, self.threshold, self.eps)(y_true, y_pred)
         ce_loss = self.ce_loss(y_pred, y_true.float())
         
         return self.alpha * dice_loss + (1 - self.alpha) * ce_loss

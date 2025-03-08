@@ -602,7 +602,7 @@ class SegmentationEngine(Common):
                             continue
                     
                     # Calculate loss, normalize by accumulation steps
-                    loss = self.loss_fn(y_pred, y) / accumulation_steps
+                    loss = self.loss_fn(y, y_pred) / accumulation_steps
                 
                     # Check for NaN or Inf in loss
                     if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
@@ -622,7 +622,7 @@ class SegmentationEngine(Common):
                 y_pred = self.get_predictions(self.model(X))
                 
                 # Calculate loss, normalize by accumulation steps
-                loss = self.loss_fn(y_pred, y) / accumulation_steps
+                loss = self.loss_fn(y, y_pred) / accumulation_steps
 
                 # Backward pass
                 loss.backward()
@@ -664,11 +664,11 @@ class SegmentationEngine(Common):
                 # Optimizer zero grad
                 self.optimizer.zero_grad()
 
-            # Accumulate metrics
-            train_loss += loss.item() * accumulation_steps  # Scale back to original loss
+            # Accumulate metrics            
+            train_loss += loss.item() * accumulation_steps  # Scale back to original loss            
             y_pred = y_pred.float() # Convert to float for stability            
-            train_dice += self.dice_coefficient(y, y_pred, self.num_classes)
-            train_iou += self.intersection_over_union(y, y_pred, self.num_classes)
+            train_dice += self.dice_coefficient(y, y_pred, self.num_classes) # This returns a cpu scalar
+            train_iou += self.intersection_over_union(y, y_pred, self.num_classes) # This returns a cpu scalar
 
         # Adjust metrics to get average loss and accuracy per batch
         train_loss = train_loss / len_dataloader
@@ -755,7 +755,7 @@ class SegmentationEngine(Common):
                                 continue
 
                         # Calculate and accumulate loss
-                        loss = self.loss_fn(y_pred, y)
+                        loss = self.loss_fn(y, y_pred)
                         test_loss += loss.item()
 
                         # Debug NaN/Inf loss
@@ -765,8 +765,8 @@ class SegmentationEngine(Common):
 
                     # Calculate and accumulate accuracy
                     y_pred = y_pred.float() # Convert to float for stability
-                    test_dice += self.dice_coefficient(y, y_pred, self.num_classes)
-                    test_iou += self.intersection_over_union(y, y_pred, self.num_classes)
+                    test_dice += self.dice_coefficient(y, y_pred, self.num_classes) # This returns a cpu scalar
+                    test_iou += self.intersection_over_union(y, y_pred, self.num_classes) # This returns a cpu scalar
 
             # Adjust metrics to get average loss and accuracy per batch 
             test_loss = test_loss / len_dataloader

@@ -87,32 +87,36 @@ class Logger:
 class Common(Logger):
 
     """A class containing utility functions for classification tasks."""
+    def __init__(self, log_verbose: bool=True):
+        super().__init__(log_verbose=log_verbose)
 
-    @staticmethod
-    def sec_to_min_sec(seconds):
-        """Converts seconds to a formatted string in minutes and seconds."""
+    def sec_to_min_sec(self, seconds):
+
+        """
+        Converts seconds to a formatted string in minutes and seconds.
+        """
+
         if not isinstance(seconds, (int, float)) or seconds < 0:
-            Logger().error("Input must be a non-negative number.")
+            self.error("Input must be a non-negative number.")
+            return None
                     
         minutes = int(seconds // 60)
         remaining_seconds = int(seconds % 60)
 
         return f"{str(minutes).rjust(3)}m{str(remaining_seconds).zfill(2)}s"
 
-    @staticmethod
-    def calculate_accuracy(y_true, y_pred):
+    def calculate_accuracy(self, y_true, y_pred):
 
         """
         Calculates accuracy between truth labels and predictions.
         """
 
         if len(y_true) != len(y_pred):
-            raise ValueError(f"Length of y_true and y_pred for accuracy calculation must be the same.")
+            self.error(f"Length of y_true and y_pred for accuracy calculation must be the same.")
 
         return torch.eq(y_true, y_pred).sum().item() / len(y_true)
     
-    @staticmethod
-    def calculate_f1_score(y_true, y_pred, num_classes, average="macro"):
+    def calculate_f1_score(self, y_true, y_pred, num_classes, average="macro"):
 
         """Calculates the F1 score for multi-class classification.
 
@@ -127,7 +131,7 @@ class Common(Logger):
         """
 
         if len(y_true) != len(y_pred):
-            raise ValueError(f"Length of y_true and y_pred for F1-score calculation must be the same.")
+            self.error(f"Length of y_true and y_pred for F1-score calculation must be the same.")
 
         # Convert tensors to integer labels
         y_true = y_true.int()
@@ -166,17 +170,16 @@ class Common(Logger):
             return 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
         else:
-            raise ValueError("Invalid value for 'average'. Choose 'macro', 'weighted', or 'micro'.")
+            self.error("Invalid value for 'average'. Choose 'macro', 'weighted', or 'micro'.")
 
-    @staticmethod
-    def calculate_fpr_at_recall(y_true, y_pred_probs, recall_threshold):
+    def calculate_fpr_at_recall(self, y_true, y_pred_probs, recall_threshold):
         
         """
         Calculates the False Positive Rate (FPR) at a specified recall threshold.
         """
 
         if not (0 <= recall_threshold <= 1):
-            Logger().error(f"'recall_threshold' must be between 0 and 1.")
+            self.error(f"'recall_threshold' must be between 0 and 1.")
 
 
         if isinstance(y_pred_probs, list):
@@ -206,8 +209,7 @@ class Common(Logger):
 
         return np.mean(fpr_per_class)
 
-    @staticmethod
-    def calculate_pauc_at_recall(y_true, y_pred_probs, recall_threshold=0.80, num_classes=101):
+    def calculate_pauc_at_recall(self, y_true, y_pred_probs, recall_threshold=0.80, num_classes=101):
         
         """
         Calculates the Partial AUC for multi-class classification at the given recall threshold.
@@ -241,8 +243,7 @@ class Common(Logger):
 
         return np.mean(partial_auc_values)
 
-    @staticmethod
-    def dice_coefficient_(y_true, y_pred, threshold=0.5, eps=1e-6):
+    def dice_coefficient_(self, y_true, y_pred, threshold=0.5, eps=1e-6):
 
         """
         Computes Dice Coefficient for binary or multi-class segmentation.
@@ -272,109 +273,111 @@ class Common(Logger):
 
         return dice
 
-    @staticmethod
-    def dice_coefficient(y_true, y_pred, num_classes=1, from_logits=True, threshold=0.5, eps=1e-6, reduction='mean'):
+
+    def dice_coefficient(self, y_true, y_pred, num_classes=1, from_logits=True, eps=1e-6, reduction='mean'):
         
         """
         Computes the Dice Coefficient for binary or multi-class segmentation.
-        """
-        
-        # For binary segmentation apply sigmoid
-        if num_classes == 1:
-            if from_logits:
-                y_pred = torch.sigmoid(y_pred)
-            else:
-                y_pred = torch.clamp(y_pred, 0, 1)            
-            y_pred = y_pred > threshold
-            #y_true = (y_true > 0).float()
+        """        
 
-        # For multi-class segmentation apply softmax        
-        else:            
-            if from_logits:
-                y_pred = torch.softmax(y_pred, dim=1)
-            y_pred = torch.argmax(y_pred, dim=1)            
+        # Check out lenghts
+        if len(y_true) != len(y_pred):
+            self.error(f"Length of y_true and y_pred for Dice coefficient calculation must be the same.")
         
+        # Ensure 4K shape
+        if y_true.dim() != 4:
+            y_true.unsqueeze(0)
+        
+        if y_pred.dim() != 4:
+            y_pred.unsqueeze(0)
+
+        # Apply sigmoid if logits are provided
+        if from_logits:
+            y_pred = torch.sigmoid(y_pred)
+        
+        # Ensure ground truth is float for stability
+        y_true = y_true.float()
+
+        # For multi-class, treat each class as a binary mask
+        if num_classes > 1:            
+            y_pred = (y_pred > 0.5)
+
+        # Compute the dice coefficient per class
         dice_scores = []
-        
-        # Loop through all classes
         for i in range(num_classes):
-            if num_classes == 1:
-                true_class = y_true
-                pred_class = y_pred
-            else:
-                true_class = y_true[:, i, :, :].float()
-                pred_class = (y_pred == i).float()
-            
+            pred_class = y_pred[:, i, :, :]
+            true_class = y_true[:, i, :, :]
+
             intersection = torch.sum(true_class * pred_class)
             union = torch.sum(true_class) + torch.sum(pred_class)
-            
-            # Calculate Dice score for each class
+
             dice = (2. * intersection + eps) / (union + eps)
             dice_scores.append(dice)
-        
+
+        # Stack class-wise dice scores
+        dice_scores = torch.stack(dice_scores)  
+
         # Reduce across classes
         if reduction == 'mean':
-            return torch.mean(torch.tensor(dice_scores))
+            return torch.mean(dice_scores).item()
         elif reduction == 'sum':
-            return torch.sum(torch.tensor(dice_scores))
-        elif reduction is None:
-            return torch.stack(dice_scores)
+            return torch.sum(dice_scores).item()
         else:
-            raise ValueError(f"Unexpected reduction method: {reduction}")
+            return dice_scores.cpu()
 
-
-    @staticmethod
-    def intersection_over_union(y_true, y_pred, num_classes=1, from_logits=True, threshold=0.5, eps=1e-6, reduction='mean'):
-
-        """
-        Computes the Intersection over Union (IoU) score for binary or multi-class segmentation.
-        """
+    def intersection_over_union(self, y_true, y_pred, num_classes=1, from_logits=True, eps=1e-6, reduction='mean'):
         
-        # For binary segmentation apply sigmoid
-        if num_classes == 1:
-            if from_logits:
-                y_pred = torch.sigmoid(y_pred)
-            else:
-                y_pred = torch.clamp(y_pred, 0, 1)            
-            y_pred = y_pred > threshold
-            #y_true = (y_true > 0).float()
+        """
+        Computes the Intersection over Union (IoU) for binary or multi-class segmentation.
+        The inputs should be tesors with shape (batch, channels/classes, height, width)
+        """
 
-        # For multi-class segmentation apply softmax        
-        else:            
-            if from_logits:
-                y_pred = torch.softmax(y_pred, dim=1)
-            y_pred = torch.argmax(y_pred, dim=1)
+        # Check out lenghts
+        if len(y_true) != len(y_pred):
+            self.error(f"Length of y_true and y_pred for IoU calculation must be the same.")
+        
+        # Ensure 4K shape
+        if y_true.dim() != 4:
+            y_true.unsqueeze(0)
+        
+        if y_pred.dim() != 4:
+            y_pred.unsqueeze(0)
 
+        # Apply sigmoid if logits are provided
+        if from_logits:
+            y_pred = torch.sigmoid(y_pred)
+        
+        # Ensure ground truth is float for stability
+        y_true = y_true.float()
+
+        # For multi-class, treat each class as a binary mask
+        if num_classes > 1:
+            y_pred = (y_pred > 0.5)
+
+        # Compute the IoU score per class
         iou_scores = []
-
-        # Loop through all classes
         for i in range(num_classes):
-            if num_classes == 1:
-                true_class = y_true
-                pred_class = y_pred
-            else:
-                true_class = y_true[:, i, :, :].float()
-                pred_class = (y_pred == i).float()
+            pred_class = y_pred[:, i, :, :]
+            true_class = y_true[:, i, :, :]
 
             intersection = torch.sum(true_class * pred_class)
             union = torch.sum(true_class) + torch.sum(pred_class) - intersection
 
-            # Calculate IoU score for each class
-            iou = (intersection + eps) / (union + eps)
-            iou_scores.append(iou)
+            dice = (intersection + eps) / (union + eps)
+            iou_scores.append(dice)
+
+        # Stack class-wise iou scores
+        iou_scores = torch.stack(iou_scores)  
 
         # Reduce across classes
         if reduction == 'mean':
-            return torch.mean(torch.tensor(iou_scores))
+            return torch.mean(iou_scores).item()
         elif reduction == 'sum':
-            return torch.sum(torch.tensor(iou_scores))
-        elif reduction is None:
-            return torch.stack(iou_scores)
+            return torch.sum(iou_scores).item()
         else:
-            raise ValueError(f"Unexpected reduction method: {reduction}")
+            return iou_scores.cpu()
 
-    @staticmethod
-    def save_model(model: torch.nn.Module, target_dir: str, model_name: str):
+    def save_model(self, model: torch.nn.Module, target_dir: str, model_name: str):
 
         """Saves a PyTorch model to a target directory.
 
@@ -403,11 +406,10 @@ class Common(Logger):
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
-        print(f"Saving best model to: {model_save_path}")
+        self.info(f"Saving best model to: {model_save_path}")
         torch.save(obj=model.state_dict(), f=model_save_path)
 
-    @staticmethod
-    def load_model(model: torch.nn.Module, target_dir: str, model_name: str):
+    def load_model(self, model: torch.nn.Module, target_dir: str, model_name: str):
         
         """Loads a PyTorch model from a target directory.
 
@@ -434,16 +436,15 @@ class Common(Logger):
         model_save_path = Path(target_dir) / model_name
 
         # Load the model
-        Logger().info(f"Loading model from: {model_save_path}")
+        self.info(f"Loading model from: {model_save_path}")
         model.load_state_dict(torch.load(model_save_path, weights_only=True))
         
         return model
     
-    @staticmethod
-    def get_predictions(output):
+    def get_predictions(self, output):
         if isinstance(output, torch.Tensor):
             return output.contiguous()
         elif hasattr(output, "logits"):            
             return output.logits.contiguous()
         else:
-            Logger().error(f"Unexpected model output type: {type(output)}")
+            self.error(f"Unexpected model output type: {type(output)}")

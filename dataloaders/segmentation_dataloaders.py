@@ -105,7 +105,7 @@ class SegmentationTransforms:
                 img = Ftv.gaussian_blur(img, kernel_size=3, sigma=blur_sigma)
             
             # Random zoom out
-            if torch.rand(1) < 0.2:
+            if torch.rand(1) < 0.3:
                 img, mask = self.random_zoom_out(img, mask, scale_factor=zoom_factor)
         
             # Color augmentations for image only

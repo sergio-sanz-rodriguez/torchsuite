@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import warnings
 import sys
+import torch.nn.functional as F
 from pathlib import Path
 from sklearn.metrics import precision_recall_curve, roc_curve, auc
 
@@ -243,139 +244,71 @@ class Common(Logger):
 
         return np.mean(partial_auc_values)
 
-    def dice_coefficient_(self, y_true, y_pred, threshold=0.5, eps=1e-6):
 
-        """
-        Computes Dice Coefficient for binary or multi-class segmentation.
-        """
-        
-        # Multiclass case, apply softmax
-        if y_pred.dim() == 4 and y_pred.shape[1] > 1:
-            y_pred = torch.argmax(y_pred, dim=1)  # Take the class with the highest probability
-        
-        # For binary case, apply sigmoid
-        else:
-            y_pred = torch.sigmoid(y_pred)
+    def calculate_mask_similarity(self, y_true, y_pred, metric='dice', num_classes=4, from_logits=True, eps=1e-6, reduction='mean'):
 
-        # Convert predictions to binary
-        y_pred = y_pred > threshold
-        
-        # Flatten the tensors
-        y_true = y_true.view(-1)
-        y_pred = y_pred.view(-1)
-
-        # Calculate the intersection and the union
-        intersection = torch.sum(y_pred * y_true)
-        union = torch.sum(y_pred) + torch.sum(y_true)
-
-        # Compute the Dice coefficient
-        dice = (2. * intersection + eps) / (union + eps)
-
-        return dice
-
-
-    def dice_coefficient(self, y_true, y_pred, num_classes=1, from_logits=True, eps=1e-6, reduction='mean'):
-        
         """
         Computes the Dice Coefficient for binary or multi-class segmentation.
-        """        
+        """
 
-        # Check out lenghts
+        # Check that the dimensions of y_true and y_pred are the same
         if len(y_true) != len(y_pred):
             self.error(f"Length of y_true and y_pred for Dice coefficient calculation must be the same.")
         
-        # Ensure 4K shape
+        # Ensure the inputs are 4D: [batch_size, channels, height, width]
         if y_true.dim() != 4:
-            y_true.unsqueeze(0)
+            y_true = y_true.unsqueeze(0)
         
         if y_pred.dim() != 4:
-            y_pred.unsqueeze(0)
+            y_pred = y_pred.unsqueeze(0)
 
-        # Apply sigmoid if logits are provided
+        # Apply softmax for multi-class segmentation
         if from_logits:
-            y_pred = torch.sigmoid(y_pred)
-        
+            y_pred = torch.softmax(y_pred, dim=1) if self.num_classes > 1 else torch.sigmoid(y_pred)
+
         # Ensure ground truth is float for stability
         y_true = y_true.float()
 
-        # For multi-class, treat each class as a binary mask
-        if num_classes > 1:            
-            y_pred = (y_pred > 0.5)
+        # Binary case (num_classes == 1)
+        if num_classes == 1:
+            
+            # Compute intersection and union
+            intersection = torch.sum(y_true * y_pred, dim=(2, 3))
+            if metric == 'dice':
+                union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred, dim=(2, 3))
+            elif metric == 'iou':
+                union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred, dim=(2, 3)) - intersection
 
-        # Compute the dice coefficient per class
-        dice_scores = []
-        for i in range(num_classes):
-            pred_class = y_pred[:, i, :, :]
-            true_class = y_true[:, i, :, :]
+        # Multi-class case (num_classes > 1)
+        else:
+            # Convert predictions to one-hot-like representation
+            y_pred_one_hot = F.one_hot(torch.argmax(y_pred, dim=1), num_classes=self.num_classes)
+            y_pred_one_hot = y_pred_one_hot.permute(0, 3, 1, 2).float()  # Shape (B, C, H, W)
 
-            intersection = torch.sum(true_class * pred_class)
-            union = torch.sum(true_class) + torch.sum(pred_class)
+            # Compute intersection and union
+            intersection = torch.sum(y_true * y_pred_one_hot, dim=(2, 3))
+            if metric == 'dice':
+                union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred_one_hot, dim=(2, 3))
+            elif metric == 'iou':
+                union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred_one_hot, dim=(2, 3)) - intersection
 
-            dice = (2. * intersection + eps) / (union + eps)
-            dice_scores.append(dice)
-
-        # Stack class-wise dice scores
-        dice_scores = torch.stack(dice_scores)  
-
+        # Compute metric
+        if metric == 'dice':
+            output = (2. * intersection + eps) / (union + eps)
+        elif metric == 'iou':
+            output = (intersection + eps) / (union + eps)
+        if torch.any(output < 0) or torch.any(output > 1):
+            self.warning(f"Mask similarity: {metric} coefficient out of range for class.")
+        output = torch.clamp(output, 0.0, 1.0)
+            
         # Reduce across classes
         if reduction == 'mean':
-            return torch.mean(dice_scores).item()
+            return output.mean().item()
         elif reduction == 'sum':
-            return torch.sum(dice_scores).item()
+            return output.sum().item()
         else:
-            return dice_scores.cpu()
-
-    def intersection_over_union(self, y_true, y_pred, num_classes=1, from_logits=True, eps=1e-6, reduction='mean'):
+            return output.cpu()
         
-        """
-        Computes the Intersection over Union (IoU) for binary or multi-class segmentation.
-        The inputs should be tesors with shape (batch, channels/classes, height, width)
-        """
-
-        # Check out lenghts
-        if len(y_true) != len(y_pred):
-            self.error(f"Length of y_true and y_pred for IoU calculation must be the same.")
-        
-        # Ensure 4K shape
-        if y_true.dim() != 4:
-            y_true.unsqueeze(0)
-        
-        if y_pred.dim() != 4:
-            y_pred.unsqueeze(0)
-
-        # Apply sigmoid if logits are provided
-        if from_logits:
-            y_pred = torch.sigmoid(y_pred)
-        
-        # Ensure ground truth is float for stability
-        y_true = y_true.float()
-
-        # For multi-class, treat each class as a binary mask
-        if num_classes > 1:
-            y_pred = (y_pred > 0.5)
-
-        # Compute the IoU score per class
-        iou_scores = []
-        for i in range(num_classes):
-            pred_class = y_pred[:, i, :, :]
-            true_class = y_true[:, i, :, :]
-
-            intersection = torch.sum(true_class * pred_class)
-            union = torch.sum(true_class) + torch.sum(pred_class) - intersection
-
-            dice = (intersection + eps) / (union + eps)
-            iou_scores.append(dice)
-
-        # Stack class-wise iou scores
-        iou_scores = torch.stack(iou_scores)  
-
-        # Reduce across classes
-        if reduction == 'mean':
-            return torch.mean(iou_scores).item()
-        elif reduction == 'sum':
-            return torch.sum(iou_scores).item()
-        else:
-            return iou_scores.cpu()
 
     def save_model(self, model: torch.nn.Module, target_dir: str, model_name: str):
 
@@ -448,3 +381,5 @@ class Common(Logger):
             return output.logits.contiguous()
         else:
             self.error(f"Unexpected model output type: {type(output)}")
+
+        

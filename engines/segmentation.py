@@ -667,8 +667,8 @@ class SegmentationEngine(Common):
             # Accumulate metrics            
             train_loss += loss.item() * accumulation_steps  # Scale back to original loss            
             y_pred = y_pred.float() # Convert to float for stability            
-            train_dice += self.dice_coefficient(y, y_pred, self.num_classes) # This returns a cpu scalar
-            train_iou += self.intersection_over_union(y, y_pred, self.num_classes) # This returns a cpu scalar
+            train_dice += self.calculate_mask_similarity(y, y_pred, metric='dice', num_classes=self.num_classes) # This returns a cpu scalar
+            train_iou +=  self.calculate_mask_similarity(y, y_pred, metric='iou', num_classes=self.num_classes) # This returns a cpu scalar
 
         # Adjust metrics to get average loss and accuracy per batch
         train_loss = train_loss / len_dataloader
@@ -765,8 +765,8 @@ class SegmentationEngine(Common):
 
                     # Calculate and accumulate accuracy
                     y_pred = y_pred.float() # Convert to float for stability
-                    test_dice += self.dice_coefficient(y, y_pred, self.num_classes) # This returns a cpu scalar
-                    test_iou += self.intersection_over_union(y, y_pred, self.num_classes) # This returns a cpu scalar
+                    test_dice += self.calculate_mask_similarity(y, y_pred, metric='dice', num_classes=self.num_classes) # This returns a cpu scalar
+                    test_iou +=  self.calculate_mask_similarity(y, y_pred, metric='iou', num_classes=self.num_classes) # This returns a cpu scalar
 
             # Adjust metrics to get average loss and accuracy per batch 
             test_loss = test_loss / len_dataloader

@@ -111,11 +111,13 @@ def collapse_one_hot_mask(mask: torch.Tensor) -> torch.Tensor:
     """
 
     # Add an extra channel of zeros to the mask
-    extra_channel = torch.zeros(1, mask.shape[1], mask.shape[2])  # (1, H, W)
-    mask_with_extra = torch.cat((extra_channel, mask), dim=0)  # Concatenate along the channel dimension (C -> C+1)
-    
+    #extra_channel = torch.zeros(1, mask.shape[1], mask.shape[2])  # (1, H, W)
+    #mask_with_extra = torch.cat((extra_channel, mask), dim=0) # Concatenate along the channel dimension (C -> C+1)
+        
     # Perform argmax along the class dimension to collapse the one-hot encoded mask
-    collapsed_mask = torch.argmax(mask_with_extra, dim=0)
+    #collapsed_mask = torch.argmax(mask_with_extra, dim=0)
+
+    collapsed_mask = torch.argmax(mask, dim=0)
     
     return collapsed_mask
 

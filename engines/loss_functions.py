@@ -7,7 +7,7 @@ Additional loss functions for other tasks (e.g., object detection, segmentation)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from .common import Logger
 
 def roc_curve_gpu(y_true, y_score):
 
@@ -194,7 +194,7 @@ class CrossEntropyPAUCLoss(nn.Module):
 
         # Debug mode
         if self.debug_mode:
-           print(
+           Logger().info(
                f"pauc: {torch.round(torch.tensor(pauc) * 10000) / 10000}, "
                f"pauc_loss: {torch.round(torch.tensor(pauc_loss) * 10000) / 10000}, "
                f"avg_p_auc: {torch.round(torch.tensor(avg_p_auc) * 10000) / 10000}, "
@@ -242,6 +242,7 @@ class CrossEntropyFPRLoss(nn.Module):
             self.weight = torch.ones(num_classes, dtype=torch.float32)
 
     def forward(self, predictions, targets):
+
         """
         Computes the loss that combines Cross-Entropy and False Positive Rate (FPR) for both binary and multi-class classification.
 
@@ -297,7 +298,7 @@ class CrossEntropyFPRLoss(nn.Module):
 
         # Debug mode (optional)
         if self.debug_mode:
-            print(
+            Logger().info(
                 f"ce_loss: {torch.round(torch.tensor(ce_loss) * 10000) / 10000}, "
                 f"fpr_loss: {torch.round(torch.tensor(fpr_loss) * 10000) / 10000}, "
                 f"total_loss: {torch.round(torch.tensor(total_loss) * 10000) / 10000}"
@@ -435,38 +436,45 @@ class DiceLoss(nn.Module):
             Dice Loss value (lower is better).
         """
 
-        # Apply sigmoid activation for binary segmentation
+        # Apply softmax / sigmoid
         if self.from_logits:
-            y_pred = torch.sigmoid(y_pred)
+            y_pred = torch.softmax(y_pred, dim=1) if self.num_classes > 1 else torch.sigmoid(y_pred)
 
         # Ensure ground truth is float for stability
-        y_true = y_true.float()  
+        y_true = y_true.float() 
 
-        # Compute the Dice loss per class
-        dice_losses = []
-        for i in range(self.num_classes):
-            pred_class = y_pred[:, i, :, :]  # Probability map for class i
-            true_class = y_true[:, i, :, :]  # Ground-truth mask for class i
+        # Binary case (num_classes == 1)
+        if self.num_classes == 1:
 
-            intersection = torch.sum(true_class * pred_class)
-            union = torch.sum(true_class) + torch.sum(pred_class)
+            # Compute intersection and union
+            intersection = torch.sum(y_true * y_pred, dim=(2, 3))
+            union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred, dim=(2, 3))
 
-            dice = (2. * intersection + self.eps) / (union + self.eps)
-            dice_loss = 1 - dice
-            if dice < 0 or dice > 1:
-                print(f"Warning: Dice coefficient out of range for class {i}: {dice}")
-            dice_losses.append(dice_loss)
+        # Multi-class case (num_classes > 1)
+        else:
+            # Convert predictions to one-hot-like representation
+            y_pred_one_hot = F.one_hot(torch.argmax(y_pred, dim=1), num_classes=self.num_classes)
+            y_pred_one_hot = y_pred_one_hot.permute(0, 3, 1, 2).float()  # Shape (B, C, H, W)
 
-        # Stack class-wise dice scores
-        dice_losses = torch.stack(dice_losses)  
+            # Compute intersection and union
+            intersection = torch.sum(y_true * y_pred_one_hot, dim=(2, 3))
+            union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred_one_hot, dim=(2, 3))        
+        
+        # Compute Dice coefficient
+        dice = (2. * intersection + self.eps) / (union + self.eps)
+        if torch.any(dice < 0) or torch.any(dice > 1):
+            Logger().warning(f"Dice loss: Dice coefficient out of range for class.")
+        dice = torch.clamp(dice, 0.0, 1.0)
+        dice_loss = 1 - dice
 
         # Reduce across classes
         if self.reduction == 'mean':
-            return torch.mean(dice_losses)
+            return dice_loss.mean()
         elif self.reduction == 'sum':
-            return torch.sum(dice_losses)
+            return dice_loss.sum()
         else:
-            return dice_losses
+            return dice_loss
+
 
 
 # Image Segmentation: Dice + Cross-Entropy Loss

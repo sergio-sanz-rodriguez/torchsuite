@@ -3,6 +3,7 @@ Contains functionality for creating PyTorch DataLoaders for object dectection.
 """
 
 import os
+import sys
 import torch
 import random
 import numpy as np
@@ -14,8 +15,11 @@ from torchvision import tv_tensors
 from torchvision.io import read_image
 from torchvision.transforms.v2 import functional as F
 
+sys.path.append(os.path.abspath("../engines"))
+from engines.common import Logger
 
-class SegmentationTransforms:
+class SegmentationTransforms(Logger):
+
     """
     A class to apply transformations on both images and masks for segmentation tasks.
 
@@ -39,16 +43,16 @@ class SegmentationTransforms:
         ):
         
         if not isinstance(img_size, tuple) or len(img_size) != 2 or not all(isinstance(i, int) for i in img_size):
-            raise ValueError("img_size must be a tuple of two integers representing (H, W).")
+            self.error("img_size must be a tuple of two integers representing (H, W).")
         
         if not isinstance(train, bool):
-            raise TypeError("train must be a boolean value.")
+            self.error("train must be a boolean value.")
         
         if not isinstance(mean_std_norm, bool):
-            raise TypeError("mean_std_norm must be a boolean value.")
+            self.error("mean_std_norm must be a boolean value.")
         
         if not isinstance(augment_magnitude, int) or not (1 <= augment_magnitude <= 5):
-            raise ValueError("augment_magnitude must be an integer between 1 and 5.")
+            self.error("augment_magnitude must be an integer between 1 and 5.")
 
         self.train = train
         self.img_size = img_size
@@ -56,6 +60,7 @@ class SegmentationTransforms:
         self.augment_magnitude = augment_magnitude
 
     def __call__(self, img, mask):
+
         """
         Apply transformations to the given image and its corresponding mask.
 
@@ -82,7 +87,7 @@ class SegmentationTransforms:
             blur_sigma = (0.1, 0.3 * self.augment_magnitude)    # Blur intensity: (0.1, 0.3) to (0.1, 1.5)
             zoom_factor = 1.0 + (0.1 * self.augment_magnitude)  # Zoom-out factor: 1.1 to 1.5
             color_jitter = 0.1 * self.augment_magnitude         # Color jitter intensity: 0.05 to 0.25
-            dropout_size = 0.04* self.augment_magnitude         # Dropout size: 0.1 to 0.2
+            dropout_size = 0.04* self.augment_magnitude         # Dropout size: 0.04 to 0.2
 
             # Horizontal flip
             if torch.rand(1) < 0.5:
@@ -260,7 +265,7 @@ class ProcessDatasetSegmentation(torch.utils.data.Dataset):
 
         # Get unique object ids ignoring background (0)
         obj_ids = torch.unique(mask)
-        obj_ids = obj_ids[obj_ids != 0]
+        #obj_ids = obj_ids[obj_ids != 0]
 
         # Map ids in class_dictionary to channel indexes for the one-hot mask (one class per channel)
         class_mapping = {orig_id: channel for channel, (orig_id, _) in enumerate(self.class_dictionary.items())}

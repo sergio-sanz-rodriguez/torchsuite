@@ -83,9 +83,9 @@ class SegmentationTransforms(Logger):
         if self.train:
             
             # Define augmentation intensity based on augment_magnitude
-            angle_range = 5 * self.augment_magnitude            # Rotation range: (-5, 5) to (-25, 25)
-            blur_sigma = (0.1, 0.3 * self.augment_magnitude)    # Blur intensity: (0.1, 0.3) to (0.1, 1.5)
-            zoom_factor = 1.0 + (0.1 * self.augment_magnitude)  # Zoom-out factor: 1.1 to 1.5
+            angle_range =  5 * self.augment_magnitude           # Rotation range: (-5, 5) to (-25, 25)
+            blur_sigma =   (0.1, 0.3 * self.augment_magnitude)  # Blur intensity: (0.1, 0.3) to (0.1, 1.5)
+            zoom_factor =  1.0 + (0.1 * self.augment_magnitude) # Zoom-out factor: 1.1 to 1.5
             color_jitter = 0.1 * self.augment_magnitude         # Color jitter intensity: 0.05 to 0.25
             dropout_size = 0.04* self.augment_magnitude         # Dropout size: 0.04 to 0.2
 

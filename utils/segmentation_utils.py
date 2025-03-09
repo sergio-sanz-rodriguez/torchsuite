@@ -9,6 +9,23 @@ sys.path.append(os.path.abspath("../engines"))
 from engines.common import Logger
 
 def num_to_rgb(num_arr, color_map: Dict=None):
+    
+    """
+    Converts a numpy array of class indices to an RGB image.
+
+    Parameters:
+    - num_arr (np.ndarray): The input array of class indices.
+    - color_map (Dict, optional): A dictionary mapping class indices to RGB colors. If None, a default color map is used.
+
+    Returns:
+    - np.ndarray: The RGB image as a numpy array.
+    """
+
+    if not isinstance(num_arr, np.ndarray):
+        Logger().error("The input array is not a numpy array. Please provide a numpy array.")
+
+    if len(num_arr.shape) != 2:
+        Logger().error("The input array is not 2D. Please provide a 2D numpy array.")
 
     if color_map == None:
         Logger().error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
@@ -26,12 +43,15 @@ def num_to_rgb(num_arr, color_map: Dict=None):
 def image_overlay(image, mask, alpha=1.0, beta=0.5, gamma=0.0):
     
     """
-    Addes overlay to the image:
+    Adds an overlay to the image:
     - image (Tensor): Original image
     - mask (Tensor): The segmented image in form of mask
     - alpha (Float): Transparency for the original image.
     - beta (Float):  Transparency for the segmentation map.
     - gamma (Float): Scalar added to each sum.
+
+    Returns:
+    - Overlaid image
     """
 
     # Convert Tensors to color images
@@ -48,7 +68,7 @@ def image_overlay(image, mask, alpha=1.0, beta=0.5, gamma=0.0):
 def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0, color_map=None, title=None):
     
     """
-    Display an image with its corresponding mask overlaid.
+    Displays an image with its corresponding mask overlaid.
 
     Parameters:
     - image (Tensor): The image tensor to be displayed (C, H, W)
@@ -81,7 +101,7 @@ def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0
 
     # Plot the image
     ax.imshow(image)
-    
+
     # Set title if provided
     if title:
         ax.set_title(title)
@@ -95,6 +115,7 @@ def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0
 
 
 def visualize_original_and_transformed(img_nt, target_nt, img_t, target_t, alpha):
+    
     """
     Visualize original and transformed images with their corresponding masks.
     

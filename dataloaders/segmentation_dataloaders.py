@@ -232,7 +232,7 @@ class ProcessDatasetSegmentation(torch.utils.data.Dataset):
             raise ValueError("class_dictionary must be provided to define category mappings.")
 
         self.class_dictionary = class_dictionary
-        self.num_classes = len(class_dictionary)  # Max num of classes
+        self.num_classes = len(class_dictionary)
 
         # load all image files, sorting them to ensure that they are aligned
         self.imgs = list(sorted(os.listdir(os.path.join(root, image_path))))

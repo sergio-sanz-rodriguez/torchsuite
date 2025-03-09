@@ -1,8 +1,52 @@
+import os
+import sys
+import cv2
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Dict
+sys.path.append(os.path.abspath("../engines"))
+from engines.common import Logger
 
-def display_image_with_mask(image, mask, ax=None, alpha=0.5, cmap='jet', title=None):
+def num_to_rgb(num_arr, color_map: Dict=None):
+
+    if color_map == None:
+        Logger().error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
+
+    single_layer = np.squeeze(num_arr)
+    output = np.zeros(num_arr.shape[:2] + (3,))
+ 
+    for k in color_map.keys():
+        output[single_layer == k] = color_map[k]
+ 
+    # return a floating point array in range [0.0, 1.0]
+    return np.float32(output) / 255.0
+
+# Function to overlay a segmentation map on top of an RGB image.
+def image_overlay(image, mask, alpha=1.0, beta=0.5, gamma=0.0):
+    
+    """
+    Addes overlay to the image:
+    - image (Tensor): Original image
+    - mask (Tensor): The segmented image in form of mask
+    - alpha (Float): Transparency for the original image.
+    - beta (Float):  Transparency for the segmentation map.
+    - gamma (Float): Scalar added to each sum.
+    """
+
+    # Convert Tensors to color images
+    mask =  cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    # Apply the overlay
+    image = cv2.addWeighted(image, alpha, mask, beta, gamma, image)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    return np.clip(image, 0.0, 1.0)
+
+
+def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0, color_map=None, title=None):
+    
     """
     Display an image with its corresponding mask overlaid.
 
@@ -10,24 +54,26 @@ def display_image_with_mask(image, mask, ax=None, alpha=0.5, cmap='jet', title=N
     - image (Tensor): The image tensor to be displayed (C, H, W)
     - mask (Tensor): The mask tensor to be overlaid on the image (H, W)
     - ax (matplotlib.axes.Axes, optional): The subplot axis to plot on. If None, creates a new figure.
-    - alpha (Float): The transparency of the mask overlay.
-    - cmap (Str): Color map for the segmentation map.
+    - alpha (Float): Transparency for the original image.
+    - beta (Float):  Transparency for the segmentation map.
+    - gamma (Float): Scalar added to each sum.
     - title (Str, optional): Title of the subplot.
     """
+
+    if color_map == None:
+        Logger().error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
+
     # Convert tensors to numpy arrays for displaying
     image = image.permute(1, 2, 0).cpu().numpy()  # (C, H, W) -> (H, W, C)
-
-    # Normalize the image if needed
-    if np.issubdtype(image.dtype, np.floating):
-        image = np.clip(image, 0, 1)
-    else:
-        # Convert to 0-1 range
-        image = image / 255.0 
 
     # Ensure mask has correct shape (H, W)
     mask = mask.squeeze(0).cpu().numpy()  # Remove the first dimension if it's 1
     if mask.ndim == 1:
         mask = mask.reshape(image.shape[0], image.shape[1])
+
+    # Convert mask to RGB for overlay
+    mask = num_to_rgb(mask, color_map=color_map)
+    image = image_overlay(image, mask, alpha, beta, gamma)
 
     # If no axis is provided, create a new figure
     if ax is None:
@@ -35,9 +81,6 @@ def display_image_with_mask(image, mask, ax=None, alpha=0.5, cmap='jet', title=N
 
     # Plot the image
     ax.imshow(image)
-
-    # Plot the mask with overlay
-    ax.imshow(mask, alpha=alpha, cmap=cmap)
     
     # Set title if provided
     if title:
@@ -139,7 +182,7 @@ def create_label_class_dict(mask, target_categories):
     
     # Identify nonzero categories
     unique_labels = mask.unique()
-    unique_labels = unique_labels[unique_labels != 0]
+    #unique_labels = unique_labels[unique_labels != 0]
     
     # Create the dictionary mapping labels to class names
     label_class_dict = {label.item(): target_categories.get(label.item(), 'Unknown') for label in unique_labels}

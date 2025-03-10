@@ -21,15 +21,16 @@ Currently, TorchSuite is fully optimized for **image and audio classification ta
 - Other data types, such as video and text
 
 ## Modules  
-
-- **Training and inference engines:** `classification.py` and `obj_detection.py` for seamless training and evaluation workflows.
-- **Flexible data loading:** `image/audio/obj_dect_dataloaders.py` to streamline dataset preparation and augmentation.
-- **Utility functions:** `classification/obj_detection_utils.py` offering a collection of utility functions to enhance productivity.
+- **CPU and GPU-accelerated computation:** optimized for both CPU and GPU, enabling flexible model training and inference
+- **Training and inference engines:** `classification.py`, `obj_detection.py`, `segmentation.py` for training and evaluation workflows
+- **Flexible data loading:** `image/audio/obj_dect/segmentation_dataloaders.py` to streamline dataset preparation and augmentation.
+- **Utility functions:** `classification/obj_detection/segmentation_utils.py` offering a collection of utility functions to enhance productivity.
 - **Vision Transformer (ViT) support:** `vision_transformer.py` for implementing ViTs with PyTorch.
 - **Region-based CNN (R-CNN) support:** `faster_rcnn.py` to create deep learning networks for object detection.
+- **U-Net support:** `unet.py` for a flexible design of U-Net models tailored to image segmentation. Pretrained U-net is taken from [mberkay0](https://github.com/mberkay0/pretrained-backbones-unet).
 - **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies. Some classes have been taken from [kamrulhasanrony](https://github.com/kamrulhasanrony/Vision-Transformer-based-Food-Classification/tree/master). 
 - **Custom loss functions:** `loss_functions.py` including various loss formulations for different tasks.
-- **Code examples:** a series of notebooks demonstrating Python code for training deep learning models
+- **Code examples:** a series of notebooks demonstrating Python code for training deep learning models.
 
 ## Installation
 

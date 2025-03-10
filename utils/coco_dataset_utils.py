@@ -18,7 +18,7 @@ from torchvision import datasets
 from torchvision.transforms import v2 as T
 
 # Import custom libraries
-from classification_utils import set_seeds
+from .classification_utils import set_seeds
 
 # Warnings
 import warnings
@@ -34,7 +34,7 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 set_seeds(42)
 
 
-def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, output_masks_dir, label=""):
+def COCO_2_PennFundanPed(coco_images_path, coco_annotations_path, output_images_dir, output_masks_dir, label=""):
     
     """
     Converts the COCO dataset to match the PennFudanPed dataset format.
@@ -109,7 +109,110 @@ def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, ou
         else:
             os.remove(os.path.join(output_images_dir, filename))  # Remove image if mask is invalid
 
-    print(f"Dataset conversion completed: {image_count} images & masks saved.")
+    print(f"Dataset conversion completed: {image_count} images and masks saved.")
+
+
+def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, output_masks_dir, 
+                  class_dictionary="all", label=""):
+    """
+    Converts the COCO dataset to a folder format with images and segmentation masks.
+    Allows filtering specific categories via a dictionary, or 'all' to use all categories.
+
+    Parameters:
+    - coco_images_path (str): Path to the COCO images directory.
+    - coco_annotations_path (str): Path to the COCO annotation JSON file.
+    - output_images_dir (str): Directory to save converted images.
+    - output_masks_dir (str): Directory to save corresponding masks.    
+    - class_dictionary (dict or "all"): A dictionary mapping category IDs to class names, or "all" for all categories.
+    - label (str): Optional label to append to filenames.
+    """
+
+    os.makedirs(output_images_dir, exist_ok=True)
+    os.makedirs(output_masks_dir, exist_ok=True)
+
+    dataset = datasets.CocoDetection(root=coco_images_path, annFile=coco_annotations_path)
+
+    # Load COCO category mapping
+    with open(coco_annotations_path, 'r') as f:
+        coco_data = json.load(f)
+
+    # If "all" is selected, include all available categories
+    if class_dictionary  == "all":
+        class_dictionary = {cat["id"]: cat["name"] for cat in coco_data["categories"]}
+    
+    # Check if class_dictionary is actually a dictionary
+    if not isinstance(class_dictionary, dict):
+        raise ValueError("`class_dictionary` must be a dictionary or 'all'.")
+
+    # Map the ids n class_dictionary with the original ids in the coco dataset
+    selected_category_ids = {cat["id"]: cat["name"] for cat in coco_data["categories"] if cat["name"] in class_dictionary.values()}
+    category_id_mapping = {
+        coco_id: key
+        for key, value in class_dictionary.items()
+        for coco_id, coco_name in selected_category_ids.items()        
+        if coco_name == value
+    }
+
+    print(f"Category ID Mapping: {category_id_mapping}")
+
+    # Initialize counter for filenames
+    image_count = 0  
+
+    for idx in range(len(dataset)):
+        img, annotations = dataset[idx]
+
+        # Filter only selected categories
+        valid_annotations = [ann for ann in annotations if ann["category_id"] in category_id_mapping]
+
+        # Skip if no selected categories are present
+        if not valid_annotations:
+            continue  
+
+        base_filename = f"{image_count:06d}"
+        filename = f"{base_filename}_{label}.png" if label else f"{base_filename}.png"
+
+        img = img.convert("RGBA")  
+        img.save(os.path.join(output_images_dir, filename))
+
+        # Create segmentation mask
+        mask = Image.new("L", img.size, 0)  
+        draw = ImageDraw.Draw(mask)
+
+        has_valid_segmentation = False
+
+        for ann in valid_annotations:
+            if not ann["segmentation"]:
+                continue
+            
+            # Get old category_id from the dataset
+            category_id = ann["category_id"]
+            
+            # Check if category_id exists in the new mapping
+            if category_id not in category_id_mapping:
+                print(f"Warning: Category ID {category_id} not found in the new mapping. Skipping this annotation.")
+                continue  # Skip if category_id is not in the new mapping
+ 
+            # Get the new category ID using the mapping
+            internal_key = category_id_mapping[category_id]
+
+            for seg in ann["segmentation"]:
+                if isinstance(seg, list) and len(seg) >= 6:  
+                    polygon = [tuple(map(int, seg[i:i + 2])) for i in range(0, len(seg), 2)]
+                    draw.polygon(polygon, outline=internal_key, fill=internal_key)  # Use remapped ID for mask
+
+                    has_valid_segmentation = True
+
+        if has_valid_segmentation:
+            mask.save(os.path.join(output_masks_dir, filename))
+            image_count += 1  
+        else:
+            os.remove(os.path.join(output_images_dir, filename))  
+
+    print(f"Dataset conversion completed: {image_count} images and masks saved.")
+
+    return category_id_mapping # Return the mapping of COCO category IDs to internal category IDs
+
+
 
 
 def select_and_copy_samples(input_images_dir, input_masks_dir, output_images_dir, output_masks_dir, num_samples, seed=42):
@@ -236,6 +339,7 @@ def split_dataset(src_images, src_masks, dst_train_images, dst_train_masks, dst_
     
     """
     Split the dataset into training, validation, and test sets, and move the corresponding images and masks to their respective directories.
+    It is required that the image and the associated mask have the same name.
     
     Parameters:
     - src_images: Path to the source images.
@@ -275,32 +379,18 @@ def split_dataset(src_images, src_masks, dst_train_images, dst_train_masks, dst_
     val_files = image_files[train_end:val_end]
     test_files = image_files[val_end:]
 
-    def get_mask_name(image_name):
-        """Finds the corresponding mask file name."""
-        mask_path = os.path.join(src_masks, image_name)
-        if os.path.exists(mask_path):
-            return image_name
-        mask_with_suffix = os.path.join(src_masks, image_name.replace(".", "_mask."))
-        return mask_with_suffix if os.path.exists(mask_with_suffix) else None
-
     # Move files while ensuring masks exist
-    for file in train_files:
-        mask_name = get_mask_name(file)
-        if mask_name:
-            shutil.copy2(os.path.join(src_images, file), os.path.join(dst_train_images, file))
-            shutil.copy2(mask_name, os.path.join(dst_train_masks, os.path.basename(mask_name)))
+    for file in train_files:        
+        shutil.copy2(os.path.join(src_images, file), os.path.join(dst_train_images, file))
+        shutil.copy2(os.path.join(src_masks, file), os.path.join(dst_train_masks, file))
 
-    for file in val_files:
-        mask_name = get_mask_name(file)
-        if mask_name:
-            shutil.copy2(os.path.join(src_images, file), os.path.join(dst_val_images, file))
-            shutil.copy2(mask_name, os.path.join(dst_val_masks, os.path.basename(mask_name)))
+    for file in val_files:        
+        shutil.copy2(os.path.join(src_images, file), os.path.join(dst_val_images, file))
+        shutil.copy2(os.path.join(src_masks, file), os.path.join(dst_val_masks, file))
 
     for file in test_files:
-        mask_name = get_mask_name(file)
-        if mask_name:
-            shutil.copy2(os.path.join(src_images, file), os.path.join(dst_test_images, file))
-            shutil.copy2(mask_name, os.path.join(dst_test_masks, os.path.basename(mask_name)))
+        shutil.copy2(os.path.join(src_images, file), os.path.join(dst_test_images, file))
+        shutil.copy2(os.path.join(src_masks, file), os.path.join(dst_test_masks, file))
 
     print("Dataset split successfully.")
 

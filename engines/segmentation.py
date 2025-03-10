@@ -1,5 +1,5 @@
 """
-Contains classes for training and testing a PyTorch model for object detection and segmentation.
+Contains classes for training and testing a PyTorch model for image segmentation.
 """
 
 import os
@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import copy
 import warnings
-import re
 import torchvision.ops as ops
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -22,7 +21,6 @@ try:
     from torch.amp import GradScaler, autocast
 except ImportError:
     from torch.cuda.amp import GradScaler, autocast
-#from sklearn.metrics import precision_recall_curve, roc_curve, auc
 from contextlib import nullcontext
 from .common import Common, Colors
 
@@ -31,7 +29,7 @@ warnings.filterwarnings("ignore")
 
 
 # Training and prediction engine class
-class ObjectDetectionEngine(Common):
+class SegmentationEngine(Common):
 
     """
     A class to handle training, evaluation, and predictions for a PyTorch model.
@@ -42,6 +40,7 @@ class ObjectDetectionEngine(Common):
     Args:
         model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
         color_map (dict, optional): Specifies the colors for the training and evaluation curves
+        log_verbose (bool, optional): if True, activate logger messages.
         device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
@@ -58,6 +57,8 @@ class ObjectDetectionEngine(Common):
         self.device = device
         self.model = model
         self.model_loss = None
+        self.model_dice = None
+        self.model_iou = None
         self.model_epoch = None
         self.save_best_model = False
         self.keep_best_models_in_memory = False
@@ -67,7 +68,9 @@ class ObjectDetectionEngine(Common):
         self.scheduler = None
         self.model_name = None
         self.model_name_loss = None        
-        self.squeeze_dim = False
+        self.model_name_dice = None
+        self.model_name_iou = None
+        self.num_classes = 1
         self.log_verbose = log_verbose
 
         # Initialize colors
@@ -241,12 +244,14 @@ class ObjectDetectionEngine(Common):
         
         dictionary = dictionary or {}  # Ensure dictionary is not None
         self.results.update({
-            "epoch": [],
-            **{f"train_{key}": [] for key in dictionary.keys()},
-            "train_total_loss": [],
-            "train_time [s]": [],
-            **{f"test_{key}": [] for key in dictionary.keys()},
-            "test_total_loss": [],
+            "epoch": [],            
+            "train_loss": [],
+            "train_dice": [],
+            "train_iou": [],
+            "train_time [s]": [],            
+            "test_loss": [],
+            "test_dice": [],
+            "test_iou": [],
             "test_time [s]": [],
             "lr": []
         })
@@ -255,9 +260,13 @@ class ObjectDetectionEngine(Common):
         self,
         epoch: int,
         max_epochs: int,
-        train_loss: Dict[str, float],        
+        train_loss: Dict[str, float],
+        train_dice: Dict[str, float],        
+        train_iou: Dict[str, float],
         train_epoch_time: float,
         test_loss: Optional[Dict[str, float]] = None,
+        test_dice: Optional[Dict[str, float]] = None,
+        test_iou: Optional[Dict[str, float]] = None,
         test_epoch_time: Optional[float] = None,
         plot_curves: bool = False
         ):
@@ -269,81 +278,93 @@ class ObjectDetectionEngine(Common):
         - Outputs key metrics such as training and validation loss, accuracy, and fpr at recall in numerical form.
         - Generates plots that visualize the training process, such as:
         - Loss curves (training vs validation loss over epochs).
-        - Accuracy curves (training vs validation accuracy over epochs).
-        - FPR at recall curves
+        - Dice-coefficient curves (training vs validation accuracy over epochs).
         """
 
         # Retrieve the learning rate
         if self.scheduler is None or isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             lr = self.optimizer.param_groups[0]['lr']
         else:
-            lr = self.scheduler.get_last_lr()[0]
-        
-        # Format train loss as a string
-        train_loss_str = f"{self.color_other} | ".join(f"{self.color_train}{key}: {value:.4f}" for key, value in train_loss.items())
+            lr = self.scheduler.get_last_lr()[0]        
 
+        # Print results
         print(
             f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
-            f"{self.color_train}Train: {self.color_other} {train_loss_str} {self.color_other}| "
+            f"{self.color_train}Train: {self.color_other}| "
+            f"{self.color_train}loss: {train_loss:.4f} {self.color_other}| "
+            f"{self.color_train}dice: {train_dice:.4f} {self.color_other}| "
+            f"{self.color_train}iou: {train_iou:.4f} {self.color_other}| "
             f"{self.color_train}time: {self.sec_to_min_sec(train_epoch_time)} {self.color_other}| "            
             f"{self.color_train}lr: {lr:.10f}"
         )
-        if self.apply_validation and test_loss is not None:
-
-            # Format test loss as a string
-            test_loss_str = f"{self.color_other} | ".join(f"{self.color_test}{key}: {value:.4f}" for key, value in test_loss.items())
-
+        if self.apply_validation:
             print(
                 f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
-                f"{self.color_test}test:  {self.color_other} {test_loss_str} {self.color_other}| "                
+                f"{self.color_test}Test:  {self.color_other}| "
+                f"{self.color_test}loss: {test_loss:.4f} {self.color_other}| "
+                f"{self.color_test}dice: {test_dice:.4f} {self.color_other}| "
+                f"{self.color_test}iou: {test_iou:.4f} {self.color_other}| "
                 f"{self.color_test}time: {self.sec_to_min_sec(test_epoch_time)} {self.color_other}| "            
                 f"{self.color_test}lr: {lr:.10f}"
             )
         
         # Update results dictionary
-        self.results["epoch"].append(epoch+1)        
-        for key, value in train_loss.items():
-            self.results[f"train_{key}"].append(value)
+        self.results["epoch"].append(epoch+1)
+        self.results["train_loss"].append(train_loss)
+        self.results["train_dice"].append(train_dice)
+        self.results["train_iou"].append(train_iou)
+        self.results["test_loss"].append(test_loss)
+        self.results["test_dice"].append(test_dice)
+        self.results["test_iou"].append(test_iou)
         self.results["train_time [s]"].append(train_epoch_time)
-        if test_loss is not None:
-            for key, value in test_loss.items():
-                self.results[f"test_{key}"].append(value)
-            self.results["test_time [s]"].append(test_epoch_time)
-        else:
-            #`train_loss` always exists, we just need its keys
-            for key in train_loss.keys() if train_loss else ["loss"]: 
-                self.results[f"test_{key}"].append(None)
-            self.results["test_time [s]"].append(None)
+        self.results["test_time [s]"].append(test_epoch_time)
         self.results["lr"].append(lr)
         
-        # Plot training and test loss curves
+        # Plots training and test loss, accuracy, and fpr-at-recall curves.
         if plot_curves:
-            n_plots = len(train_loss.keys())
-            cols = min(5, n_plots)
-            rows = (n_plots + cols - 1) // cols
+        
+            n_plots = 3
+            plt.figure(figsize=(25, 6))
+            range_epochs = range(1, len(self.results["train_loss"])+1)
 
-            plt.figure(figsize=(25, 6*rows))
-            range_epochs = range(1, len(self.results["epoch"]) + 1)
+            # Plot loss
+            plt.subplot(1, n_plots, 1)
+            plt.plot(range_epochs, self.results["train_loss"], label="train_loss", color=self.color_train_plt)
+            if self.apply_validation:
+                plt.plot(range_epochs, self.results["test_loss"], label="test_loss", color=self.color_test_plt)
+            plt.title("Loss")
+            plt.xlabel("Epochs")
+            plt.grid(visible=True, which="both", axis="both")
+            plt.legend()
 
-            for i, key in enumerate(train_loss.keys(), start=1):
-                plt.subplot(rows, cols, i)
-                plt.plot(range_epochs, self.results[f"train_{key}"], label=f"train_{key}", color=self.color_train_plt)
-                
-                if self.apply_validation and test_loss is not None:
-                    plt.plot(range_epochs, self.results[f"test_{key}"], label=f"test_{key}", color=self.color_test_plt)
-                
-                plt.title(key)
-                plt.xlabel("Epochs")
-                plt.grid(visible=True, which="both", axis="both")
-                plt.legend()
+            # Plot dice
+            plt.subplot(1, n_plots, 2)
+            plt.plot(range_epochs, self.results["train_dice"], label="train_dice_coeff", color=self.color_train_plt)
+            if self.apply_validation:
+                plt.plot(range_epochs, self.results["test_dice"], label="test_dice_coeff", color=self.color_test_plt)
+            plt.title("Dice-Coefficient")
+            plt.xlabel("Epochs")
+            plt.grid(visible=True, which="both", axis="both")
+            plt.legend()
 
-            plt.show()   
+            # Plot iou
+            plt.subplot(1, n_plots, 3)
+            plt.plot(range_epochs, self.results["train_iou"], label="train_iou", color=self.color_train_plt)
+            if self.apply_validation:
+                plt.plot(range_epochs, self.results["test_iou"], label="test_iou", color=self.color_test_plt)
+            plt.title("Intersection over Union (IoU)")
+            plt.xlabel("Epochs")
+            plt.grid(visible=True, which="both", axis="both")
+            plt.legend()            
+                    
+            plt.show()
 
     def init_train(
         self,
         target_dir: str=None,
         model_name: str=None,
         dataloader: torch.utils.data.DataLoader=None,
+        num_classes: int=1,
         apply_validation: bool=True,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         keep_best_models_in_memory: bool=False,
@@ -378,16 +399,14 @@ class ObjectDetectionEngine(Common):
             debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
             save_best_model (Union[str, List[str]]): Criterion mode for saving the model: 
                 - "loss": saves the epoch with the lowest validation loss
-                - "acc": saves the epoch with the highest validation accuracy
-                - "fpr": saves the eopch with the lowsest false positive rate at recall
-                - "pauc": saves the epoch with the highest partial area under the curve at recall
-                - "last": saves last epoch
+                - "dice": saves the epoch with the highest validation dice coefficient
+                - "iou": saves the epoch with the highest validation iou
                 - "all": saves models for all epochs
-                - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
+                - A list, e.g., ["loss", "dice"], is also allowed. Only applicable if `save_best_model` is True.
                 - None: the model will not be saved.            
 
         Functionality:
-            Validates `recall_threshold`, `accumulation_steps`, and `epochs` parameters with assertions.
+            Validates `accumulation_steps` and `epochs` and other parameters with assertions.
             Prints configuration parameters using the `print_config` method.
             Initializes the optimizer, loss function, and scheduler.
             Ensures the target directory for saving models exists, creating it if necessary.
@@ -396,10 +415,6 @@ class ObjectDetectionEngine(Common):
             
         This method sets up the environment for training, ensuring all necessary resources and parameters are prepared.
         """
-
-        # Validate if the train dataloader has been given
-        if not isinstance(dataloader, torch.utils.data.DataLoader) or dataloader is None:
-            self.error(f"The train dataloader has incorrect format or is not specified.")
 
         # Validate keep_best_models_in_memory
         if not isinstance(keep_best_models_in_memory, (bool)):
@@ -411,8 +426,8 @@ class ObjectDetectionEngine(Common):
         if not isinstance(apply_validation, (bool)):
             self.error(f"'apply_validation' must be True or False.")
         else:
-            self.apply_validation = apply_validation        
-
+            self.apply_validation = apply_validation
+              
         # Validate accumulation_steps
         if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
             self.error(f"'accumulation_steps' must be an integer greater than or equal to 1.")
@@ -432,7 +447,7 @@ class ObjectDetectionEngine(Common):
             self.error(f"'save_best_model' must be None, a string, or a list of strings.")
 
         # Validate mode only if save_best_model is True
-        valid_modes = {"loss", "acc", "fpr", "pauc", "last", "all"}
+        valid_modes = {"loss", "dice", "iou", "last", "all"}
         if self.save_best_model:
             if not isinstance(mode, list):
                 self.error(f"'mode' must be a string or a list of strings.")
@@ -464,49 +479,30 @@ class ObjectDetectionEngine(Common):
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,            
-            debug_mode=debug_mode,
+            debug_mode=debug_mode,            
             )
         
-        # Initialize optimizer, loss_fn, and scheduler
+        # Initialize optimizer, loss_fn, scheduler, and result_log
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.scheduler = scheduler
+        self.init_results()
 
+        # Set the model in train mode
         self.model.train()
 
         # Attempt a forward pass to check if the shape of X is compatible
-        for batch, (images, targets) in enumerate(dataloader):
-
-            images, targets = self.prepare_data(images, targets)
-
+        for batch, (X, y) in enumerate(dataloader):
+            
             try:
                 # This is where the model will "complain" if the shape is incorrect
-                check = self.model(images, targets)
-                # Initialize the log results
-                if isinstance(check, dict):
-                    self.init_results(check)
-
+                check = self.get_predictions(self.model(X.to(self.device)))
+                classes_in_mask = check.shape[1]  # dim=1 is the num_class dimension for the mask                              
+                if isinstance(check, torch.Tensor) and num_classes == classes_in_mask:
+                    self.num_classes = num_classes
             except Exception as e:
-
-                # If the result dict delivered by the model is unknown.
-                #if not isinstance(check, dict):
-                #    self.error(f"Unknown output metrics from the model.")
-
-                # If the shape is wrong, reshape and try again
-                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
-                if match:
-                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
-                else:
-                    self.warning(f"Attempting to reshape X.")
-
-                # Check the current shape and attempt a fix
-                if images[0].ndimension() == 2:
-                    self.squeeze_dim = True
-                elif images[0].ndimension() == 3:  # [batch_size, width, height]
-                    pass
-                else:
-                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
-            break        
+                raise ValueError(r"Unexpected error when checking the model", str(e))
+            break
     
         # Initialize the best model and model_epoch list based on the specified mode.
         if self.save_best_model:
@@ -514,14 +510,26 @@ class ObjectDetectionEngine(Common):
                 if self.keep_best_models_in_memory:
                     self.model_loss = copy.deepcopy(self.model)                            
                     self.model_loss.to(self.device)
-                self.model_name_loss = self.model_name.replace(".", f"_loss.")    
+                self.model_name_loss = self.model_name.replace(".", f"_loss.")
+            if "dice" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_dice = copy.deepcopy(self.model)                            
+                    self.model_dice.to(self.device)
+                self.model_name_dice = self.model_name.replace(".", f"_dice.")
+            if "iou" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_iou = copy.deepcopy(self.model)
+                    self.model_iou.to(self.device)
+                self.model_name_iou = self.model_name.replace(".", f"_iou.")            
             if "all" in self.mode:
                 if self.keep_best_models_in_memory:
                     self.model_epoch = []
                     for k in range(epochs):
                         self.model_epoch.append(copy.deepcopy(self.model))
                         self.model_epoch[k].to(self.device)
-            self.best_test_loss = float("inf")         
+            self.best_test_loss = float("inf") 
+            self.best_test_dice = 0.0
+            self.best_test_iou = 0.0               
     
     def progress_bar(
         self,
@@ -559,7 +567,6 @@ class ObjectDetectionEngine(Common):
 
         return progress
 
-
     # This train step function includes gradient accumulation (experimental)
     def train_step_v2(
         self,
@@ -583,9 +590,11 @@ class ObjectDetectionEngine(Common):
             debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
 
         Returns:
-            A tuple of training loss, training accuracy, and fpr at recall metrics.
-            In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
+            A tuple of training loss, training dice, training_iou.
+            In the form (train_loss, train_dice, train_iou).
         """
+
+        self.info(f"Training epoch {epoch_number+1}...")
 
         # Put model in train mode
         self.model.train()
@@ -594,42 +603,47 @@ class ObjectDetectionEngine(Common):
         # Initialize the GradScaler for Automatic Mixed Precision (AMP)
         scaler = GradScaler() if amp else None
 
-        # Setup train loss values
+        # Setup metric values        
         len_dataloader = len(dataloader)
-        train_loss = 0         
-        train_loss_dict = {}     
+        train_loss, train_dice, train_iou = 0, 0, 0
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (images, targets) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
+        for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
             
-            images, targets = self.prepare_data(images, targets)
+            # Send data to target device
+            X, y = X.to(self.device), y.to(self.device)            
 
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
                     
                     # Forward pass
-                    loss_dict = self.model(images, targets)
-                    loss = sum(item for item in loss_dict.values())
+                    y_pred = self.get_predictions(self.model(X))
                     
                     # Check if the output has NaN or Inf values
-                    if torch.isnan(loss).any() or torch.isinf(loss).any():
+                    if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                         if enable_clipping:
-                            self.warning(f"Loss is NaN or Inf at batch {batch}. Replacing Nans/Infs...")                            
-                            loss = torch.nan_to_num(
-                                loss,
-                                nan=torch.mean(loss).item(), 
-                                posinf=torch.max(loss).item(), 
-                                neginf=torch.min(loss).item()
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                            #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
+                            y_pred = torch.nan_to_num(
+                                y_pred,
+                                nan=torch.mean(y_pred).item(), 
+                                posinf=torch.max(y_pred).item(), 
+                                neginf=torch.min(y_pred).item()
                                 )
                         else:
-                            self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping batch...")
+                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                             continue
                     
-                    # Divide into accumulation_steps
-                    loss /= accumulation_steps
-                                      
+                    # Calculate loss, normalize by accumulation steps
+                    loss = self.loss_fn(y, y_pred) / accumulation_steps
+                
+                    # Check for NaN or Inf in loss
+                    if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
+                        self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping...")
+                        continue
+
                 # Backward pass with scaled gradients
                 if debug_mode:
                     # Use anomaly detection
@@ -640,12 +654,11 @@ class ObjectDetectionEngine(Common):
 
             else:
                 # Forward pass
-                loss_dict = self.model(images, targets)
-                loss = sum(item for item in loss_dict.values())
-
-                # Divide into accumulation_steps
-                loss /= accumulation_steps
+                y_pred = self.get_predictions(self.model(X))
                 
+                # Calculate loss, normalize by accumulation steps
+                loss = self.loss_fn(y, y_pred) / accumulation_steps
+
                 # Backward pass
                 loss.backward()
 
@@ -685,36 +698,33 @@ class ObjectDetectionEngine(Common):
 
                 # Optimizer zero grad
                 self.optimizer.zero_grad()
-            
-            # Accumulate metrics for each loss in loss_dict
-            for loss_name, loss_value in loss_dict.items():
-                if loss_name in train_loss_dict:
-                    train_loss_dict[loss_name] += loss_value.item() * accumulation_steps  # Scale back to original loss
-                else:
-                    train_loss_dict[loss_name] = loss_value.item() * accumulation_steps
-            train_loss += loss.item() * accumulation_steps  # Scale back to original loss
 
-        # Adjust metrics to get average losses per batch
-        for loss_name in train_loss_dict:
-            train_loss_dict[loss_name] /= len_dataloader                
-        train_loss /= len_dataloader
+            # Accumulate metrics            
+            train_loss += loss.item() * accumulation_steps  # Scale back to original loss            
+            y_pred = y_pred.float() # Convert to float for stability            
+            train_dice += self.calculate_mask_similarity(y, y_pred, metric='dice', num_classes=self.num_classes) # This returns a cpu scalar
+            train_iou +=  self.calculate_mask_similarity(y, y_pred, metric='iou', num_classes=self.num_classes) # This returns a cpu scalar
 
-        train_loss_dict.update({"total_loss": train_loss})        
+        # Adjust metrics to get average loss and accuracy per batch
+        train_loss = train_loss / len_dataloader
+        train_dice = train_dice / len_dataloader
+        train_iou = train_iou / len_dataloader
 
-        return train_loss, train_loss_dict
+        return train_loss, train_dice, train_iou
 
     def test_step(
         self,
-        dataloader: torch.utils.data.DataLoader,
+        dataloader: torch.utils.data.DataLoader,        
         epoch_number: int = 1,
         amp: bool = True,
+        debug_mode: bool = False,
         enable_clipping: bool = False
         ) -> Tuple[float, float, float]:
         
         """Tests a PyTorch model for a single epoch.
 
         Args:
-            dataloader: A DataLoader instance for the model to be tested on.
+            dataloader: A DataLoader instance for the model to be tested on.            
             epoch_number: Epoch number.
             amp: Whether to use Automatic Mixed Precision for inference.
             debug_mode: Enables logging for debugging purposes.
@@ -727,22 +737,22 @@ class ObjectDetectionEngine(Common):
         # Execute the test step is apply_validation is enabled
         if self.apply_validation:
 
-            # Put model in train mode, otherwise loss results are not generated
-            self.model.train() 
+            self.info(f"Validating epoch {epoch_number+1}...")
 
-            # Setup test loss and test accuracy values
+            # Put model in eval mode
+            self.model.eval() 
+            #self.model.to(self.device) # Already done in __init__
+
+            # Setup test metric values
             len_dataloader = len(dataloader)
-            test_loss = 0
-            test_loss_dict = {} 
-
+            test_loss, test_dice, test_iou = 0, 0, 0
+            
             # Set inference context
             try:
                 inference_context = torch.inference_mode()
                 with torch.inference_mode():        
-                    for batch, (images, targets) in enumerate(dataloader):
-
-                        images, targets = self.prepare_data(images, targets)
-                        check = self.model(images, targets)
+                    for batch, (X, y) in enumerate(dataloader):
+                        test_pred = self.get_predictions(self.model(X.to(self.device)))
                         break
             except RuntimeError:
                 inference_context = torch.no_grad()
@@ -750,60 +760,66 @@ class ObjectDetectionEngine(Common):
 
             # Turn on inference context manager 
             with inference_context:
-
-                # Loop through DataLoader batches                
-                for batch, (images, targets) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
-
-                    images, targets = self.prepare_data(images, targets)
+                # Loop through DataLoader batches
+                for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
+                    
+                    # Send data to target device
+                    X, y = X.to(self.device), y.to(self.device)                    
+                                        
+                    if torch.isnan(X).any() or torch.isinf(X).any():
+                        self.warning(f"NaN or Inf detected in test input!")
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
 
                          # Forward pass
-                        loss_dict = self.model(images, targets)
-                        loss = sum(item for item in loss_dict.values())
+                        y_pred = self.get_predictions(self.model(X))
 
-                        # Check if the output has NaN or Inf values
-                        if torch.isnan(loss).any() or torch.isinf(loss).any():
+                        # Check for NaN/Inf in predictions
+                        if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                             if enable_clipping:
-                                self.warning(f"Loss is NaN or Inf at batch {batch}. Replacing Nans/Infs...")                            
-                                loss = torch.nan_to_num(
-                                    loss,
-                                    nan=torch.mean(loss).item(), 
-                                    posinf=torch.max(loss).item(), 
-                                    neginf=torch.min(loss).item()
-                                    )
+                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                                y_pred = torch.nan_to_num(
+                                    y_pred,
+                                    nan=torch.mean(y_pred).item(),
+                                    posinf=torch.max(y_pred).item(),
+                                    neginf=torch.min(y_pred).item()
+                                )
                             else:
-                                self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping batch...")
+                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
                                 continue
 
-                         # Accumulate individual component losses
-                        for loss_name, loss_value in loss_dict.items():
-                            if loss_name in test_loss_dict:
-                                test_loss_dict[loss_name] += loss_value.item()
-                            else:
-                                test_loss_dict[loss_name] = loss_value.item()
-                        test_loss += loss.item()                    
+                        # Calculate and accumulate loss
+                        loss = self.loss_fn(y, y_pred)
+                        test_loss += loss.item()
 
-            # Adjust metrics to get average losses per batch 
-            for loss_name in test_loss_dict:
-                test_loss_dict[loss_name] /= len_dataloader
-            test_loss /= len_dataloader
+                        # Debug NaN/Inf loss
+                        if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
+                            self.warning(f"Loss is NaN/Inf at batch {batch}. Skipping...")
+                            continue
 
-            test_loss_dict.update({"total_loss": test_loss})
+                    # Calculate and accumulate accuracy
+                    y_pred = y_pred.float() # Convert to float for stability
+                    test_dice += self.calculate_mask_similarity(y, y_pred, metric='dice', num_classes=self.num_classes) # This returns a cpu scalar
+                    test_iou +=  self.calculate_mask_similarity(y, y_pred, metric='iou', num_classes=self.num_classes) # This returns a cpu scalar
 
+            # Adjust metrics to get average loss and accuracy per batch 
+            test_loss = test_loss / len_dataloader
+            test_dice = test_dice / len_dataloader
+            test_iou = test_iou / len_dataloader
+        
         # Otherwise set params with initial values
-        else:            
-            test_loss = None
-            test_loss_dict = None            
+        else:
+            test_loss, test_dice, test_iou = self.best_test_loss, self.best_test_dice, self.best_test_iou
 
-        return test_loss, test_loss_dict
+        return test_loss, test_dice, test_iou
 
 
     # Scheduler step after the optimizer
     def scheduler_step(
         self,
         test_loss: float=None,
+        test_dice: float=None,
         ):
 
         """
@@ -812,17 +828,19 @@ class ObjectDetectionEngine(Common):
         Parameters:
         - scheduler (torch.optim.lr_scheduler): The learning rate scheduler.
         - test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
-        - test_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
+        - test_dice (float, optional): Test dice-coefficient value, required for ReduceLROnPlateau with 'max' mode.
         """
             
         if self.scheduler:
             if self.apply_validation and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 # Check whether scheduler is configured for "min" or "max"
                 if self.scheduler.mode == "min" and test_loss is not None:
-                    self.scheduler.step(test_loss)  # Minimize test_loss                
+                    self.scheduler.step(test_loss)  # Minimize test_loss
+                elif self.scheduler.mode == "max" and test_dice is not None:
+                    self.scheduler.step(test_dice)  # Maximize test_accuracy
                 else:
                     self.error(
-                        f"The scheduler requires either `test_loss` or `test_acc` "
+                        f"The scheduler requires either `test_loss` or `test_dice` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -831,7 +849,9 @@ class ObjectDetectionEngine(Common):
     # Updates and saves the best model and model_epoch list based on the specified mode.
     def update_model(
         self,
-        test_loss: float = None,        
+        test_loss: float = None,
+        test_dice: float = None,
+        test_iou: float = None,        
         epoch: int = None,
     ) -> pd.DataFrame:
 
@@ -839,15 +859,17 @@ class ObjectDetectionEngine(Common):
         Updates and saves the best model and model_epoch list based on the specified mode(s), as well as the last-epoch model.
 
         Parameters:
-        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).       
+        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).
+        - test_dice (float, optional): Test dice coefficient for the current epoch (used in "dice" mode).
+        - test_iou (float, optional): Test IoU for the current epoch (used in "iou" mode).        
         - epoch (int, optional): Current epoch index, used for naming models when saving all epochs in "all" mode.
 
         Functionality:
         - Saves the last-epoch model.
         - Saves the logs (self.results).
-        - Saves the best-performing model during training based on the specified testuation mode.
+        - Saves the best-performing model during training based on the specified evaluation mode.
         - If mode is "all", saves the model for every epoch.
-        - Updates `self.model_<loss, acc, fpr, pauc, epoch>` accordingly.
+        - Updates `self.model_<loss, dice, iou, epoch>` accordingly.
 
         Returns:
             A dataframe of training and testing metrics for each epoch.
@@ -884,6 +906,26 @@ class ObjectDetectionEngine(Common):
                         if self.keep_best_models_in_memory:
                             self.model_loss.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_loss)
+                # Dice-coefficient criterion    
+                elif mode == "dice":
+                    if test_dice is None:
+                        self.error(f"'test_dice' must be provided when mode is 'dice'.")
+                    if test_dice > self.best_test_dice:
+                        remove_previous_best(self.model_name_dice)
+                        self.best_test_dice = test_dice
+                        if self.keep_best_models_in_memory:
+                            self.model_dice.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_dice)
+                # IoU criterion    
+                elif mode == "iou":
+                    if test_iou is None:
+                        self.error(f"'test_iou' must be provided when mode is 'iou'.")
+                    if test_iou > self.best_test_iou:
+                        remove_previous_best(self.model_name_iou)
+                        self.best_test_iou = test_iou
+                        if self.keep_best_models_in_memory:
+                            self.model_iou.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_iou)
                 # Last-epoch criterion
                 elif mode == "last":
                     remove_previous_best(self.model_name)
@@ -929,6 +971,7 @@ class ObjectDetectionEngine(Common):
         train_dataloader: torch.utils.data.DataLoader=None, 
         test_dataloader: torch.utils.data.DataLoader=None,
         apply_validation: bool=True,
+        num_classes: int=2, 
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
@@ -937,7 +980,7 @@ class ObjectDetectionEngine(Common):
         amp: bool=True,
         enable_clipping: bool=False,
         accumulation_steps: int=1,
-        debug_mode: bool=False,
+        debug_mode: bool=False,        
         ) -> pd.DataFrame:
 
         """
@@ -958,14 +1001,17 @@ class ObjectDetectionEngine(Common):
                 such as ".pth", ".pt", ".pkl", ".h5", or ".torch".
             save_best_model (Union[str, List[str]], optional): Criterion(s) for saving the model.
                 Options include:
-                - "loss" (validation loss),                
+                - "loss" (validation loss),
+                - "dice" (validation Dice-coefficient),
+                - "iou" (validation IoU),                
                 - "last" (save model at the last epoch),
                 - "all" (save models for all epochs),
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
             keep_best_models_in_memory (bool, optional): If True, the best models are kept in memory for future inference. The model state from the last epoch will always be kept in memory.
             train_dataloader (torch.utils.data.DataLoader, optional): Dataloader for training the model.
-            test_dataloader (torch.utils.data.DataLoader, optional): Dataloader for testing or validating the model.
+            test_dataloader (torch.utils.data.DataLoader, optional): Dataloader for testing/validating the model.
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
+            num_classes (int, optional): Number of output classes for the model (default is 2).
             optimizer (torch.optim.Optimizer, optional): Optimizer to use during training.
             loss_fn (torch.nn.Module, optional): Loss function used for training.
             scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler to adjust learning rate during training.            
@@ -974,26 +1020,34 @@ class ObjectDetectionEngine(Common):
             amp (bool, optional): Whether to use Automatic Mixed Precision (AMP) during training. Default is True.
             enable_clipping (bool, optional): Whether to enable gradient and model output clipping. Default is False.
             accumulation_steps (int, optional): Number of mini-batches to accumulate gradients before an optimizer step. Default is 1 (no accumulation).
-            debug_mode (bool, optional): Whether to enable debug mode. If True, it may slow down the training process.
+            debug_mode (bool, optional): Whether to enable debug mode. If True, it may slow down the training process.            
 
         Returns:
             pd.DataFrame: A dataframe containing the metrics for training and testing across all epochs.
             The dataframe will have the following columns:
             - epoch: List of epoch numbers.
-            - train_<loss_metrics>: List of training loss values for each epoch.            
-            - test_<loss_metrics>: List of test loss values for each epoch.
-            - train_time: Training_time for each epcoh            
-            - test_time: Testing time for each epoch.
-            - lr: Learning rate value for each epoch.
+            - train_loss: List of training loss values for each epoch.
+            - train_dice: List of training dice-coefficient values for each epoch.
+            - train_iou: List of training IoU values for each epoch.
+            - test_loss: List of test loss values for each epoch.
+            - test_dice: List of test dice-coefficient values for each epoch.
+            - test_iou: List of test IoU values for each epoch.
+            - train_time: List of training time for each epoch.
+            - test_time: List of testing time for each epoch.
+            - lr: List of learning rate values for each epoch.
 
         Example output (for 2 epochs):
         {
             epoch: [1, 2],
-            train_loss: [2.0616, 1.0537],            
-            test_loss: [1.2641, 1.5706],            
+            train_loss: [2.0616, 1.0537],
+            train_dice: [0.3945, 0.3945],
+            train_iou: [0.4415, 0.5015],
+            test_loss: [1.2641, 1.5706],
+            test_dice: [0.3400, 0.2973],
+            test_iou: [0.4174, 0.3481],
             train_time: [1.1234, 1.5678],
             test_time: [0.4567, 0.7890],
-            lr: [0.001, 0.0005],
+            lr: [0.001, 0.0005],            
         }
         """
 
@@ -1005,19 +1059,20 @@ class ObjectDetectionEngine(Common):
             target_dir=target_dir,
             model_name=model_name,
             dataloader=train_dataloader,
+            num_classes=num_classes,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,
             apply_validation= apply_validation,
             optimizer=optimizer,
             loss_fn=loss_fn,
             scheduler=scheduler,
-            batch_size=train_dataloader.batch_size,
+            batch_size=train_dataloader.batch_size,            
             epochs=epochs, 
             plot_curves=plot_curves,
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,
-            debug_mode=debug_mode,
+            debug_mode=debug_mode,            
             )
 
         # Loop through training and testing steps for a number of epochs
@@ -1025,8 +1080,8 @@ class ObjectDetectionEngine(Common):
 
             # Perform training step and time it
             train_epoch_start_time = time.time()
-            train_loss, train_loss_dict = self.train_step_v2(
-                dataloader=train_dataloader,            
+            train_loss, train_dice, train_iou = self.train_step_v2(
+                dataloader=train_dataloader,                                
                 epoch_number=epoch,
                 amp=amp,
                 enable_clipping=enable_clipping,
@@ -1037,11 +1092,12 @@ class ObjectDetectionEngine(Common):
 
             # Perform test step and time it
             test_epoch_start_time = time.time()
-            test_loss, test_loss_dict = self.test_step(
-                dataloader=test_dataloader,            
+            test_loss, test_dice, test_iou = self.test_step(
+                dataloader=test_dataloader,                
                 epoch_number=epoch,
                 amp=amp,
                 enable_clipping=enable_clipping,
+                debug_mode=debug_mode
                 )
             test_epoch_time = time.time() - test_epoch_start_time if self.apply_validation else 0.0            
 
@@ -1051,22 +1107,29 @@ class ObjectDetectionEngine(Common):
             self.display_results(
                 epoch=epoch,
                 max_epochs=epochs,
-                train_loss=train_loss_dict,                
+                train_loss=train_loss,
+                train_dice=train_dice,
+                train_iou=train_iou,                                
                 train_epoch_time=train_epoch_time,
-                test_loss=test_loss_dict,                
+                test_loss=test_loss,
+                test_dice=test_dice,
+                test_iou=test_iou,                
                 test_epoch_time=test_epoch_time,
-                plot_curves=plot_curves,
+                plot_curves=plot_curves,                
             )
 
             # Scheduler step after the optimizer
             self.scheduler_step(
                 test_loss=test_loss,
+                test_dice=test_dice
             )
 
             # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.
             # If apply_validation is enabled then upate models based on validation results
             df_results = self.update_model(
-                test_loss=test_loss if self.apply_validation or test_loss is not None else train_loss,                
+                test_loss=test_loss if self.apply_validation else train_loss,
+                test_dice=test_dice if self.apply_validation else train_dice,
+                test_iou=test_iou if self.apply_validation else train_iou,                
                 epoch=epoch
                 )
 
@@ -1075,150 +1138,3 @@ class ObjectDetectionEngine(Common):
         self.finish_train(train_time)
 
         return df_results
-
-    @staticmethod
-    def prune_predictions(
-        pred,
-        score_threshold=0.66,
-        mask_threshold=0.5,
-        iou_threshold=0.5,
-        ):
-
-        """
-        Filters and refines predictions by:
-        1. Removing low-confidence detections based on the score threshold.
-        2. Applying a binary mask threshold to filter out weak segmentation masks.
-        3. Using Non-Maximum Suppression (NMS) to eliminate overlapping predictions.
-
-        Parameters:
-        pred : dict
-            The raw predictions containing "boxes", "scores", "labels", and "masks".
-        score_threshold : float, optional
-            The minimum confidence score required to keep a prediction (default: 0.7).
-        mask_threshold : float, optional
-            The threshold for binarizing the segmentation masks (default: 0.5).
-        iou_threshold : float, optional
-            The Intersection over Union (IoU) threshold for NMS (default: 0.5).
-
-        Returns:
-        dict
-            A dictionary with filtered and refined predictions:
-            - "boxes": Tensor of kept bounding boxes.
-            - "scores": Tensor of kept scores.
-            - "labels": List of label strings.
-            - "masks": Tensor of kept segmentation masks. [OPTIONAL]
-        """
-        
-        # Filter predictions based on confidence score threshold
-        scores = pred["scores"]
-        high_conf_idx = scores > score_threshold
-
-        filtered_pred = {
-            "boxes":  pred["boxes"][high_conf_idx].long(),
-            "scores": pred["scores"][high_conf_idx],
-            "labels": pred["labels"][high_conf_idx], #[f"roi: {s:.3f}" for s in scores[high_conf_idx]]
-        }
-
-        # Only add "masks" if present in prediction output
-        if "masks" in pred:
-            filtered_pred["masks"] = (pred["masks"] > mask_threshold).squeeze(1)[high_conf_idx]
-
-        # Apply Non-Maximum Suppression (NMS) to remove overlapping predictions
-        if len(filtered_pred["boxes"]) == 0:
-            return filtered_pred  # No boxes to process
-        keep_idx = ops.nms(filtered_pred["boxes"].float(), filtered_pred["scores"], iou_threshold)
-
-        # Return filtered predictions
-        return {
-            "boxes": filtered_pred["boxes"][keep_idx],
-            "scores": filtered_pred["scores"][keep_idx],
-            "labels": filtered_pred["labels"][keep_idx], #[i] for i in keep_idx],
-            **({"masks": filtered_pred["masks"][keep_idx]} if "masks" in filtered_pred else {})  # Only add "masks" if present
-        }
-
-    def predict(
-        self,
-        dataloader: torch.utils.data.DataLoader,
-        model_state: str="last",
-        prune_predictions: bool=True,
-        **kwargs
-        ):
-
-        """
-        Predicts classes for a given dataset using a trained model.
-
-        Args:
-            model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
-            dataloader (torch.utils.data.DataLoader): The dataset to predict on.            
-            prune_predictions (bool): A flag to activate a method that filters out redundant ROIs.
-            **kwargs: Additional arguments to pass to the apply_postprocessing function, such as thresholds.         
-
-        Returns:
-            (list): All of the predicted class labels represented by prediction probabilities (softmax)
-        """
- 
-        # Check model to use
-        valid_modes =  {"loss", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
-
-        if model_state == "last":
-            model = self.model
-        elif model_state == "loss":
-            if self.model_loss is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_loss
-        elif isinstance(model_state, int):
-            if self.model_epoch is None:
-                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                model = self.model
-            else:
-                if model_state > len(self.model_epoch):
-                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                    model = self.model
-                else:
-                    model = self.model_epoch[model_state-1]            
-
-
-        y_preds = []
-        model.eval()
-        model.to(self.device)
-
-        # Set inference context
-        try:
-            inference_context = torch.inference_mode()
-            with torch.inference_mode():        
-                for images, targets in dataloader:
-                    
-                    images, targets = self.prepare_data(images, targets)
-                    y_pred = model(images)
-                    break
-        except RuntimeError:
-            inference_context = torch.no_grad()
-            self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
-
-        # Turn on inference context manager 
-        with inference_context:
-            for images, targets in tqdm(dataloader, desc="Making predictions"):
-
-                # Send data and targets to target device
-                images, targets = self.prepare_data(images, targets)
-                                
-                # Do the forward pass
-                y_pred = model(images)
-
-                # If prune_predictions is enabled, apply it to filter predictions
-                # Process predictions: prune if enabled, format labels
-                y_pred = [
-                    self.prune_predictions(pred, **kwargs) if prune_predictions else pred
-                    for pred in y_pred
-                ]
-
-                y_preds.extend(y_pred)
-
-        # Convert predictions to CPU
-        cpu_preds = [{k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in pred.items()} for pred in y_preds]
-        
-        # Concatenate list of predictions into a tensor
-        return cpu_preds

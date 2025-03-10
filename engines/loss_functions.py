@@ -7,7 +7,7 @@ Additional loss functions for other tasks (e.g., object detection, segmentation)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from .common import Logger
 
 def roc_curve_gpu(y_true, y_score):
 
@@ -79,6 +79,8 @@ def roc_curve_gpu(y_true, y_score):
 
     return fpr, tpr
 
+
+# Image Classification: Cross-Entropy + pAUC Loss
 class CrossEntropyPAUCLoss(nn.Module):
 
     """
@@ -192,7 +194,7 @@ class CrossEntropyPAUCLoss(nn.Module):
 
         # Debug mode
         if self.debug_mode:
-           print(
+           Logger().info(
                f"pauc: {torch.round(torch.tensor(pauc) * 10000) / 10000}, "
                f"pauc_loss: {torch.round(torch.tensor(pauc_loss) * 10000) / 10000}, "
                f"avg_p_auc: {torch.round(torch.tensor(avg_p_auc) * 10000) / 10000}, "
@@ -202,7 +204,7 @@ class CrossEntropyPAUCLoss(nn.Module):
 
         return total_loss
 
-
+# Image classification: Cross-Entropy + FPR Loss
 class CrossEntropyFPRLoss(nn.Module):
 
     """
@@ -240,6 +242,7 @@ class CrossEntropyFPRLoss(nn.Module):
             self.weight = torch.ones(num_classes, dtype=torch.float32)
 
     def forward(self, predictions, targets):
+
         """
         Computes the loss that combines Cross-Entropy and False Positive Rate (FPR) for both binary and multi-class classification.
 
@@ -295,7 +298,7 @@ class CrossEntropyFPRLoss(nn.Module):
 
         # Debug mode (optional)
         if self.debug_mode:
-            print(
+            Logger().info(
                 f"ce_loss: {torch.round(torch.tensor(ce_loss) * 10000) / 10000}, "
                 f"fpr_loss: {torch.round(torch.tensor(fpr_loss) * 10000) / 10000}, "
                 f"total_loss: {torch.round(torch.tensor(total_loss) * 10000) / 10000}"
@@ -335,7 +338,7 @@ class CrossEntropyFPRLoss(nn.Module):
             return 0
         
 
-# Define knowledge distillation loss
+# Image distillation (classification) Loss
 class DistillationLoss(nn.Module):
 
     """
@@ -398,3 +401,107 @@ class DistillationLoss(nn.Module):
         )
         hard_loss = self.ce_loss(student_logits, labels)
         return self.alpha * hard_loss + (1 - self.alpha) * soft_loss
+
+
+# Image segmentation: Dice Loss
+class DiceLoss(nn.Module):
+    def __init__(self, num_classes=1, from_logits=True, eps=1e-6, reduction='mean'):
+        
+        """
+        Dice Loss for binary and multi-class segmentation (flattened version for global calculation).
+        
+        Args:
+            num_classes (int): Number of classes (1 for binary segmentation, >1 for multi-class).
+            from_logits (bool): If True, applies sigmoid activation to predictions.
+            eps (float): Small constant for numerical stability.
+            reduction (str): Specifies the reduction method ('mean', 'sum', or None).
+        """
+        
+        super(DiceLoss, self).__init__()
+        self.num_classes = num_classes
+        self.from_logits = from_logits
+        self.eps = eps
+        self.reduction = reduction
+
+    def forward(self, y_true, y_pred):
+
+        """
+        Computes the Dice Loss by flattening both predictions and ground truth.
+
+        Args:
+            y_true: Ground truth labels (one-hot encoded for multi-class) -> shape (N, C, H, W)
+            y_pred: Model predictions (logits if from_logits=True) -> shape (N, C, H, W)
+
+        Returns:
+            Dice Loss value (lower is better).
+        """
+
+        # Apply softmax / sigmoid
+        if self.from_logits:
+            y_pred = torch.softmax(y_pred, dim=1) if self.num_classes > 1 else torch.sigmoid(y_pred)
+
+        # Ensure ground truth is float for stability
+        y_true = y_true.float() 
+
+        # Binary case (num_classes == 1)
+        if self.num_classes == 1:
+
+            # Compute intersection and union
+            intersection = torch.sum(y_true * y_pred, dim=(2, 3))
+            union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred, dim=(2, 3))
+
+        # Multi-class case (num_classes > 1)
+        else:
+            # Convert predictions to one-hot-like representation
+            y_pred_one_hot = F.one_hot(torch.argmax(y_pred, dim=1), num_classes=self.num_classes)
+            y_pred_one_hot = y_pred_one_hot.permute(0, 3, 1, 2).float()  # Shape (B, C, H, W)
+
+            # Compute intersection and union
+            intersection = torch.sum(y_true * y_pred_one_hot, dim=(2, 3))
+            union = torch.sum(y_true, dim=(2, 3)) + torch.sum(y_pred_one_hot, dim=(2, 3))        
+        
+        # Compute Dice coefficient
+        dice = (2. * intersection + self.eps) / (union + self.eps)
+        if torch.any(dice < 0) or torch.any(dice > 1):
+            Logger().warning(f"Dice loss: Dice coefficient out of range for class.")
+        dice = torch.clamp(dice, 0.0, 1.0)
+        dice_loss = 1 - dice
+
+        # Reduce across classes
+        if self.reduction == 'mean':
+            return dice_loss.mean()
+        elif self.reduction == 'sum':
+            return dice_loss.sum()
+        else:
+            return dice_loss
+
+
+
+# Image Segmentation: Dice + Cross-Entropy Loss
+class DiceCrossEntropyLoss(nn.Module):
+    def __init__(self, num_classes=1, alpha=0.5, threshold=0.5, eps=1e-6, label_smoothing=0.1):
+        
+        """
+        Combines Dice Loss and Cross-Entropy Loss.
+        
+        - alpha: weight factor (default: 0.5 means equal weight)
+        """
+
+        super(DiceCrossEntropyLoss, self).__init__()
+        self.num_classes = num_classes
+        self.alpha = alpha
+        self.threshold = threshold
+        self.eps = eps
+        self.label_smoothing = label_smoothing        
+
+        # For multi-class: CrossEntropyLoss, for binary classification: BCEWithLogitsLoss
+        if self.num_classes > 1:
+            self.ce_loss = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
+        else:
+            self.ce_loss = nn.BCEWithLogitsLoss()
+
+    def forward(self, y_true, y_pred):
+        dice_loss = DiceLoss(self.num_classes, self.threshold, self.eps)(y_true, y_pred)
+        ce_loss = self.ce_loss(y_pred, y_true.float())
+        
+        return self.alpha * dice_loss + (1 - self.alpha) * ce_loss

@@ -105,7 +105,7 @@ class ProcessDataset(torch.utils.data.Dataset):
         # There is only one class
         #labels = torch.ones((num_objs,), dtype=torch.int64)
         #labels = obj_ids
-        labels = torch.clamp(remapped_ids, max=self.num_classes)
+        labels = torch.clamp(remapped_ids, max=self.num_classes)    
 
         image_id = idx
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])

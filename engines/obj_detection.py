@@ -49,6 +49,7 @@ class ObjectDetectionEngine(Common):
         self,
         model: torch.nn.Module=None,
         color_map: dict=None,
+        log_verbose: bool=True,
         device: str="cuda" if torch.cuda.is_available() else "cpu"
         ):
         super().__init__()
@@ -67,6 +68,7 @@ class ObjectDetectionEngine(Common):
         self.model_name = None
         self.model_name_loss = None        
         self.squeeze_dim = False
+        self.log_verbose = log_verbose
 
         # Initialize colors
         default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
@@ -521,7 +523,43 @@ class ObjectDetectionEngine(Common):
                         self.model_epoch[k].to(self.device)
             self.best_test_loss = float("inf")         
     
-    
+    def progress_bar(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        total: int,
+        epoch_number: int,
+        stage: str,
+        desc_length: int=22):
+
+        """
+        Creates the tqdm progress bar for the training and validation stages.
+
+        Args:
+            dataloader: The dataloader for the current stage.
+            total: The total number of batches in the dataloader.
+            epoch_number: The current epoch number.
+            stage: The current stage ("train" or "validate").
+            desc_length: The length of the description string for the progress bar.
+
+        Returns:
+            A tqdm progress bar instance for the current stage.
+        """
+
+        train_str = f"Training epoch {epoch_number+1}"
+        val_str = f"Validating epoch {epoch_number+1}"
+        
+        if stage == 'train':
+            color = self.color_train_plt
+            desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
+        else:
+            color = self.color_test_plt
+            desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "
+        progress = tqdm(enumerate(dataloader), total=total, colour=color)
+        progress.set_description(desc)
+
+        return progress
+
+
     # This train step function includes gradient accumulation (experimental)
     def train_step_v2(
         self,
@@ -549,8 +587,6 @@ class ObjectDetectionEngine(Common):
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        self.info(f"Training epoch {epoch_number+1}...")
-
         # Put model in train mode
         self.model.train()
         #self.model.to(self.device) # Already done in __init__
@@ -565,7 +601,7 @@ class ObjectDetectionEngine(Common):
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_train_plt):
+        for batch, (images, targets) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
             
             images, targets = self.prepare_data(images, targets)
 
@@ -691,8 +727,6 @@ class ObjectDetectionEngine(Common):
         # Execute the test step is apply_validation is enabled
         if self.apply_validation:
 
-            self.info(f"Validating epoch {epoch_number+1}...")
-
             # Put model in train mode, otherwise loss results are not generated
             self.model.train() 
 
@@ -716,8 +750,9 @@ class ObjectDetectionEngine(Common):
 
             # Turn on inference context manager 
             with inference_context:
-                # Loop through DataLoader batches
-                for batch, (images, targets) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_test_plt):
+
+                # Loop through DataLoader batches                
+                for batch, (images, targets) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
 
                     images, targets = self.prepare_data(images, targets)
 

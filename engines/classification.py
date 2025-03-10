@@ -96,10 +96,10 @@ class ClassificationEngine(Common):
         else:
             color_map = {**default_color_map, **color_map} # Merge user input with defaults
         self.color_train = Colors.get_console_color(color_map['train'])
-        self.color_test =  Colors.get_console_color(color_map['eval'])
+        self.color_test =  Colors.get_console_color(color_map['test'])
         self.color_other = Colors.get_console_color(color_map['other'])
         self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
-        self.color_test_plt =  Colors.get_matplotlib_color(color_map['eval'])
+        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
 
         # Initialize result logs
         self.results = {}
@@ -700,6 +700,42 @@ class ClassificationEngine(Common):
             self.best_test_fpr = float("inf")
             self.best_test_pauc = 0.0
     
+    def progress_bar(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        total: int,
+        epoch_number: int,
+        stage: str,
+        desc_length: int=22):
+
+        """
+        Creates the tqdm progress bar for the training and validation stages.
+
+        Args:
+            dataloader: The dataloader for the current stage.
+            total: The total number of batches in the dataloader.
+            epoch_number: The current epoch number.
+            stage: The current stage ("train" or "validate").
+            desc_length: The length of the description string for the progress bar.
+
+        Returns:
+            A tqdm progress bar instance for the current stage.
+        """
+
+        train_str = f"Training epoch {epoch_number+1}"
+        val_str = f"Validating epoch {epoch_number+1}"
+        
+        if stage == 'train':
+            color = self.color_train_plt
+            desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
+        else:
+            color = self.color_test_plt
+            desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "
+        progress = tqdm(enumerate(dataloader), total=total, colour=color)
+        progress.set_description(desc)
+
+        return progress
+
     def train_step(
         self,
         dataloader: torch.utils.data.DataLoader,
@@ -733,8 +769,6 @@ class ClassificationEngine(Common):
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        self.info(f"Training epoch {epoch_number+1}...")
-
         # Put model in train mode
         self.model.train()
         #self.model.to(self.device) # Already done in __init__
@@ -749,8 +783,7 @@ class ClassificationEngine(Common):
         all_labels = []
 
         # Loop through data loader data batches
-        for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_train_plt): #): 
-            #, desc=f"Training epoch {epoch_number}..."):
+        for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
 
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)
@@ -903,8 +936,6 @@ class ClassificationEngine(Common):
             In the form (train_loss, train_accuracy, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.01123, 0.15561).
         """
 
-        self.info(f"Training epoch {epoch_number+1}...")
-
         # Put model in train mode
         self.model.train()
         #self.model.to(self.device) # Already done in __init__
@@ -920,7 +951,7 @@ class ClassificationEngine(Common):
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_train_plt): #):
+        for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
             
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)            
@@ -1074,8 +1105,6 @@ class ClassificationEngine(Common):
         # Execute the test step is apply_validation is enabled
         if self.apply_validation:
 
-            self.info(f"Validating epoch {epoch_number+1}...")
-
             # Put model in eval mode
             self.model.eval() 
             #self.model.to(self.device) # Already done in __init__
@@ -1099,9 +1128,10 @@ class ClassificationEngine(Common):
 
             # Turn on inference context manager 
             with inference_context:
+
                 # Loop through DataLoader batches
-                for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_test_plt): #colour='#FF9E2C'):
-                    #, desc=f"Validating epoch {epoch_number}..."):
+                for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
+
                     # Send data to target device
                     X, y = X.to(self.device), y.to(self.device)                    
                     X = X.squeeze(1) if self.squeeze_dim else X
@@ -1961,10 +1991,10 @@ class DistillationEngine(Common):
             color_map = {**default_color_map, **color_map} # Merge user input with defaults
 
         self.color_train = Colors.get_console_color(color_map['train'])
-        self.color_test =  Colors.get_console_color(color_map['eval'])
+        self.color_test =  Colors.get_console_color(color_map['test'])
         self.color_other = Colors.get_console_color(color_map['other'])
         self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
-        self.color_test_plt =  Colors.get_matplotlib_color(color_map['eval'])
+        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
 
         # Initialize result logs
         self.results = {}
@@ -2518,7 +2548,7 @@ class DistillationEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+                    info.error(f"Unexpected input shape after exception handling: {X.shape}")
             break
     
         # Initialize the best model and model_epoch list based on the specified mode.
@@ -2560,6 +2590,43 @@ class DistillationEngine(Common):
             self.best_test_fpr = float("inf")
             self.best_test_pauc = 0.0
     
+    def progress_bar(
+        self,
+        dataloader_std: torch.utils.data.DataLoader,
+        dataloader_tch: torch.utils.data.DataLoader,
+        total: int,
+        epoch_number: int,
+        stage: str,
+        desc_length: int=22):
+
+        """
+        Creates the tqdm progress bar for the training and validation stages.
+
+        Args:
+            dataloader_std: The student dataloader for the current stage.
+            dataloader_tch: The teacher dataloader for the current stage.
+            total: The total number of batches in the dataloader.
+            epoch_number: The current epoch number.
+            stage: The current stage ("train" or "validate").
+            desc_length: The length of the description string for the progress bar.
+
+        Returns:
+            A tqdm progress bar instance for the current stage.
+        """
+
+        train_str = f"Training epoch {epoch_number+1}"
+        val_str = f"Validating epoch {epoch_number+1}"
+        
+        if stage == 'train':
+            color = self.color_train_plt
+            desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
+        else:
+            color = self.color_test_plt
+            desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "        
+        progress = tqdm(zip(enumerate(dataloader_std), enumerate(dataloader_tch)), total=total, colour=color)
+        progress.set_description(desc)
+
+        return progress
 
     # This train step function includes gradient accumulation (experimental)
     def train_step_v2(
@@ -2596,9 +2663,6 @@ class DistillationEngine(Common):
             In the form (train_loss, train_acc, train_f1, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.18332, 0.01123, 0.15561).
         """
 
-        self.info(f"Training epoch {epoch_number+1}...")
-
-
         # Put student model in train mode
         self.model.train()
         self.model.to(self.device)
@@ -2617,8 +2681,13 @@ class DistillationEngine(Common):
         all_labels = []
 
         # Loop through data loader data batches
-        self.optimizer.zero_grad()  # Clear gradients before starting
-        for (batch, (X, y)), (_, (X_tch, _)) in tqdm(zip(enumerate(dataloader_std), enumerate(dataloader_tch)), total=len_dataloader):
+        self.optimizer.zero_grad()  # Clear gradients before starting        
+        for (batch, (X, y)), (_, (X_tch, _)) in self.progress_bar(
+            dataloader_std=dataloader_std,
+            dataloader_tch=dataloader_tch,
+            total=len_dataloader,
+            epoch_number=epoch_number,
+            stage="train"):
             
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)
@@ -2774,9 +2843,7 @@ class DistillationEngine(Common):
         """
 
         # Execute the test step is apply_validation is enabled
-        if self.apply_validation:
-
-            self.info(f"Validating epoch {epoch_number+1}...")
+        if self.apply_validation:            
 
             # Put the student model in eval mode
             self.model.eval() 
@@ -2805,10 +2872,15 @@ class DistillationEngine(Common):
 
             # Turn on inference context manager 
             with inference_context:
-                # Loop through DataLoader batches
-                # for batch, (X, y) in tqdm(enumerate(dataloader), total=len(dataloader), colour='#FF9E2C'):
-                for (batch, (X, y)), (_, (X_tch, _)) in tqdm(zip(enumerate(dataloader_std), enumerate(dataloader_tch)), total=len_dataloader, colour='#FF9E2C'):
-                    #, desc=f"Validating epoch {epoch_number}..."):
+
+                # Loop through DataLoader batches                   
+                for (batch, (X, y)), (_, (X_tch, _)) in self.progress_bar(
+                    dataloader_std=dataloader_std,
+                    dataloader_tch=dataloader_tch,
+                    total=len_dataloader,
+                    epoch_number=epoch_number,
+                    stage="test"):
+
                     # Send data to target device
                     X, y = X.to(self.device), y.to(self.device)
                     X_tch = X_tch.to(self.device)

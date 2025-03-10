@@ -531,7 +531,42 @@ class SegmentationEngine(Common):
             self.best_test_dice = 0.0
             self.best_test_iou = 0.0               
     
-    
+    def progress_bar(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        total: int,
+        epoch_number: int,
+        stage: str,
+        desc_length: int=22):
+
+        """
+        Creates the tqdm progress bar for the training and validation stages.
+
+        Args:
+            dataloader: The dataloader for the current stage.
+            total: The total number of batches in the dataloader.
+            epoch_number: The current epoch number.
+            stage: The current stage ("train" or "validate").
+            desc_length: The length of the description string for the progress bar.
+
+        Returns:
+            A tqdm progress bar instance for the current stage.
+        """
+
+        train_str = f"Training epoch {epoch_number+1}"
+        val_str = f"Validating epoch {epoch_number+1}"
+        
+        if stage == 'train':
+            color = self.color_train_plt
+            desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
+        else:
+            color = self.color_test_plt
+            desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "
+        progress = tqdm(enumerate(dataloader), total=total, colour=color)
+        progress.set_description(desc)
+
+        return progress
+
     # This train step function includes gradient accumulation (experimental)
     def train_step_v2(
         self,
@@ -574,7 +609,7 @@ class SegmentationEngine(Common):
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_train_plt):
+        for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
             
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)            
@@ -726,7 +761,7 @@ class SegmentationEngine(Common):
             # Turn on inference context manager 
             with inference_context:
                 # Loop through DataLoader batches
-                for batch, (X, y) in tqdm(enumerate(dataloader), total=len_dataloader, colour=self.color_test_plt):
+                for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
                     
                     # Send data to target device
                     X, y = X.to(self.device), y.to(self.device)                    

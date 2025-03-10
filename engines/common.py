@@ -308,6 +308,14 @@ class Common(Logger):
             return output.sum().item()
         else:
             return output.cpu()
+    
+    def get_predictions(self, output):
+        if isinstance(output, torch.Tensor):
+            return output.contiguous()
+        elif hasattr(output, "logits"):            
+            return output.logits.contiguous()
+        else:
+            self.error(f"Unexpected model output type: {type(output)}")
         
 
     def save_model(self, model: torch.nn.Module, target_dir: str, model_name: str):
@@ -342,6 +350,7 @@ class Common(Logger):
         self.info(f"Saving best model to: {model_save_path}")
         torch.save(obj=model.state_dict(), f=model_save_path)
 
+
     def load_model(self, model: torch.nn.Module, target_dir: str, model_name: str):
         
         """Loads a PyTorch model from a target directory.
@@ -373,13 +382,5 @@ class Common(Logger):
         model.load_state_dict(torch.load(model_save_path, weights_only=True))
         
         return model
-    
-    def get_predictions(self, output):
-        if isinstance(output, torch.Tensor):
-            return output.contiguous()
-        elif hasattr(output, "logits"):            
-            return output.logits.contiguous()
-        else:
-            self.error(f"Unexpected model output type: {type(output)}")
 
         

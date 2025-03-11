@@ -358,6 +358,8 @@ def display_and_save_predictions(
     box_color: str='white',
     mask_color: str='blue',
     width: int=1,
+    font_type: str=None,
+    font_size: int=8,
     print_classes: bool=True,
     print_scores: bool=True,
     label_to_class_dict={1: 'roi'},
@@ -425,7 +427,9 @@ def display_and_save_predictions(
             boxes=filtered_pred["boxes"],
             labels=labels if print_classes or print_scores else None,
             colors=box_color,
-            width=width)
+            width=width,
+            font=font_type,
+            font_size=font_size)
         
         # Draw segmentation masks (if any)
         if "masks" in filtered_pred and len(filtered_pred["masks"]) > 0:

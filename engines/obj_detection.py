@@ -295,7 +295,7 @@ class ObjectDetectionEngine(Common):
 
             print(
                 f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
-                f"{self.color_test}test:  {self.color_other} {test_loss_str} {self.color_other}| "                
+                f"{self.color_test}Test:  {self.color_other} {test_loss_str} {self.color_other}| "                
                 f"{self.color_test}time: {self.sec_to_min_sec(test_epoch_time)} {self.color_other}| "            
                 f"{self.color_test}lr: {lr:.10f}"
             )

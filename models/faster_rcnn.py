@@ -21,7 +21,7 @@ class StandardFasterRCNN(torch.nn.Module):
         backbone: str = "resnet50", #['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
         weights: Union[str, Path] = "DEFAULT",
         hidden_layer: int = 256,
-        device: torch.device = "cuda" if torch.cuda.is_available() else "cpu" 
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ):
 
         """
@@ -47,37 +47,15 @@ class StandardFasterRCNN(torch.nn.Module):
         assert isinstance(num_classes, int), "[ERROR] num_classes must be an integer."
         assert isinstance(hidden_layer, int) and hidden_layer > 0, "[ERROR] hidden_layer must be a positive integer."
 
-        # Create the Faster R-CNN model based on the selected backbone
+        # Load default pretrained weights if "DEFAULT" or None
         if backbone == 'resnet50':
-            self.model = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=False)
+            self.model = torchvision.models.detection.maskrcnn_resnet50_fpn(weights="DEFAULT")
         elif backbone == 'resnet50_v2':
-            self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(pretrained=False)
+            self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights="DEFAULT")
         elif backbone == 'mobilenet_v3_large':
-            self.model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(pretrained=False)
+            self.model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(weights="DEFAULT")
         else:
-            self.model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_320_fpn(pretrained=False)
-
-        # Load default pretrained weights if "DEFAULT" or None is passed
-        if weights == "DEFAULT" or weights is None:
-            if backbone == 'resnet50':
-                self.model = torchvision.models.detection.maskrcnn_resnet50_fpn(weights="DEFAULT")
-            elif backbone == 'resnet50_v2':
-                self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights="DEFAULT")
-            elif backbone == 'mobilenet_v3_large':
-                self.model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(weights="DEFAULT")
-            else:
-                self.model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_320_fpn(weights="DEFAULT")
-
-        # Load custom weights if provided
-        elif isinstance(weights, (str, Path)):
-            weights_path = Path(weights)
-            if weights_path.exists() and weights_path.suffix == '.pth':
-                # Load the custom weights
-                checkpoint = torch.load(weights_path)
-                # Update the model with the checkpoint's state_dict
-                self.model.load_state_dict(checkpoint)
-            else:
-                raise ValueError(f"[ERROR] Custom weights path '{weights}' is not valid or does not point to a valid checkpoint file.")
+            self.model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_320_fpn(weights="DEFAULT")
         
         # Replace the classification head (bounding box predictor)
         in_features = self.model.roi_heads.box_predictor.cls_score.in_features
@@ -87,7 +65,21 @@ class StandardFasterRCNN(torch.nn.Module):
         if "maskrcnn" in self.model.__class__.__name__.lower():
             in_features_mask = self.model.roi_heads.mask_predictor.conv5_mask.in_channels
             self.model.roi_heads.mask_predictor = MaskRCNNPredictor(in_features_mask, hidden_layer, num_classes)
-        
+
+        # Load custom weights if provided
+        if isinstance(weights, (str, Path)) and weights != "DEFAULT":
+            weights_path = Path(weights)
+            if weights_path.exists() and weights_path.suffix in {".pth", ".pt", ".pkl", ".h5", ".torch"}:
+                # Load the custom weights
+                checkpoint = torch.load(weights_path, map_location=device)
+                # Remove the 'model.' prefix from the keys in the checkpoint
+                checkpoint = {k.replace('model.', ''): v for k, v in checkpoint.items()}
+                # Update the model with the checkpoint's state_dict
+                self.model.load_state_dict(checkpoint)
+            else:
+                raise ValueError(f"[ERROR] Custom weights path '{weights}' is not valid or does not point to a valid checkpoint file.")
+
+        # Move the model to the specified device
         self.model.to(device)
 
     def forward(self, images, targets=None):

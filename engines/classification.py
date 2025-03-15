@@ -728,9 +728,12 @@ class ClassificationEngine(Common):
         if stage == 'train':
             color = self.color_train_plt
             desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
-        else:
+        elif stage == 'validation' or stage == "test":
             color = self.color_test_plt
             desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "
+        else:
+            color = self.color_test_plt
+            desc = f"Making predictions"
         progress = tqdm(enumerate(dataloader), total=total, colour=color)
         progress.set_description(desc)
 
@@ -783,7 +786,11 @@ class ClassificationEngine(Common):
         all_labels = []
 
         # Loop through data loader data batches
-        for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
+        for batch, (X, y) in self.progress_bar(
+            dataloader=dataloader,
+            total=len_dataloader,
+            epoch_number=epoch_number, stage='train'
+            ):
 
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)
@@ -951,7 +958,12 @@ class ClassificationEngine(Common):
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
+        for batch, (X, y) in self.progress_bar(
+            dataloader=dataloader,
+            total=len_dataloader,
+            epoch_number=epoch_number,
+            stage='train'
+            ):
             
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)            
@@ -1130,7 +1142,11 @@ class ClassificationEngine(Common):
             with inference_context:
 
                 # Loop through DataLoader batches
-                for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
+                for batch, (X, y) in self.progress_bar(
+                    dataloader=dataloader,
+                    total=len_dataloader,
+                    epoch_number=epoch_number,
+                    stage='test'):
 
                     # Send data to target device
                     X, y = X.to(self.device), y.to(self.device)                    
@@ -1701,7 +1717,11 @@ class ClassificationEngine(Common):
 
         # Turn on inference context manager 
         with inference_context:
-            for X, y in tqdm(dataloader, desc="Making predictions"):
+            for X, y in self.progress_bar(
+                dataloader=dataloader,
+                total=len(dataloader),
+                stage='inference'
+                ):
 
                 # Send data and targets to target device
                 X, y = X.to(self.device), y.to(self.device)
@@ -1827,7 +1847,7 @@ class ClassificationEngine(Common):
         pred_list = []
         
         # Loop through target paths
-        for path in tqdm(paths, total=num_samples):
+        for path in tqdm(paths, total=num_samples, colour=self.color_test_plt):
             
             # Create empty dictionary to store prediction information for each sample
             pred_dict = {}
@@ -2592,8 +2612,7 @@ class DistillationEngine(Common):
     
     def progress_bar(
         self,
-        dataloader_std: torch.utils.data.DataLoader,
-        dataloader_tch: torch.utils.data.DataLoader,
+        dataloader: torch.utils.data.DataLoader,
         total: int,
         epoch_number: int,
         stage: str,
@@ -2603,8 +2622,7 @@ class DistillationEngine(Common):
         Creates the tqdm progress bar for the training and validation stages.
 
         Args:
-            dataloader_std: The student dataloader for the current stage.
-            dataloader_tch: The teacher dataloader for the current stage.
+            dataloader: The dataloader for the current stage.
             total: The total number of batches in the dataloader.
             epoch_number: The current epoch number.
             stage: The current stage ("train" or "validate").
@@ -2620,10 +2638,13 @@ class DistillationEngine(Common):
         if stage == 'train':
             color = self.color_train_plt
             desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
+        elif stage == 'validation' or stage == "test":
+            color = self.color_test_plt
+            desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "
         else:
             color = self.color_test_plt
-            desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "        
-        progress = tqdm(zip(enumerate(dataloader_std), enumerate(dataloader_tch)), total=total, colour=color)
+            desc = f"Making predictions"
+        progress = tqdm(enumerate(dataloader), total=total, colour=color)
         progress.set_description(desc)
 
         return progress
@@ -2879,7 +2900,8 @@ class DistillationEngine(Common):
                     dataloader_tch=dataloader_tch,
                     total=len_dataloader,
                     epoch_number=epoch_number,
-                    stage="test"):
+                    stage="test"
+                    ):
 
                     # Send data to target device
                     X, y = X.to(self.device), y.to(self.device)
@@ -3431,7 +3453,11 @@ class DistillationEngine(Common):
 
         # Turn on inference context manager 
         with inference_context:
-            for X, y in tqdm(dataloader, desc="Making predictions"):
+            for X, y in self.progress_bar(
+                dataloader=dataloader,
+                total=len(dataloader),
+                stage='inference'
+                ):
 
                 # Send data and targets to target device
                 X, y = X.to(self.device), y.to(self.device)
@@ -3560,7 +3586,7 @@ class DistillationEngine(Common):
         pred_list = []
         
         # Loop through target paths
-        for path in tqdm(paths, total=num_samples):
+        for path in tqdm(paths, total=num_samples, colour=self.color_test_plt):
             
             # Create empty dictionary to store prediction information for each sample
             pred_dict = {}

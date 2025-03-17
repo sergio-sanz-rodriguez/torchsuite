@@ -704,9 +704,9 @@ class ClassificationEngine(Common):
         self,
         dataloader: torch.utils.data.DataLoader,
         total: int,
-        epoch_number: int,
         stage: str,
-        desc_length: int=22):
+        epoch_number: int = 1,
+        desc_length: int = 22):
 
         """
         Creates the tqdm progress bar for the training and validation stages.
@@ -2614,9 +2614,9 @@ class DistillationEngine(Common):
         self,
         dataloader: torch.utils.data.DataLoader,
         total: int,
-        epoch_number: int,
         stage: str,
-        desc_length: int=22):
+        epoch_number: int = 1,
+        desc_length: int = 22):
 
         """
         Creates the tqdm progress bar for the training and validation stages.
@@ -2624,8 +2624,8 @@ class DistillationEngine(Common):
         Args:
             dataloader: The dataloader for the current stage.
             total: The total number of batches in the dataloader.
-            epoch_number: The current epoch number.
             stage: The current stage ("train" or "validate").
+            epoch_number: The current epoch number.
             desc_length: The length of the description string for the progress bar.
 
         Returns:
@@ -3453,7 +3453,7 @@ class DistillationEngine(Common):
 
         # Turn on inference context manager 
         with inference_context:
-            for X, y in self.progress_bar(
+            for batch, (X, y) in self.progress_bar(
                 dataloader=dataloader,
                 total=len(dataloader),
                 stage='inference'

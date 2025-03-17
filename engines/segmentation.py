@@ -12,6 +12,7 @@ import copy
 import warnings
 import torchvision.ops as ops
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 from datetime import datetime
 from typing import Tuple, Dict, Any, List, Union, Optional
 from tqdm.auto import tqdm 
@@ -535,8 +536,8 @@ class SegmentationEngine(Common):
         self,
         dataloader: torch.utils.data.DataLoader,
         total: int,
-        epoch_number: int,
         stage: str,
+        epoch_number: int=0,
         desc_length: int=22):
 
         """
@@ -559,9 +560,12 @@ class SegmentationEngine(Common):
         if stage == 'train':
             color = self.color_train_plt
             desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
-        else:
+        elif stage == 'validation' or stage == "test":
             color = self.color_test_plt
             desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "
+        else:
+            color = self.color_test_plt
+            desc = f"Making predictions"
         progress = tqdm(enumerate(dataloader), total=total, colour=color)
         progress.set_description(desc)
 
@@ -609,7 +613,12 @@ class SegmentationEngine(Common):
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
+        for batch, (X, y) in self.progress_bar(
+            dataloader=dataloader,
+            total=len_dataloader,
+            epoch_number=epoch_number,
+            stage='train'
+            ):
             
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)            
@@ -761,7 +770,12 @@ class SegmentationEngine(Common):
             # Turn on inference context manager 
             with inference_context:
                 # Loop through DataLoader batches
-                for batch, (X, y) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
+                for batch, (X, y) in self.progress_bar(
+                    dataloader=dataloader,
+                    total=len_dataloader,
+                    epoch_number=epoch_number,
+                    stage='test'
+                    ):
                     
                     # Send data to target device
                     X, y = X.to(self.device), y.to(self.device)                    
@@ -1138,3 +1152,116 @@ class SegmentationEngine(Common):
         self.finish_train(train_time)
 
         return df_results
+
+    
+    def predict(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        num_classes: int=2,
+        model_state: str="last",
+        output_type: str="onehot",        
+        ) -> torch.Tensor:
+
+        """
+        Predicts classes for a given dataset using a trained model.
+
+        Args:
+            model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
+            dataloader (torch.utils.data.DataLoader): The dataset to predict on.
+            output_type (str): The type of output to return. Either "logits", "softmax", or "onehot".            
+
+        Returns:
+            (list): All of the predicted class labels represented by prediction probabilities (softmax)
+        """         
+
+        # Check model to use
+        valid_modes =  {"loss", "dice", "iou", "last", "all"}
+        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
+
+        if model_state == "last":
+            model = self.model
+        elif model_state == "loss":
+            if self.model_loss is None:
+                self.info(f"Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_loss
+        elif model_state == "dice":
+            if self.model_dice is None:
+                self.info(f"Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_dice
+        elif model_state == "iou":
+            if self.model_iou is None:
+                self.info(f"Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_iou
+        elif isinstance(model_state, int):
+            if self.model_epoch is None:
+                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
+                model = self.model
+            else:
+                if model_state > len(self.model_epoch):
+                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
+                    model = self.model
+                else:
+                    model = self.model_epoch[model_state-1]            
+
+        # Check output_max
+        valid_output_types = {"logits", "softmax", "onehot"}
+        assert output_type in valid_output_types, f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}"
+
+        # Set num classes and batch_size
+        self.num_classes = num_classes
+        batch_size = dataloader.batch_size
+
+        # Initialize prediction
+        y_preds = []
+        model.eval()
+        model.to(self.device)
+
+        # Set inference context
+        try:
+            inference_context = torch.inference_mode()
+            with torch.inference_mode():        
+                for batch, (X, y) in enumerate(dataloader):
+                    check = self.get_predictions(self.model(X.to(self.device)))
+                    break
+        except RuntimeError:
+            inference_context = torch.no_grad()
+            self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+
+        # Turn on inference context manager 
+        with inference_context:
+            for batch, (X, y) in self.progress_bar(
+                dataloader=dataloader,
+                total=len(dataloader),
+                stage='inference'
+                ):
+
+                # Send data and targets to target device
+                X, y = X.to(self.device), y.to(self.device)
+                
+                # Do the forward pass
+                if output_type == "softmax":
+                    y_pred = torch.argmax(model(X), dim=1)
+                elif output_type == "onehot":
+                    y_pred = F.one_hot(
+                        torch.argmax(model(X), dim=1),
+                        num_classes = self.num_classes
+                        ).permute(0, 3, 1, 2).float()  # Shape (B, C, H, W)
+                
+                if y_pred.shape[0] != batch_size:
+            
+                    # Pad with zeros along the channel dimension if there are fewer channelS
+                    pad_size = batch_size - y_pred.shape[0]
+                    padding = torch.zeros(pad_size, y_pred.shape[1], y_pred.shape[2], y_pred.shape[3], device=self.device)
+                    y_pred = torch.cat((y_pred, padding), dim=0)
+                
+                # Put predictions on CPU for evaluation
+                y_preds.append(y_pred.unsqueeze(0).cpu())
+
+        # Concatenate list of predictions into a tensor
+        return torch.cat(y_preds, dim=0)

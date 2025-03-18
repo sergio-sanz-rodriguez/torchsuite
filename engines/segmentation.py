@@ -598,8 +598,6 @@ class SegmentationEngine(Common):
             In the form (train_loss, train_dice, train_iou).
         """
 
-        self.info(f"Training epoch {epoch_number+1}...")
-
         # Put model in train mode
         self.model.train()
         #self.model.to(self.device) # Already done in __init__
@@ -745,8 +743,6 @@ class SegmentationEngine(Common):
 
         # Execute the test step is apply_validation is enabled
         if self.apply_validation:
-
-            self.info(f"Validating epoch {epoch_number+1}...")
 
             # Put model in eval mode
             self.model.eval() 
@@ -1166,7 +1162,7 @@ class SegmentationEngine(Common):
         Predicts classes for a given dataset using a trained model.
 
         Args:
-            model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
+            model_state: specifies the model to use for making predictions. "loss", "dice", "iou", "last" (default), "all", an integer
             dataloader (torch.utils.data.DataLoader): The dataset to predict on.
             output_type (str): The type of output to return. Either "logits", "softmax", or "onehot".            
 

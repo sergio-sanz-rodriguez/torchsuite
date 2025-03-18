@@ -26,8 +26,9 @@ Currently, TorchSuite is fully optimized for **image and audio classification ta
 - **Flexible data loading:** `image/audio/obj_dect/segmentation_dataloaders.py` to streamline dataset preparation and augmentation.
 - **Utility functions:** `classification/obj_detection/segmentation_utils.py` offering a collection of utility functions to enhance productivity.
 - **Vision Transformer (ViT) support:** `vision_transformer.py` for implementing ViTs with PyTorch.
+- **Wav2Vec2 support:** `wav2vec2.py` includes a Transformer-based acoustic model for audio classification.
 - **Region-based CNN (R-CNN) support:** `faster_rcnn.py` to create deep learning networks for object detection.
-- **U-Net support:** `unet.py` for a flexible design of U-Net models tailored to image segmentation. Pretrained U-net is taken from [mberkay0](https://github.com/mberkay0/pretrained-backbones-unet).
+- **U-Net support:** `unet.py` for a flexible design of U-Net models tailored to image segmentation. Pretrained U-Net modeling is taken from [mberkay0](https://github.com/mberkay0/pretrained-backbones-unet). The library includes the canonical vanilla U-Net architecture as well.
 - **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies. Some classes have been taken from [kamrulhasanrony](https://github.com/kamrulhasanrony/Vision-Transformer-based-Food-Classification/tree/master). 
 - **Custom loss functions:** `loss_functions.py` including various loss formulations for different tasks.
 - **Code examples:** a series of notebooks demonstrating Python code for training deep learning models.

@@ -142,7 +142,6 @@ class ClassificationEngine(Common):
         if not any(model_name.endswith(ext) for ext in valid_extensions):
             self.error(f"'model_name' should end with one of {valid_extensions}.")
         #assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
-
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
@@ -166,7 +165,6 @@ class ClassificationEngine(Common):
             The loaded PyTorch model (if return_model=True).
         """
 
-        
         # Define the list of valid extensions
         valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
 

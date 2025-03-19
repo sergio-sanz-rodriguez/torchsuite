@@ -126,7 +126,9 @@ class SegmentationEngine(Common):
         valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
 
         # Create model save path
-        assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
+        if not any(model_name.endswith(ext) for ext in valid_extensions):
+            self.error(f"'model_name' should end with one of {valid_extensions}.") 
+        #assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
@@ -150,8 +152,13 @@ class SegmentationEngine(Common):
             The loaded PyTorch model (if return_model=True).
         """
 
+        # Define the list of valid extensions
+        valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
+
         # Create the model path
-        assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
+        if not any(model_name.endswith(ext) for ext in valid_extensions):
+            self.error(f"'model_name' should end with one of {valid_extensions}.")
+        #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
         model_path = Path(target_dir) / model_name
 
         # Load the model
@@ -1172,7 +1179,9 @@ class SegmentationEngine(Common):
 
         # Check model to use
         valid_modes =  {"loss", "dice", "iou", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
+        if model_state not in valid_modes or not isinstance(model_state, int):
+            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
+        #assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
             model = self.model
@@ -1207,7 +1216,9 @@ class SegmentationEngine(Common):
 
         # Check output_max
         valid_output_types = {"logits", "softmax", "onehot"}
-        assert output_type in valid_output_types, f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}"
+        if output_type not in valid_output_types:
+            self.error(f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}.")
+        #assert output_type in valid_output_types, f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}"
 
         # Set num classes and batch_size
         self.num_classes = num_classes

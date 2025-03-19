@@ -140,7 +140,7 @@ class ClassificationEngine(Common):
 
         # Create model save path
         if not any(model_name.endswith(ext) for ext in valid_extensions):
-            self.error(f"'model_name' should end with one of {valid_extensions}")
+            self.error(f"'model_name' should end with one of {valid_extensions}.")
         #assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
 
         model_save_path = Path(target_dir) / model_name
@@ -172,7 +172,7 @@ class ClassificationEngine(Common):
 
         # Create the model path
         if not any(model_name.endswith(ext) for ext in valid_extensions):
-            self.error(f"'model_name' should end with one of {valid_extensions}")
+            self.error(f"'model_name' should end with one of {valid_extensions}.")
         #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
         model_path = Path(target_dir) / model_name
 
@@ -1686,7 +1686,7 @@ class ClassificationEngine(Common):
 
         # Check output_max
         valid_output_types = {"softmax", "argmax", "logits"}
-        if ouput_tpye not in valid_output_types:
+        if output_type not in valid_output_types:
             self.error(f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}.")
         
         y_preds = []
@@ -2071,7 +2071,7 @@ class DistillationEngine(Common):
 
         # Create model save path
         if not any(model_name.endswith(ext) for ext in valid_extensions):
-            self.error(f"'model_name' should end with one of {valid_extensions}")
+            self.error(f"'model_name' should end with one of {valid_extensions}.")
         #assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
         model_save_path = Path(target_dir) / model_name
 
@@ -2101,7 +2101,7 @@ class DistillationEngine(Common):
 
         # Create the model path
         if not any(model_name.endswith(ext) for ext in valid_extensions):
-            self.error(f"'model_name' should end with one of {valid_extensions}")
+            self.error(f"'model_name' should end with one of {valid_extensions}.")
         #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
         model_path = Path(target_dir) / model_name
 

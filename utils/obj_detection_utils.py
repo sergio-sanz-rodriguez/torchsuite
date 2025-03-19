@@ -292,63 +292,63 @@ def init_distributed_mode(args):
 
 # Function to remove redundant boxes and masks
 def prune_predictions(
-        pred,
-        score_threshold=0.66,
-        mask_threshold=0.5,
-        iou_threshold=0.5,
-        ):
+    pred,
+    score_threshold=0.66,
+    mask_threshold=0.5,
+    iou_threshold=0.5,
+    ):
 
-        """
-        Filters and refines predictions by:
-        1. Removing low-confidence detections based on the score threshold.
-        2. Applying a binary mask threshold to filter out weak segmentation masks.
-        3. Using Non-Maximum Suppression (NMS) to eliminate overlapping predictions.
+    """
+    Filters and refines predictions by:
+    1. Removing low-confidence detections based on the score threshold.
+    2. Applying a binary mask threshold to filter out weak segmentation masks.
+    3. Using Non-Maximum Suppression (NMS) to eliminate overlapping predictions.
 
-        Parameters:
-        pred : dict
-            The raw predictions containing "boxes", "scores", "labels", and "masks".
-        score_threshold : float, optional
-            The minimum confidence score required to keep a prediction (default: 0.7).
-        mask_threshold : float, optional
-            The threshold for binarizing the segmentation masks (default: 0.5).
-        iou_threshold : float, optional
-            The Intersection over Union (IoU) threshold for NMS (default: 0.5).
+    Parameters:
+    pred : dict
+        The raw predictions containing "boxes", "scores", "labels", and "masks".
+    score_threshold : float, optional
+        The minimum confidence score required to keep a prediction (default: 0.7).
+    mask_threshold : float, optional
+        The threshold for binarizing the segmentation masks (default: 0.5).
+    iou_threshold : float, optional
+        The Intersection over Union (IoU) threshold for NMS (default: 0.5).
 
-        Returns:
-        dict
-            A dictionary with filtered and refined predictions:
-            - "boxes": Tensor of kept bounding boxes.
-            - "scores": Tensor of kept scores.
-            - "labels": List of label strings.
-            - "masks": Tensor of kept segmentation masks. [OPTIONAL]
-        """
-        
-        # Filter predictions based on confidence score threshold
-        scores = pred["scores"]
-        high_conf_idx = scores > score_threshold
+    Returns:
+    dict
+        A dictionary with filtered and refined predictions:
+        - "boxes": Tensor of kept bounding boxes.
+        - "scores": Tensor of kept scores.
+        - "labels": List of label strings.
+        - "masks": Tensor of kept segmentation masks. [OPTIONAL]
+    """
+    
+    # Filter predictions based on confidence score threshold
+    scores = pred["scores"]
+    high_conf_idx = scores > score_threshold
 
-        filtered_pred = {
-            "boxes":  pred["boxes"][high_conf_idx].long(),
-            "scores": pred["scores"][high_conf_idx],
-            "labels": pred["labels"][high_conf_idx], #[f"roi: {s:.3f}" for s in scores[high_conf_idx]]
-        }
+    filtered_pred = {
+        "boxes":  pred["boxes"][high_conf_idx].long(),
+        "scores": pred["scores"][high_conf_idx],
+        "labels": pred["labels"][high_conf_idx], #[f"roi: {s:.3f}" for s in scores[high_conf_idx]]
+    }
 
-        # Only add "masks" if present in prediction output
-        if "masks" in pred:
-            filtered_pred["masks"] = (pred["masks"] > mask_threshold).squeeze(1)[high_conf_idx]
+    # Only add "masks" if present in prediction output
+    if "masks" in pred:
+        filtered_pred["masks"] = (pred["masks"] > mask_threshold).squeeze(1)[high_conf_idx]
 
-        # Apply Non-Maximum Suppression (NMS) to remove overlapping predictions
-        if len(filtered_pred["boxes"]) == 0:
-            return filtered_pred  # No boxes to process
-        keep_idx = ops.nms(filtered_pred["boxes"].float(), filtered_pred["scores"], iou_threshold)
+    # Apply Non-Maximum Suppression (NMS) to remove overlapping predictions
+    if len(filtered_pred["boxes"]) == 0:
+        return filtered_pred  # No boxes to process
+    keep_idx = ops.nms(filtered_pred["boxes"].float(), filtered_pred["scores"], iou_threshold)
 
-        # Return filtered predictions
-        return {
-            "boxes": filtered_pred["boxes"][keep_idx],
-            "scores": filtered_pred["scores"][keep_idx],
-            "labels": filtered_pred["labels"][keep_idx], #[i] for i in keep_idx],
-            **({"masks": filtered_pred["masks"][keep_idx]} if "masks" in filtered_pred else {})  # Only add "masks" if present
-        }
+    # Return filtered predictions
+    return {
+        "boxes": filtered_pred["boxes"][keep_idx],
+        "scores": filtered_pred["scores"][keep_idx],
+        "labels": filtered_pred["labels"][keep_idx], #[i] for i in keep_idx],
+        **({"masks": filtered_pred["masks"][keep_idx]} if "masks" in filtered_pred else {})  # Only add "masks" if present
+    }
 
 
 # Function to display images with masks and boxes on the ROIs

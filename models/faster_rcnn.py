@@ -1,3 +1,5 @@
+import os
+import sys
 import torch
 import torchvision
 from typing import Union
@@ -7,6 +9,8 @@ from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection import FasterRCNN
+sys.path.append(os.path.abspath("../engines"))
+from engines.common import Logger
 
 class StandardFasterRCNN(torch.nn.Module):
 
@@ -39,13 +43,19 @@ class StandardFasterRCNN(torch.nn.Module):
         """
 
         super().__init__()
+
+        logger = Logger()
         
         # Check if the specified backbone is available
         backbone_list = ['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
-        assert backbone in backbone_list, f"[ERROR] Backbone '{backbone}' not recognized."
+        if backbone not in backbone_list:
+            logger.error(f"Backbone '{backbone}' not recognized. Using default 'resnet50'.")
+        
+        if not isinstance(num_classes, int) or num_classes <= 0:
+            logger.error(f"'num_classes' must be a positive integer. Using default value of 1.")
 
-        assert isinstance(num_classes, int), "[ERROR] num_classes must be an integer."
-        assert isinstance(hidden_layer, int) and hidden_layer > 0, "[ERROR] hidden_layer must be a positive integer."
+        if not isinstance(hidden_layer, int) or hidden_layer <= 0:
+            logger.error(f"'hidden_layer' must be a positive integer. Using default value of 256.")
 
         # Load default pretrained weights if "DEFAULT" or None
         if backbone == 'resnet50':
@@ -128,8 +138,12 @@ class CustomFasterRCNN(torch.nn.Module):
 
         super().__init__()
 
+        logger = Logger()
+
         # Check out number of classes
-        assert isinstance(num_classes, int), "[ERROR] num_classes must be an integer."
+        if not isinstance(num_classes, int):
+            logger.error(f"'num_classes' must be an integer.")
+        #assert isinstance(num_classes, int), "[ERROR] num_classes must be an integer."
         
         # Extract the feature layer of the backbone
         backbone = backbone.features

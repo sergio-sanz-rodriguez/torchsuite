@@ -139,7 +139,10 @@ class ClassificationEngine(Common):
         valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
 
         # Create model save path
-        assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
+        if not any(model_name.endswith(ext) for ext in valid_extensions):
+            self.error(f"'model_name' should end with one of {valid_extensions}")
+        #assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
+
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
@@ -163,8 +166,14 @@ class ClassificationEngine(Common):
             The loaded PyTorch model (if return_model=True).
         """
 
+        
+        # Define the list of valid extensions
+        valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
+
         # Create the model path
-        assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
+        if not any(model_name.endswith(ext) for ext in valid_extensions):
+            self.error(f"'model_name' should end with one of {valid_extensions}")
+        #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
         model_path = Path(target_dir) / model_name
 
         # Load the model
@@ -1628,7 +1637,8 @@ class ClassificationEngine(Common):
  
         # Check model to use
         valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
+        if model_state not in valid_modes or not isinstance(model_state, int):
+            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
 
         if model_state == "last":
             model = self.model
@@ -1676,8 +1686,9 @@ class ClassificationEngine(Common):
 
         # Check output_max
         valid_output_types = {"softmax", "argmax", "logits"}
-        assert output_type in valid_output_types, f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}"
-
+        if ouput_tpye not in valid_output_types:
+            self.error(f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}.")
+        
         y_preds = []
         model.eval()
         model.to(self.device)
@@ -1771,7 +1782,8 @@ class ClassificationEngine(Common):
 
         # Check model to use
         valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
+        if model_state not in valid_modes or not isinstance(model_state, int):
+            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
 
         if model_state == "last":
             model = self.model
@@ -1826,14 +1838,18 @@ class ClassificationEngine(Common):
 
         # Collect file paths
         paths = [p for p in Path(test_dir).rglob("*") if p.suffix.lower() in valid_extensions]
-        assert len(paths) > 0, f"No valid image or audio files found in directory: {test_dir}"
+        if len(paths) == 0:
+            self.error(f"No valid image or audio files found in directory: {test_dir}.")
 
         # Number of random images to extract
         num_samples = len(paths)
         num_random_samples = int(sample_fraction * num_samples)
 
         # Ensure the number of images to extract is less than or equal to the total number of images
-        assert num_random_samples <= len(paths), f"Number of images to extract exceeds total images in directory: {len(paths)}"
+        if num_random_samples > num_samples:
+            self.warning(f"Number of images to extract exceeds total images in directory: {num_samples}. Using all images instead.")
+            num_random_samples = num_samples
+        #assert num_random_samples <= len(paths), f"Number of images to extract exceeds total images in directory: {len(paths)}"
 
         # Randomly select a subset of file paths
         torch.manual_seed(seed)
@@ -2054,7 +2070,9 @@ class DistillationEngine(Common):
         valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
 
         # Create model save path
-        assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
+        if not any(model_name.endswith(ext) for ext in valid_extensions):
+            self.error(f"'model_name' should end with one of {valid_extensions}")
+        #assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
@@ -2078,8 +2096,13 @@ class DistillationEngine(Common):
             The loaded PyTorch model (if return_model=True).
         """
 
+        # Define the list of valid extensions
+        valid_extensions = [".pth", ".pt", ".pkl", ".h5", ".torch"]
+
         # Create the model path
-        assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
+        if not any(model_name.endswith(ext) for ext in valid_extensions):
+            self.error(f"'model_name' should end with one of {valid_extensions}")
+        #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
         model_path = Path(target_dir) / model_name
 
         # Load the model
@@ -3386,7 +3409,9 @@ class DistillationEngine(Common):
  
         # Check model to use
         valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
+        if model_state not in valid_modes or not isinstance(model_state, int):
+            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
+        #assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
             model = self.model
@@ -3434,7 +3459,9 @@ class DistillationEngine(Common):
 
         # Check output_max
         valid_output_types = {"softmax", "argmax", "logits"}
-        assert output_type in valid_output_types, f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}"
+        if output_type not in valid_output_types:
+            self.error(f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}.")
+        #assert output_type in valid_output_types, f"Invalid output_max value: {output_type}. Must be one of {valid_output_types}"
 
         y_preds = []
         model.eval()
@@ -3506,7 +3533,9 @@ class DistillationEngine(Common):
 
         # Check model to use
         valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
-        assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
+        if model_state not in valid_modes or not isinstance(model_state, int):
+            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
+        #assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 
         if model_state == "last":
             model = self.model
@@ -3565,14 +3594,19 @@ class DistillationEngine(Common):
 
         # Collect file paths
         paths = [p for p in Path(test_dir).rglob("*") if p.suffix.lower() in valid_extensions]
-        assert len(paths) > 0, f"No valid image or audio files found in directory: {test_dir}"
+        if len(paths) == 0:
+            self.error(f"No valid image or audio files found in directory: {test_dir}.")
+        #assert len(paths) > 0, f"No valid image or audio files found in directory: {test_dir}"
 
         # Number of random images to extract
         num_samples = len(paths)
         num_random_samples = int(sample_fraction * num_samples)
 
         # Ensure the number of images to extract is less than or equal to the total number of images
-        assert num_random_samples <= len(paths), f"Number of images to extract exceeds total images in directory: {len(paths)}"
+        if num_random_samples > num_samples:
+            self.warning(f"Number of images to extract exceeds total images in directory: {num_samples}. Using all images instead.")
+            num_random_samples = num_samples
+        #assert num_random_samples <= len(paths), f"Number of images to extract exceeds total images in directory: {len(paths)}"
 
         # Randomly select a subset of file paths
         torch.manual_seed(seed)

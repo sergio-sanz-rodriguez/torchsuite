@@ -901,20 +901,20 @@ def predict_and_play_audio(
     predicted_labels = []
 
     for i, (waveform, actual_label) in enumerate(zip(waveform_list, label_list)):
-         # Convert waveform to tensor and reshape for the model if needed
-        try:                
-            waveform_tensor = torch.tensor(waveform).to(device)
-            _ = model(waveform_tensor)
-        except Exception as e:
-            waveform_tensor = torch.tensor(waveform).unsqueeze(0).to(device)
         
-        # Apply transformations
-        transform = transform.to(device)
-        waveform_tensor = transform(waveform_tensor).to(device)
+        # Apply transformation
+        try:
+            waveform_tensor = transform(waveform.to(device)).to(device)
+        except:
+            waveform_tensor = transform(waveform.to("cpu")).to("cpu")
+            waveform_tensor = torch.tensor(waveform_tensor).to(device)
 
-        # Get model prediction
+        # Make predictions
         with torch.no_grad():
-            output = model(waveform_tensor)
+            try:
+                output = model(waveform_tensor) # Waveform case
+            except:
+                output = model(waveform_tensor.unsqueeze(0)) # Spectrogram case
             predicted_label_idx = output.argmax(dim=1).item()
             predicted_label = class_names[predicted_label_idx]
         

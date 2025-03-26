@@ -106,7 +106,7 @@ These notebooks provide hands-on examples of the core functionality of the libra
 
 ## Best Practices for Deep Learning Training
 
-### Data Augmentation
+### Image Data Augmentation
 Data augmentation is of paramount importance to ensure the model's generalization. `TrivialAugmentWide()` is an efficient method that applies diverse image transformations with a single command. This method should be applied during preprocessing of the image dataset to adjust its format (e.g., image resolution, torch.tensor format, color normalization, etc.) to match the network's requirements.
 
 ```bash
@@ -122,6 +122,30 @@ transform_train = v2.Compose([
                 std=[0.229, 0.224, 0.225]) 
 ])
 ```
+
+### Audio Data Augmentation
+Similar to image recognition tasks, generalization in audio recognition can be improved by applying augmentation techniques to the audio signal. Whether pattern recognition is performed in the time domain (waveform) or the frequency domain (spectrograms), the following transformations can be applied:
+* Time domain
+
+ ```bash
+import torch
+import librosa
+# Apply pitch shifting
+waveform = librosa.effects.pitch_shift(waveform.numpy(), sr=sample_rate, n_steps=n_steps)
+# Add random noise
+waveform_noise = waveform + torch.randn_like(waveform) * noise_level
+ ```
+ * Frequency domain
+ ```bash
+import torchaudio
+# Define 10% masking for the frequency domain
+freq_mask_param = int(0.10 * n_mels) # n_mels: number of mel bands in the spectrogram
+spectrogram = torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_param)(spectrogram)
+# Define 10% masking for the time domain
+time_mask_param = 0.10 * (waveform_length // hop_length) + 1 # hop_length: stride for spectrogram calculation
+spectrogram = torchaudio.transforms.TimeMasking(time_mask_param=time_mask_param)(spectrogram)
+ ```
+
 ### Training a Classifier
 The AdamW optimizer has been shown to improve generalization. Additionally, `CrossEntropyLoss` is the most commonly used loss function in classification tasks, where a certain level of label smoothing (e.g., 0.1) can further enhance generalization. Adding a scheduler for learning rate regulation is also a good practice to optimize parameter updates. An initial learning rate between `1e-4` and `1e-5` and a final learning rate up to `1e-7` are recommended. Optionally, the custom `FixedLRSchedulerWrapper` scheduler can be used to maintain a fixed learning rate in the final epochs, helping stabilize the model parameters.
 

@@ -48,7 +48,10 @@ class ClassificationEngine(Common):
 
     Args:
         model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
-        color_map (dict, optional): Specifies the colors for the training and evaluation curves
+        color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+        'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
+        'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
+        'light_magenta', 'light_cyan'.
         log_verbose (bool, optional): if True, activate logger messages.
         device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
@@ -1635,7 +1638,7 @@ class ClassificationEngine(Common):
  
         # Check model to use
         valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
-        if model_state not in valid_modes or not isinstance(model_state, int):
+        if not (model_state in valid_modes or isinstance(model_state, int)):
             self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
 
         if model_state == "last":
@@ -1691,42 +1694,49 @@ class ClassificationEngine(Common):
         model.eval()
         model.to(self.device)
 
-        # Attempt a forward pass to check if the shape of X is compatible
-        for batch, (X, y) in enumerate(dataloader):
-            try:
-                # This is where the model will "complain" if the shape is incorrect
-                check = self.get_predictions(self.model(X.to(self.device)))
-            except Exception as e:
-                # If the shape is wrong, reshape X and try again
-                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
-                if match:
-                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
-                else:
-                    self.warning(f"Attempting to reshape X.")
-
-                # Check the current shape of X and attempt a fix
-                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
-                    self.squeeze_dim = True
-                elif X.ndimension() == 2:  # [batch_size, time_steps]
-                    pass  # No change needed
-                else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
-            break
-
         # Set inference context
         try:
             inference_context = torch.inference_mode()
-            with torch.inference_mode():        
+            with torch.inference_mode():
                 for batch, (X, y) in enumerate(dataloader):
-                    check = self.get_predictions(self.model(X.to(self.device)))
+                    check = self.get_predictions(model(X.to(self.device)))
                     break
         except RuntimeError:
             inference_context = torch.no_grad()
             self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
+        # Free up unused GPU memory after shape-checking
+        torch.cuda.empty_cache()
+
+        # Attempt a forward pass to check if the shape of X is compatible
+        with inference_context:
+            for batch, (X, y) in enumerate(dataloader):            
+                try:
+                    # This is where the model will "complain" if the shape is incorrect
+                    check = self.get_predictions(model(X.to(self.device)))
+                except Exception as e:
+                    # If the shape is wrong, reshape X and try again
+                    match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                    if match:
+                        self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                    else:
+                        self.warning(f"Attempting to reshape X.")
+
+                    # Check the current shape of X and attempt a fix
+                    if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                        self.squeeze_dim = True
+                    elif X.ndimension() == 2:  # [batch_size, time_steps]
+                        pass  # No change needed
+                    else:
+                        raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+                break
+        
+        # Free up unused GPU memory after shape-checking
+        torch.cuda.empty_cache()      
+
         # Turn on inference context manager 
         with inference_context:
-            for X, y in self.progress_bar(
+            for batch, (X, y) in self.progress_bar(
                 dataloader=dataloader,
                 total=len(dataloader),
                 stage='inference'
@@ -1737,7 +1747,7 @@ class ClassificationEngine(Common):
                 X = X.squeeze(1) if self.squeeze_dim else X
                 
                 # Do the forward pass
-                y_logit = model(X)
+                y_logit = self.get_predictions(model(X))
 
                 if output_type == "softmax":
                     y_pred = torch.softmax(y_logit, dim=1)
@@ -1780,7 +1790,7 @@ class ClassificationEngine(Common):
 
         # Check model to use
         valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
-        if model_state not in valid_modes or not isinstance(model_state, int):
+        if not (model_state in valid_modes or isinstance(model_state, int)):
             self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
 
         if model_state == "last":
@@ -1882,7 +1892,14 @@ class ClassificationEngine(Common):
                 # Load and transform audio
                 signal, sample_rate = torchaudio.load(path)
             if transform:
-                signal = transform(signal)
+                try:
+                    tranform = transform.to(device)
+                    signal = transform(signal)
+                except:
+                    # Fall back to cpu if error
+                    transform = transform.to("cpu")
+                    signal = transform(signal)
+                
             signal = signal.unsqueeze(0).to(self.device)
 
             # Prepare model for inference by sending it to target device and turning on eval() mode
@@ -1975,7 +1992,12 @@ class DistillationEngine(Common):
     of a PyTorch model, including saving the best model based on specific criteria.
 
     Args:
-        model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        student (torch.nn.Module, optional): The PyTorch model for the student to handle. Must be instantiated.
+        teacher (torch.nn.Module, optional): The PyTorch model for the teacher to handle. Must be instantiated.
+        color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+        'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
+        'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
+        'light_magenta', 'light_cyan'.
         log_verbose (boo, optional): if True, activate logger messages.
         device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """

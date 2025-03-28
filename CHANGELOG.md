@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0-rc1] - 2025-03-28
+### Added
+- Audio classifaction with spectrograms
+- Comprehensive data lading and augmentation algorithms for audio classifation
+
+### Fixed
+- General bug fixes
+
 ## [0.2.0-rc1] - 2025-03-10
 ### Added
 - Image segmentation: training only

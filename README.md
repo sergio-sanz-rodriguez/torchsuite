@@ -11,14 +11,15 @@ The main highlights of the library are listed next:
 
 - Simplified model training and evaluation
 - GPU-accelerated computations
-- Support for various deep learning architectures
-- Easy-to-use API for experimentation
+- Support for a variety of deep learning architectures
+- Easy-to-use API for seamless experimentation
 
-Currently, TorchSuite is fully optimized for **image and audio classification tasks**. Future versions will extend support to:
-- Regression
-- Object/Event detection
-- Segmentation
-- Other data types, such as video and text
+Currently, TorchSuite is fully optimized for the following machine learning areas:
+- Image and audio classification
+- Object detection
+- Image segmentation
+
+Future versions will include support for other data types, such as video and text.
 
 ## Modules  
 - **CPU and GPU-accelerated computation:** optimized for both CPU and GPU, enabling flexible model training and inference
@@ -101,7 +102,8 @@ The following notebooks demonstrate how to implement and train deep learning mod
 
 - `image_classification.ipynb` shows the implementation of a transformer-based image classification model using the library.
 - `image_distillation.ipynb` shows how to implement model distillation for image-based tasks.
-- `audio_classification.ipynb` focuses on training models for audio classification.
+- `audio_waveform_classification.ipynb` and `audio_spectrogram_classification.ipynb` focuse on training and evaluating models for audio classification based on raw waveforms and spectrograms.
+
 These notebooks provide hands-on examples of the core functionality of the library.
 
 ## Best Practices for Deep Learning Training

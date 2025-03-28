@@ -15,10 +15,8 @@ import copy
 import warnings
 import re
 from datetime import datetime
-from typing import Tuple, Dict, Any, List, Union, Optional
+from typing import Tuple, Dict, Any, List, Union, Optional, Callable
 from tqdm.auto import tqdm 
-from torch.utils.tensorboard import SummaryWriter
-#from torcheval.metrics.functional import multiclass_f1_score
 from IPython.display import clear_output
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -117,7 +115,8 @@ class ClassificationEngine(Common):
         self,
         model: torch.nn.Module,
         target_dir: str,
-        model_name: str):
+        model_name: str
+        ):
 
         """Saves a PyTorch model to a target directory.
 
@@ -154,7 +153,8 @@ class ClassificationEngine(Common):
     def load(
         self,
         target_dir: str,
-        model_name: str):
+        model_name: str
+        ):
         
         """Loads a PyTorch model from a target directory and optionally returns it.
 
@@ -184,47 +184,6 @@ class ClassificationEngine(Common):
         return self
     
     
-    def create_writer(
-        self,
-        experiment_name: str, 
-        model_name: str, 
-        extra: str=None) -> torch.utils.tensorboard.writer.SummaryWriter():
-
-        """Creates a torch.utils.tensorboard.writer.SummaryWriter() instance saving to a specific log_dir.
-
-        log_dir is a combination of runs/timestamp/experiment_name/model_name/extra.
-
-        Where timestamp is the current date in YYYY-MM-DD format.
-
-        Args:
-            experiment_name (str): Name of experiment.
-            model_name (str): Name of model.
-            extra (str, optional): Anything extra to add to the directory. Defaults to None.
-
-        Returns:
-            torch.utils.tensorboard.writer.SummaryWriter(): Instance of a writer saving to log_dir.
-
-        Example usage:
-            # Create a writer saving to "runs/2022-06-04/data_10_percent/effnetb2/5_epochs/"
-            writer = create_writer(experiment_name="data_10_percent",
-                                model_name="effnetb2",
-                                extra="5_epochs")
-            # The above is the same as:
-            writer = SummaryWriter(log_dir="runs/2022-06-04/data_10_percent/effnetb2/5_epochs/")
-        """
-
-        # Get timestamp of current date (all experiments on certain day live in same folder)
-        timestamp = datetime.now().strftime("%Y-%m-%d") # returns current date in YYYY-MM-DD format
-
-        if extra:
-            # Create log directory path
-            log_dir = os.path.join("runs", timestamp, experiment_name, model_name, extra)
-        else:
-            log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
-
-        self.info(f"Created SummaryWriter, saving to: {log_dir}...")
-        return SummaryWriter(log_dir=log_dir)
-    
     def print_config(
             self,
             batch_size,
@@ -235,8 +194,8 @@ class ClassificationEngine(Common):
             amp,
             enable_clipping,
             accumulation_steps,
-            debug_mode,
-            writer):
+            debug_mode
+            ):
         
         """
         Prints the configuration of the training process.
@@ -253,8 +212,7 @@ class ClassificationEngine(Common):
         self.info(f"Plot curves: {plot_curves}")
         self.info(f"Automatic Mixed Precision (AMP): {amp}")
         self.info(f"Enable clipping: {enable_clipping}")
-        self.info(f"Debug mode: {debug_mode}")
-        self.info(f"Enable writer: {writer}")
+        self.info(f"Debug mode: {debug_mode}")        
         self.info(f"Save model: {self.save_best_model}")
         self.info(f"Target directory: {self.target_dir}")        
         if self.save_best_model:
@@ -323,7 +281,6 @@ class ClassificationEngine(Common):
         test_pauc,
         test_epoch_time,
         plot_curves,
-        writer
         ):
     
         """
@@ -383,59 +340,6 @@ class ClassificationEngine(Common):
         self.results["test_fpr"].append(test_fpr)
         self.results["train_pauc"].append(train_pauc)
         self.results["test_pauc"].append(test_pauc)
-        
-        # See if there's a writer, if so, log to it
-        if writer:
-            # Add results to SummaryWriter
-            if self.apply_validation:
-                writer.add_scalars(
-                    main_tag="Loss", 
-                    tag_scalar_dict={"train_loss": train_loss,
-                                    "test_loss": test_loss},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="Accuracy", 
-                    tag_scalar_dict={"train_acc": train_acc,
-                                    "test_acc": test_acc},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="F1-Score", 
-                    tag_scalar_dict={"train_f1": train_f1,
-                                    "test_f1": test_f1},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag=f"FPR at {recall_threshold * 100}% recall", 
-                    tag_scalar_dict={"train_fpr": train_fpr,
-                                        "test_fpr": test_fpr}, 
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag=f"pAUC above {recall_threshold_pauc * 100}% recall", 
-                    tag_scalar_dict={"train_pauc": train_pauc,
-                                        "test_pauc": test_pauc}, 
-                    global_step=epoch)
-            else:
-                writer.add_scalars(
-                    main_tag="Loss", 
-                    tag_scalar_dict={"train_loss": train_loss},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="Accuracy", 
-                    tag_scalar_dict={"train_acc": train_acc},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="F1-Score", 
-                    tag_scalar_dict={"train_f1": train_f1},
-                    global_step=epoch)                    
-                writer.add_scalars(
-                    main_tag=f"FPR at {recall_threshold * 100}% recall", 
-                    tag_scalar_dict={"train_fpr": train_fpr}, 
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag=f"pAUC above {recall_threshold_pauc * 100}% recall", 
-                    tag_scalar_dict={"train_pauc": train_pauc}, 
-                    global_step=epoch)
-        else:
-            pass
 
         # Plots training and test loss, accuracy, and fpr-at-recall curves.
         if plot_curves:
@@ -515,9 +419,8 @@ class ClassificationEngine(Common):
         amp: bool=True,
         enable_clipping: bool=False,
         accumulation_steps: int=1,
-        debug_mode: bool=False,
-        writer: Optional[SummaryWriter] = None
-    ):
+        debug_mode: bool=False
+        ):
 
         """
         Initializes the training process by setting up the required configurations, parameters, and resources.
@@ -548,7 +451,6 @@ class ClassificationEngine(Common):
                 - "all": saves models for all epochs
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
                 - None: the model will not be saved.
-            writer (SummaryWriter, optional): TensorBoard SummaryWriter for logging metrics. Default is False.
 
         Functionality:
             Validates `recall_threshold`, `accumulation_steps`, and `epochs` parameters with assertions.
@@ -634,8 +536,7 @@ class ClassificationEngine(Common):
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,            
-            debug_mode=debug_mode,
-            writer=writer
+            debug_mode=debug_mode
             )
         
         # Initialize optimizer, loss_fn, scheduler, and result_log
@@ -1389,19 +1290,14 @@ class ClassificationEngine(Common):
     def finish_train(
         self,
         train_time: float=None,
-        writer: SummaryWriter=False
         ):
 
         """
-        Finalizes the training process by closing writer and showing the elapsed time.
+        Finalizes the training process by showing the elapsed time.
         
         Args:
             train_time: Elapsed time.
-            writer: A SummaryWriter() instance to log model results to.
         """
-
-        # Close the writer
-        writer.close() if writer else None
 
         # Print elapsed time
         self.info(f"Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
@@ -1428,7 +1324,6 @@ class ClassificationEngine(Common):
         enable_clipping: bool=False,
         accumulation_steps: int=1,
         debug_mode: bool=False,
-        writer=False, #: SummaryWriter=False,
         ) -> pd.DataFrame:
 
         """
@@ -1473,7 +1368,6 @@ class ClassificationEngine(Common):
             enable_clipping (bool, optional): Whether to enable gradient and model output clipping. Default is False.
             accumulation_steps (int, optional): Number of mini-batches to accumulate gradients before an optimizer step. Default is 1 (no accumulation).
             debug_mode (bool, optional): Whether to enable debug mode. If True, it may slow down the training process.
-            writer (bool, optional): A TensorBoard SummaryWriter instance to log the model training results.
 
         Returns:
             pd.DataFrame: A dataframe containing the metrics for training and testing across all epochs.
@@ -1535,7 +1429,6 @@ class ClassificationEngine(Common):
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,
             debug_mode=debug_mode,
-            writer=writer
             )
 
         # Loop through training and testing steps for a number of epochs
@@ -1591,7 +1484,6 @@ class ClassificationEngine(Common):
                 test_pauc=test_pauc,
                 test_epoch_time=test_epoch_time,
                 plot_curves=plot_curves,
-                writer=writer
             )
 
             # Scheduler step after the optimizer
@@ -1613,7 +1505,7 @@ class ClassificationEngine(Common):
 
         # Finish training process
         train_time = time.time() - train_start_time
-        self.finish_train(train_time, writer)
+        self.finish_train(train_time)
 
         return df_results
 
@@ -1765,7 +1657,7 @@ class ClassificationEngine(Common):
     def predict_and_store(
         self,
         test_dir: str, 
-        transform: Union[torchvision.transforms, torchaudio.transforms], 
+        transform: Optional[Callable], #Union[torchvision.transforms, torchaudio.transforms], 
         class_names: List[str], 
         model_state: str="last",
         sample_fraction: float=1.0,
@@ -1778,7 +1670,7 @@ class ClassificationEngine(Common):
         Args:
             model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
             test_dir (str): The directory containing the test images.
-            transform (torchvision.transforms): The transformation to apply to the test images.
+            transform (Callable): The transformation to apply to the test images.
             class_names (list): A list of class names.
             sample_fraction (float, optional): The fraction of samples to predict. Defaults to 1.0.
             seed (int, optional): The random seed for reproducibility. Defaults to 42.
@@ -1893,7 +1785,7 @@ class ClassificationEngine(Common):
                 signal, sample_rate = torchaudio.load(path)
             if transform:
                 try:
-                    tranform = transform.to(device)
+                    tranform = transform.to(self.device)
                     signal = transform(signal)
                 except:
                     # Fall back to cpu if error
@@ -2132,48 +2024,6 @@ class DistillationEngine(Common):
         
         return self
     
-    
-    def create_writer(
-        self,
-        experiment_name: str, 
-        model_name: str, 
-        extra: str=None) -> torch.utils.tensorboard.writer.SummaryWriter():
-
-        """Creates a torch.utils.tensorboard.writer.SummaryWriter() instance saving to a specific log_dir.
-
-        log_dir is a combination of runs/timestamp/experiment_name/model_name/extra.
-
-        Where timestamp is the current date in YYYY-MM-DD format.
-
-        Args:
-            experiment_name (str): Name of experiment.
-            model_name (str): Name of model.
-            extra (str, optional): Anything extra to add to the directory. Defaults to None.
-
-        Returns:
-            torch.utils.tensorboard.writer.SummaryWriter(): Instance of a writer saving to log_dir.
-
-        Example usage:
-            # Create a writer saving to "runs/2022-06-04/data_10_percent/effnetb2/5_epochs/"
-            writer = create_writer(experiment_name="data_10_percent",
-                                model_name="effnetb2",
-                                extra="5_epochs")
-            # The above is the same as:
-            writer = SummaryWriter(log_dir="runs/2022-06-04/data_10_percent/effnetb2/5_epochs/")
-        """
-
-        # Get timestamp of current date (all experiments on certain day live in same folder)
-        timestamp = datetime.now().strftime("%Y-%m-%d") # returns current date in YYYY-MM-DD format
-
-        if extra:
-            # Create log directory path
-            log_dir = os.path.join("runs", timestamp, experiment_name, model_name, extra)
-        else:
-            log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
-            
-        self.info(f"Created SummaryWriter, saving to: {log_dir}...")
-        return SummaryWriter(log_dir=log_dir)
-    
     def print_config(
             self,
             batch_size,
@@ -2185,7 +2035,7 @@ class DistillationEngine(Common):
             enable_clipping,
             accumulation_steps,
             debug_mode,
-            writer):
+            ):
         
         """
         Prints the configuration of the training process.
@@ -2203,7 +2053,6 @@ class DistillationEngine(Common):
         self.info(f"Automatic Mixed Precision (AMP): {amp}")
         self.info(f"Enable clipping: {enable_clipping}")
         self.info(f"Debug mode: {debug_mode}")
-        self.info(f"Enable writer: {writer}")
         self.info(f"Save model: {self.save_best_model}")
         self.info(f"Target directory: {self.target_dir}")        
         if self.save_best_model:
@@ -2272,7 +2121,6 @@ class DistillationEngine(Common):
         test_pauc,
         test_epoch_time,
         plot_curves,
-        writer
         ):
     
         """
@@ -2332,59 +2180,6 @@ class DistillationEngine(Common):
         self.results["test_fpr"].append(test_fpr)
         self.results["train_pauc"].append(train_pauc)
         self.results["test_pauc"].append(test_pauc)
-        
-        # See if there's a writer, if so, log to it
-        if writer:
-            # Add results to SummaryWriter
-            if self.apply_validation:
-                writer.add_scalars(
-                    main_tag="Loss", 
-                    tag_scalar_dict={"train_loss": train_loss,
-                                    "test_loss": test_loss},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="Accuracy", 
-                    tag_scalar_dict={"train_acc": train_acc,
-                                    "test_acc": test_acc},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="F1-Score", 
-                    tag_scalar_dict={"train_f1": train_f1,
-                                    "test_f1": test_f1},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag=f"FPR at {recall_threshold * 100}% recall", 
-                    tag_scalar_dict={"train_fpr": train_fpr,
-                                        "test_fpr": test_fpr}, 
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag=f"pAUC above {recall_threshold_pauc * 100}% recall", 
-                    tag_scalar_dict={"train_pauc": train_pauc,
-                                        "test_pauc": test_pauc}, 
-                    global_step=epoch)
-            else:
-                writer.add_scalars(
-                    main_tag="Loss", 
-                    tag_scalar_dict={"train_loss": train_loss},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="Accuracy", 
-                    tag_scalar_dict={"train_acc": train_acc},
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag="F1-Score", 
-                    tag_scalar_dict={"train_f1": train_f1},
-                    global_step=epoch)                    
-                writer.add_scalars(
-                    main_tag=f"FPR at {recall_threshold * 100}% recall", 
-                    tag_scalar_dict={"train_fpr": train_fpr}, 
-                    global_step=epoch)
-                writer.add_scalars(
-                    main_tag=f"pAUC above {recall_threshold_pauc * 100}% recall", 
-                    tag_scalar_dict={"train_pauc": train_pauc}, 
-                    global_step=epoch)
-        else:
-            pass
 
         # Plots training and test loss, accuracy, and fpr-at-recall curves.
         if plot_curves:
@@ -2464,9 +2259,8 @@ class DistillationEngine(Common):
         amp: bool=True,
         enable_clipping: bool=False,
         accumulation_steps: int=1,
-        debug_mode: bool=False,
-        writer: Optional[SummaryWriter] = None
-    ):
+        debug_mode: bool=False
+        ):
 
         """
         Initializes the training process by setting up the required configurations, parameters, and resources.
@@ -2496,7 +2290,6 @@ class DistillationEngine(Common):
                 - "all": saves models for all epochs
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
                 - None: the model will not be saved.
-            writer (SummaryWriter, optional): TensorBoard SummaryWriter for logging metrics. Default is False.
 
         Functionality:
             Validates `recall_threshold`, `accumulation_steps`, and `epochs` parameters with assertions.
@@ -2582,8 +2375,7 @@ class DistillationEngine(Common):
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,            
-            debug_mode=debug_mode,
-            writer=writer
+            debug_mode=debug_mode
             )
         
         # Initialize optimizer, loss_fn, and scheduler
@@ -2611,7 +2403,7 @@ class DistillationEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    info.error(f"Unexpected input shape after exception handling: {X.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
             break
     
         # Initialize the best model and model_epoch list based on the specified mode.
@@ -3171,20 +2963,15 @@ class DistillationEngine(Common):
     
     def finish_train(
         self,
-        train_time: float=None,
-        writer: SummaryWriter=False
+        train_time: float=None
         ):
 
         """
-        Finalizes the training process by closing writer and showing the elapsed time.
+        Finalizes the training process by showing the elapsed time.
         
         Args:
             train_time: Elapsed time.
-            writer: A SummaryWriter() instance to log model results to.
         """
-
-        # Close the writer
-        writer.close() if writer else None
 
         # Print elapsed time
         self.info(f"Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
@@ -3213,8 +3000,7 @@ class DistillationEngine(Common):
         amp: bool=True,
         enable_clipping: bool=False,
         accumulation_steps: int=1,
-        debug_mode: bool=False,
-        writer=False, #: SummaryWriter=False,
+        debug_mode: bool=False
         ) -> pd.DataFrame:
 
             
@@ -3224,8 +3010,7 @@ class DistillationEngine(Common):
         and test_step() functions for a number of epochs, training and testing the 
         models in the same epoch loop.
 
-        Calculates, prints, and stores evaluation metrics throughout. Optionally, 
-        stores the metrics in a writer log directory if provided.
+        Calculates, prints, and stores evaluation metrics throughout.
 
         Args:
             target_dir: A directory for saving the model to.
@@ -3262,7 +3047,6 @@ class DistillationEngine(Common):
             enable_clipping: Whether to apply clipping to gradients and model outputs.
             accumulation_steps: Number of mini-batches to accumulate gradients before performing an optimizer step.
             debug_mode: Whether to enable the debug mode, which may slow down training.
-            writer: A SummaryWriter instance to log model metrics.
 
         Returns:
             A dataframe of training and testing loss, accuracy, FPR at recall, and pAUC 
@@ -3323,8 +3107,7 @@ class DistillationEngine(Common):
             amp=amp,
             enable_clipping=enable_clipping,
             accumulation_steps=accumulation_steps,
-            debug_mode=debug_mode,
-            writer=writer
+            debug_mode=debug_mode
             )
 
         # Loop through training and testing steps for a number of epochs
@@ -3381,8 +3164,7 @@ class DistillationEngine(Common):
                 test_fpr=test_fpr,
                 test_pauc=test_pauc,
                 test_epoch_time=test_epoch_time,
-                plot_curves=plot_curves,
-                writer=writer
+                plot_curves=plot_curves
             )
 
             # Scheduler step after the optimizer
@@ -3404,7 +3186,7 @@ class DistillationEngine(Common):
 
         # Finish training process
         train_time = time.time() - train_start_time
-        self.finish_train(train_time, writer)
+        self.finish_train(train_time)
 
         return df_results
 
@@ -3528,7 +3310,7 @@ class DistillationEngine(Common):
     def predict_and_store(
         self,
         test_dir: str, 
-        transform: torchvision.transforms, 
+        transform: Optional[Callable], #torchvision.transforms, 
         class_names: List[str], 
         model_state: str="last",
         sample_fraction: float=1.0,
@@ -3541,7 +3323,7 @@ class DistillationEngine(Common):
         Args:
             model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
             test_dir (str): The directory containing the test data.
-            transform (torchvision.transforms): The transformation to apply to the test images.
+            transform (Callable): The transformation to apply to the test images.
             class_names (list): A list of class names.
             sample_fraction (float, optional): The fraction of samples to predict. Defaults to 1.0.
             seed (int, optional): The random seed for reproducibility. Defaults to 42.

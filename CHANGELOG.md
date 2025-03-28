@@ -4,11 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.0-rc1] - 2025-03-28
 ### Added
-- Audio classifaction with spectrograms
-- Comprehensive data lading and augmentation algorithms for audio classifation
+- Image segmentation: prediction
+- Support for audio classification based on spectrograms
 
 ### Fixed
 - General bug fixes
+- Image folder reorganization
 
 ## [0.2.0-rc1] - 2025-03-10
 ### Added
@@ -20,6 +21,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - General bug fixes
+- Image folder reorganization
 
 ## [0.1.0] - 2025-02-22
 ### Added

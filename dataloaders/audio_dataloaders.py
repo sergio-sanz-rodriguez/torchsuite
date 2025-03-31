@@ -463,7 +463,7 @@ class AudioWaveformTransforms(Logger, torch.nn.Module):
         target_length, augment_magnitude):
 
         """
-        Validates the input parameters for the AudioSpectrogramTransforms class.
+        Validates the input parameters for the AudioWaveformTransforms class.
         
         Ensures that the inputs are of the correct type and within acceptable ranges. If any input is invalid,
         an error message is logged.

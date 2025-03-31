@@ -10,7 +10,7 @@ TorchSuite is a versatile and feature-rich PyTorch-based library designed to sim
 The main highlights of the library are listed next:
 
 - Simplified model training and evaluation
-- GPU-accelerated computations
+- CPU and GPU-accelerated computations
 - Support for a variety of deep learning architectures
 - Easy-to-use API for seamless experimentation
 
@@ -131,21 +131,42 @@ Similar to image recognition tasks, generalization in audio recognition can be i
 
  ```bash
 import torch
+import torchaudio
 import librosa
+# Load audio file
+waveform, sample_rate = torchaudio.load("wave.wav", normalize=True)
 # Apply pitch shifting
-waveform = librosa.effects.pitch_shift(waveform.numpy(), sr=sample_rate, n_steps=n_steps)
+waveform = librosa.effects.pitch_shift(
+waveform.numpy(),		# Audio waveform
+sr=sample_rate,         # Sample rate of the waveform
+n_steps=2	       	    # Number of semitones to shift the pitch
+)
 # Add random noise
-waveform_noise = waveform + torch.randn_like(waveform) * noise_level
+waveform = waveform + torch.randn_like(waveform) * 0.005
+
  ```
  * Frequency domain
  ```bash
 import torchaudio
-# Define 10% masking for the frequency domain
-freq_mask_param = int(0.10 * n_mels) # n_mels: number of mel bands in the spectrogram
-spectrogram = torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_param)(spectrogram)
-# Define 10% masking for the time domain
-time_mask_param = 0.10 * (waveform_length // hop_length) + 1 # hop_length: stride for spectrogram calculation
-spectrogram = torchaudio.transforms.TimeMasking(time_mask_param=time_mask_param)(spectrogram)
+# Compute spectrogram to get an image with shape [1, 384, 381]
+stride = round(len(waveform) / (384 - 1))
+transform = torchaudio.transforms.MelSpectrogram(
+sample_rate=sample_rate, # Sample rate of the waveform
+n_fft=1024,			     # Number of FFT bins       	
+win_length=1024,		 # Window length of the waveform for FFT analysis
+hop_length=stride, 	     # Stride in samples between two consecutive analysis windows
+n_mels=384,			     # Number of mel filter banks
+power=2			         # Exponent for the magnitude spectrogram
+)
+spectrogram = transform(waveform)
+# Define 10% masking in the frequency domain
+freq_mask_param = int(0.10 * 384)
+spectrogram = torchaudio.transforms.FrequencyMasking(
+    freq_mask_param=freq_mask_param)(spectrogram)
+# Define 10% masking in the time domain
+time_mask_param = int(0.10 * 381)
+spectrogram = torchaudio.transforms.TimeMasking(
+    time_mask_param=time_mask_param)(spectrogram)
  ```
 
 ### Training a Classifier

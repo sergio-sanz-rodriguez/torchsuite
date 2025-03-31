@@ -137,9 +137,9 @@ import librosa
 waveform, sample_rate = torchaudio.load("wave.wav", normalize=True)
 # Apply pitch shifting
 waveform = librosa.effects.pitch_shift(
-waveform.numpy(),		# Audio waveform
-sr=sample_rate,         # Sample rate of the waveform
-n_steps=2	       	    # Number of semitones to shift the pitch
+    waveform.numpy(),           # Audio waveform
+    sr=sample_rate,             # Sample rate of the waveform
+    n_steps=2                   # Number of semitones to shift the pitch
 )
 # Add random noise
 waveform = waveform + torch.randn_like(waveform) * 0.005
@@ -151,12 +151,12 @@ import torchaudio
 # Compute spectrogram to get an image with shape [1, 384, 381]
 stride = round(len(waveform) / (384 - 1))
 transform = torchaudio.transforms.MelSpectrogram(
-sample_rate=sample_rate, # Sample rate of the waveform
-n_fft=1024,			     # Number of FFT bins       	
-win_length=1024,		 # Window length of the waveform for FFT analysis
-hop_length=stride, 	     # Stride in samples between two consecutive analysis windows
-n_mels=384,			     # Number of mel filter banks
-power=2			         # Exponent for the magnitude spectrogram
+    sample_rate=sample_rate,    # Sample rate of the waveform
+    n_fft=1024,                 # Number of FFT bins       	
+    win_length=1024,            # Window length of the waveform for FFT analysis
+    hop_length=stride,          # Stride in samples between two analysis windows
+    n_mels=384,                 # Number of mel filter banks
+    power=2                     # Exponent for the magnitude spectrogram
 )
 spectrogram = transform(waveform)
 # Define 10% masking in the frequency domain

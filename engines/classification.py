@@ -45,13 +45,14 @@ class ClassificationEngine(Common):
     of a PyTorch model, including saving the best model based on specific criteria.
 
     Args:
-        model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
-        color_map (dict, optional): Specifies the colors for the training and evaluation curves:
-        'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
-        'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
-        'light_magenta', 'light_cyan'.
-        log_verbose (bool, optional): if True, activate logger messages.
-        device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
+        - model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        - color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+          'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
+          'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
+          'light_magenta', 'light_cyan'.
+          Example: {'train': 'blue', 'test': 'orange', 'other': 'black'}
+        - log_verbose (bool, optional): if True, activate logger messages.
+        - device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
     def __init__(
@@ -1884,14 +1885,14 @@ class DistillationEngine(Common):
     of a PyTorch model, including saving the best model based on specific criteria.
 
     Args:
-        student (torch.nn.Module, optional): The PyTorch model for the student to handle. Must be instantiated.
-        teacher (torch.nn.Module, optional): The PyTorch model for the teacher to handle. Must be instantiated.
-        color_map (dict, optional): Specifies the colors for the training and evaluation curves:
-        'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
-        'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
-        'light_magenta', 'light_cyan'.
-        log_verbose (boo, optional): if True, activate logger messages.
-        device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
+        - model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        - color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+          'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
+          'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
+          'light_magenta', 'light_cyan'.
+          Example: {'train': 'blue', 'test': 'orange', 'other': 'black'}
+        - log_verbose (bool, optional): if True, activate logger messages.
+        - device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
     def __init__(

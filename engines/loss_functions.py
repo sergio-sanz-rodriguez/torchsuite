@@ -9,202 +9,196 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .common import Logger
 
-def roc_curve_gpu(y_true, y_score):
+# Image/Audio Classification: Cross-Entropy + pAUC Loss
+class CrossEntropyPAUCLoss(torch.nn.Module):
 
     """
-    Compute ROC curve on GPU. This function calculates the True Positive Rate (TPR)
-    and False Positive Rate (FPR) for various thresholds.
-
-    Arguments:
-        y_true (Tensor): Ground truth labels, shape [batch_size].
-        y_score (Tensor): Predicted scores/probabilities for each class, shape [batch_size] (binary) or [batch_size, num_classes] (multiclass).
-
-    Returns:
-        fpr (Tensor): False positive rate at each threshold.
-        tpr (Tensor): True positive rate at each threshold.
-    """
-
-    # Handle binary or multiclass cases
-    if y_score.dim() == 1:
-        # Binary case: Treat y_score as probabilities for the positive class
-        sorted_scores, sorted_indices = torch.sort(y_score, descending=True)
-        num_classes = 2
-    else:
-        # Multiclass case
-        num_classes = y_score.size(1)
-        fpr_list, tpr_list = [], []
-        for i in range(num_classes):
-            class_probs = y_score[:, i]
-            class_true = (y_true == i).float()
-            sorted_scores, sorted_indices = torch.sort(class_probs, descending=True)
-
-            # Compute TPR and FPR for this class
-            tpr = torch.zeros(sorted_scores.size(0), device=y_score.device)
-            fpr = torch.zeros(sorted_scores.size(0), device=y_score.device)
-            total_positive = torch.sum(class_true).item()
-            total_negative = class_true.size(0) - total_positive
-
-            for j in range(sorted_scores.size(0)):
-                threshold = sorted_scores[j]
-                predictions = (class_probs >= threshold).float()
-                tp = torch.sum((predictions == 1) & (class_true == 1)).item()
-                fp = torch.sum((predictions == 1) & (class_true == 0)).item()
-                tn = torch.sum((predictions == 0) & (class_true == 0)).item()
-                fn = torch.sum((predictions == 0) & (class_true == 1)).item()
-
-                tpr[j] = tp / (tp + fn) if tp + fn > 0 else 0
-                fpr[j] = fp / (fp + tn) if fp + tn > 0 else 0
-
-            fpr_list.append(fpr)
-            tpr_list.append(tpr)
-
-        return torch.stack(fpr_list), torch.stack(tpr_list)
-
-    # For binary case
-    tpr = torch.zeros(sorted_scores.size(0), device=y_score.device)
-    fpr = torch.zeros(sorted_scores.size(0), device=y_score.device)
-    total_positive = torch.sum(y_true).item()
-    total_negative = y_true.size(0) - total_positive
-
-    for i in range(sorted_scores.size(0)):
-        threshold = sorted_scores[i]
-        predictions = (y_score >= threshold).float()
-        tp = torch.sum((predictions == 1) & (y_true == 1)).item()
-        fp = torch.sum((predictions == 1) & (y_true == 0)).item()
-        tn = torch.sum((predictions == 0) & (y_true == 0)).item()
-        fn = torch.sum((predictions == 0) & (y_true == 1)).item()
-
-        tpr[i] = tp / (tp + fn) if tp + fn > 0 else 0
-        fpr[i] = fp / (fp + tn) if fp + tn > 0 else 0
-
-    return fpr, tpr
-
-
-# Image Classification: Cross-Entropy + pAUC Loss
-class CrossEntropyPAUCLoss(nn.Module):
-
-    """
-    Custom loss combining Cross-Entropy and Partial AUC (pAUC) optimization for multi-class classification.
+    Custom loss combining Cross-Entropy and Partial AUC (pAUC) optimization for multi-class classification
     
-    Arguments:
-        recall_range (tuple): Range for recall (True Positive Rate) used in pAUC calculation (start, end).
-        lambda_pauc (float): Weight for the pAUC calculation or contribution of pAUC in the loss function: 0.0 <= lambda_pauc <= 1.0. Default: 0.5
-        num_classes (int): Number of classes for classification.
-        label_smoothing (float): Factor for label smoothing to reduce overfitting.
-        weight (Tensor): Optional class weights for handling class imbalance.
+    Args:
+        recall_threshold (float): The recall threshold for pAUC calculation.
+        lambda_pauc (float): Weight for pAUC loss in the total loss.
+        num_classes (int): The number of classes for classification.
+        label_smoothing (float): Smoothing factor for cross-entropy loss.
+        weight (tensor or None): Class weights for balancing the loss.
     """
 
     def __init__(
             self,
-            recall_range=(0.95, 1.0),
+            recall_threshold=0.0,
             lambda_pauc=0.5,
             num_classes=2,
             label_smoothing=0.1,
-            debug_mode=False,
             weight=None):
         
-        super(CrossEntropyPAUCLoss, self).__init__()
-        self.recall_range = recall_range
-        self.max_pauc = recall_range[1] - recall_range[0]
+        """
+        Initializes the loss function.
+        
+        Args:
+            recall_threshold (float): The recall threshold for pAUC calculation.
+            lambda_pauc (float): Weight for pAUC loss in the total loss.
+            num_classes (int): The number of classes for classification.
+            label_smoothing (float): Smoothing factor for cross-entropy loss.
+            weight (tensor or None): Class weights for balancing the loss.
+        """
+        
+        super().__init__()
+        self.recall_threshold = recall_threshold        
         self.lambda_pauc = lambda_pauc
         self.num_classes = num_classes
-        self.label_smoothing = label_smoothing
-        self.debug_mode = debug_mode
+        
+        if weight is not None and not torch.is_tensor(weight):
+            weight = torch.tensor(weight, dtype=torch.float32)
 
-        # Register weight tensor (to handle class imbalance)
-        if weight is not None:
-            self.weight = weight.clone().detach().to(dtype=torch.float32)
-        else:
-            self.weight = torch.ones(num_classes, dtype=torch.float32)
+        self.loss_fn = torch.nn.CrossEntropyLoss(
+            label_smoothing=label_smoothing,
+            weight=weight
+            )
+    
+    @staticmethod
+    def roc_curve_gpu(y_score: torch.Tensor, y_true: torch.Tensor):
+
+        """
+        Vectorized ROC computation on GPU for binary classification.
+
+        Args:
+            y_score (Tensor): Predicted scores.
+            y_true (Tensor): True binary labels.
+
+        Returns:
+            fpr (Tensor): False Positive Rate values.
+            tpr (Tensor): True Positive Rate values.
+        """
+
+        device = y_score.device
+
+        # Sort scores and corresponding true labels
+        desc_score_indices = torch.argsort(y_score, descending=True)
+        y_true_sorted = y_true[desc_score_indices]
+        y_score_sorted = y_score[desc_score_indices]
+
+        # True positives and false positives
+        tps = torch.cumsum(y_true_sorted, dim=0)
+        fps = torch.cumsum(1 - y_true_sorted, dim=0)
+
+        # Total positives and negatives
+        total_positives = tps[-1].clamp(min=1.0)  # avoid divide by zero
+        total_negatives = fps[-1].clamp(min=1.0)
+
+        # Compute TPR and FPR
+        tpr = tps / total_positives
+        fpr = fps / total_negatives
+
+        return fpr, tpr
+
+    @staticmethod
+    def trapezoidal_auc(fpr: torch.Tensor, tpr: torch.Tensor):
+
+        """
+        Calculate the AUC using the trapezoidal rule.
+
+        Args:
+            fpr (Tensor): False Positive Rate values.
+            tpr (Tensor): True Positive Rate values.
+
+        Returns:
+            auc (Tensor): The area under the ROC curve.
+        """
+
+        # Assumes sorted fpr
+        delta_fpr = fpr[1:] - fpr[:-1]
+        avg_tpr = (tpr[1:] + tpr[:-1]) / 2
+        return torch.sum(delta_fpr * avg_tpr)
+
+    def calculate_pauc_at_recall(self, y_pred, y_true, macro=True):
+
+        """
+        Calculates the Partial AUC (pAUC) at a given recall threshold.
+        This is vectorized for speed and GPU compatibility.
+
+        Args:
+            y_pred (Tensor): The predicted probabilities.
+            y_true (Tensor): The true labels.
+            macro (bool): If True, calculates macro pAUC (average across classes).
+
+        Returns:
+            pauc (Tensor): The calculated partial AUC.
+        """
+
+        partial_auc_values = []
+
+        for class_idx in range(self.num_classes):
+            y_scores_class = y_pred[:, class_idx]
+            y_true_bin = (y_true == class_idx).float()
+
+            if macro and torch.sum(y_true_bin) == 0:
+                continue
+
+            fpr, tpr = self.roc_curve_gpu(y_scores_class, y_true_bin)
+
+            max_fpr = 1.0 - self.recall_threshold
+            mask = fpr <= max_fpr
+
+            if torch.any(mask):
+                # Interpolate at max_fpr if needed
+                idx = torch.where(~mask)[0]
+                if idx.numel() > 0:
+                    first_idx = idx[0]
+                    prev_idx = first_idx - 1
+
+                    # Linearly interpolate between prev and first_idx
+                    fpr_prev, fpr_next = fpr[prev_idx], fpr[first_idx]
+                    tpr_prev, tpr_next = tpr[prev_idx], tpr[first_idx]
+
+                    slope = (tpr_next - tpr_prev) / (fpr_next - fpr_prev + 1e-8)
+                    tpr_interp = tpr_prev + slope * (max_fpr - fpr_prev)
+
+                    fpr = torch.cat([fpr[mask], max_fpr.unsqueeze(0)])
+                    tpr = torch.cat([tpr[mask], tpr_interp.unsqueeze(0)])
+                else:
+                    # All points are within max_fpr
+                    pass
+            else:
+                # All fpr > max_fpr, use default line
+                fpr = torch.tensor([0.0, max_fpr], device=y_pred.device)
+                tpr = torch.tensor([0.0, 0.0], device=y_pred.device)
+
+            partial_auc = self.trapezoidal_auc(fpr, tpr)
+            partial_auc_values.append(partial_auc)
+
+        return torch.mean(torch.stack(partial_auc_values))
 
     def forward(self, predictions, targets):
 
         """
-        Computes the loss that combines Cross-Entropy and Partial AUC (pAUC) for multi-class classification.
+        Forward pass for the loss function, combining cross-entropy and pAUC.
 
-        Arguments:
-            predictions (Tensor): The model's raw output (logits), shape [batch_size, num_classes].
-            targets (Tensor): Ground truth labels, shape [batch_size].
+        Args:
+            predictions (Tensor): Raw predictions (logits) from the model.
+            targets (Tensor): Ground truth labels.
 
         Returns:
-            Tensor: The computed total loss (Cross-Entropy + pAUC).
+            total_loss (Tensor): The combined loss value (Cross-Entropy + pAUC).
         """
         
-        # Convert to probabilities for each class using softmax
-        probs = F.softmax(predictions, dim=1)  # Shape: [batch_size, num_classes]
+        # Cross-Entropy uses raw logits, pAUC needs probabilities
+        probs = torch.nn.functional.softmax(predictions, dim=1)
 
-        # Convert targets to one-hot encoding
-        targets = targets.to(predictions.device)
-        targets_one_hot = torch.eye(self.num_classes, device=predictions.device)[targets]
+        # Compute Cross-Entropy Loss
+        ce_loss = self.loss_fn(predictions, targets)
 
-        # Apply label smoothing
-        if self.label_smoothing > 0:
-            targets_one_hot = (1 - self.label_smoothing) * targets_one_hot + self.label_smoothing / self.num_classes
+        # Compute pAUC Loss
+        pauc = self.calculate_pauc_at_recall(probs, targets)
+        pauc_loss = 1 - torch.pow(torch.tensor(pauc, device=predictions.device), 2.0)
 
-        # Compute AUC for each class
-        pauc=0
-        p_auc_values = []
-        if self.num_classes == 2:
-            class_probs = probs[:, 1]
-            class_targets = (targets_one_hot[:, 1] > 0.5).float()  # Threshold at 0.5
-            
-            # Compute ROC curve (assumed function available)
-            fpr_vals, tpr_vals = roc_curve_gpu(class_targets, class_probs)
-
-            # Compute the mask for the recall range
-            recall_mask = (tpr_vals >= self.recall_range[0]) & (tpr_vals <= self.recall_range[1])
-           
-            if recall_mask.sum() > 0:
-                # Compute weighted partial AUC using trapezoidal rule
-                pauc = torch.trapz(torch.clamp(tpr_vals[recall_mask] - self.recall_range[0], min=0), fpr_vals[recall_mask])
-                p_auc_values.append(pauc * self.weight[1].to(predictions.device))
-            else:
-                p_auc_values.append(torch.tensor(0.0, device=predictions.device))
-        else:
-            for i in range(self.num_classes):
-                class_probs = probs[:, i]
-                class_targets = (targets_one_hot[:, i] > 0.5).float()  # Threshold at 0.5
-                
-                # Compute ROC curve (assumed function available)
-                fpr_vals, tpr_vals = roc_curve_gpu(class_targets, class_probs)
-
-                # Compute the mask for the recall range
-                recall_mask = (tpr_vals >= self.recall_range[0]) & (tpr_vals <= self.recall_range[1])
-
-                if recall_mask.sum() > 0:
-                    # Compute weighted partial AUC using trapezoidal rule
-                    pauc = torch.trapz(torch.clamp(tpr_vals[recall_mask] - self.recall_range[0], min=0), fpr_vals[recall_mask])
-                    p_auc_values.append(pauc * self.weight[i].to(predictions.device))
-                else:
-                    p_auc_values.append(torch.tensor(0.0, device=predictions.device))
-
-        # Weighted mean of pAUC across all classes
-        avg_p_auc = torch.sum(torch.stack(p_auc_values)) / (self.weight.sum().to(predictions.device) * self.max_pauc)
-        avg_p_auc = torch.clamp(avg_p_auc, min=0.0, max=1.0)
-
-        # Compute the weighted Cross-Entropy Loss with label smoothing
-        log_probs = F.log_softmax(predictions, dim=1)
-        ce_loss = -(targets_one_hot * log_probs * self.weight.to(predictions.device)).sum(dim=1).mean()
-
-        # Compute pauc loss
-        pauc_loss = 1 - torch.pow(avg_p_auc, 2.0) #-torch.log(avg_p_auc + 1e-7)
-
-        # Compute total Loss
+        # Total Loss
         total_loss = ((1 - self.lambda_pauc) * ce_loss) + (self.lambda_pauc * pauc_loss)
-
-        # Debug mode
-        if self.debug_mode:
-           Logger().info(
-               f"pauc: {torch.round(torch.tensor(pauc) * 10000) / 10000}, "
-               f"pauc_loss: {torch.round(torch.tensor(pauc_loss) * 10000) / 10000}, "
-               f"avg_p_auc: {torch.round(torch.tensor(avg_p_auc) * 10000) / 10000}, "
-               f"ce_loss: {torch.round(torch.tensor(ce_loss) * 10000) / 10000}, "
-               f"total_loss: {torch.round(torch.tensor(total_loss) * 10000) / 10000}"
-               )
 
         return total_loss
 
-# Image classification: Cross-Entropy + FPR Loss
+
+
+# Image/Audio classification: Cross-Entropy + FPR Loss
 class CrossEntropyFPRLoss(nn.Module):
 
     """

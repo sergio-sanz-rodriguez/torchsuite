@@ -36,7 +36,9 @@ class Wav2Vec2Classifier(nn.Module):
         self,
         base_model_name="facebook/wav2vec2-base",
         num_classes=35,
-        dropout=0.0
+        dropout=0.3,
+        internal_dropout=0.1,
+        freeze_layers=0
     ):
         super().__init__()
 
@@ -49,16 +51,65 @@ class Wav2Vec2Classifier(nn.Module):
 
         try:
             # Load the pre-trained Wav2Vec2 model
-            self.wav2vec2 = Wav2Vec2Model.from_pretrained(base_model_name)
+            self.wav2vec2 = Wav2Vec2Model.from_pretrained(
+                base_model_name,
+                hidden_dropout=internal_dropout,
+                attention_dropout=internal_dropout,
+                feat_proj_dropout=internal_dropout,
+                layerdrop=internal_dropout,
+                )
         except Exception as e:
             logger.warning(f"Error loading model {base_model_name}: {e}. Falling back to 'facebook/wav2vec2-base'")
-            self.wav2vec2 = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base")
+            self.wav2vec2 = Wav2Vec2Model.from_pretrained(
+                "facebook/wav2vec2-base",
+                hidden_dropout=internal_dropout,
+                attention_dropout=internal_dropout,
+                feat_proj_dropout=internal_dropout,
+                layerdrop=internal_dropout,
+                )
+
+        # Apply freezing logic
+        #self._freeze_encoder_layers(freeze_layers)
+        self.freeze_layers(freeze_layers)
 
         # Classification head with dropout
         self.dropout = nn.Dropout(p=dropout)
 
         # Classification head: Maps Wav2Vec2 embeddings to class logits
         self.classifier = nn.Linear(self.wav2vec2.config.hidden_size, num_classes)
+    
+    def freeze_layers(self, freeze_layers: int):
+
+        """
+        Freezes layers of the Wav2Vec2 model.
+
+        Args:
+            freeze_layers (int): 
+                -  0: Do not freeze anything.
+                - >0: Freeze first N encoder layers + feature extractor.
+                - -1: Freeze all encoder layers + feature extractor.
+        """
+
+        # No layers frozen (fully trainable)
+        if freeze_layers == 0:            
+            return
+        
+        # Freeze all layers except the final one
+        if freeze_layers == -1:            
+            for param in self.wav2vec2.parameters():
+                param.requires_grad = False
+            for param in self.wav2vec2.encoder.layers[-1].parameters():
+                param.requires_grad = True
+        # Freeze the first `freeze_layers` layers
+        else:
+            for i, layer in enumerate(self.wav2vec2.encoder.layers):
+                if i < freeze_layers:
+                    for param in layer.parameters():
+                        param.requires_grad = False
+                else:
+                    for param in layer.parameters():
+                        param.requires_grad = True
+
 
     def forward(self, x):
         

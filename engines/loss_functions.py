@@ -16,11 +16,12 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
     Custom loss combining Cross-Entropy and Partial AUC (pAUC) optimization for multi-class classification
     
     Args:
-        recall_threshold (float): The recall threshold for pAUC calculation.
-        lambda_pauc (float): Weight for pAUC loss in the total loss.
-        num_classes (int): The number of classes for classification.
-        label_smoothing (float): Smoothing factor for cross-entropy loss.
-        weight (tensor or None): Class weights for balancing the loss.
+        - recall_threshold (float): The recall threshold for pAUC calculation.
+        - lambda_pauc (float): Weight for pAUC loss in the total loss.
+                Example: total_loss = lambda_pauc * pauc_loss + (1-lambda_pauc) * cross_entropy_loss
+        - num_classes (int): The number of classes for classification.
+        - label_smoothing (float): Smoothing factor for cross-entropy loss.
+        - weight (tensor or None): Class weights for balancing the loss.
     """
 
     def __init__(
@@ -35,11 +36,12 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
         Initializes the loss function.
         
         Args:
-            recall_threshold (float): The recall threshold for pAUC calculation.
-            lambda_pauc (float): Weight for pAUC loss in the total loss.
-            num_classes (int): The number of classes for classification.
-            label_smoothing (float): Smoothing factor for cross-entropy loss.
-            weight (tensor or None): Class weights for balancing the loss.
+            - recall_threshold (float): The recall threshold for pAUC calculation.
+            - lambda_pauc (float): Weight for pAUC loss in the total loss.
+                    Example: total_loss = lambda_pauc * pauc_loss + (1-lambda_pauc) * cross_entropy_loss
+            - num_classes (int): The number of classes for classification.
+            - label_smoothing (float): Smoothing factor for cross-entropy loss.
+            - weight (tensor or None): Class weights for balancing the loss.
         """
         
         super().__init__()
@@ -47,13 +49,19 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
         self.lambda_pauc = lambda_pauc
         self.num_classes = num_classes
         
+        # Normalize weights
         if weight is not None and not torch.is_tensor(weight):
-            weight = torch.tensor(weight, dtype=torch.float32)
+            weight = torch.tensor(weight, dtype=torch.float32) 
 
+        # Instantiate CrossEntropyLoss
         self.loss_fn = torch.nn.CrossEntropyLoss(
             label_smoothing=label_smoothing,
             weight=weight
             )
+        
+        # Initialize moving average for normalizing the ce_loss
+        self.register_buffer("ce_moving_avg", torch.tensor(1.0))
+        self.momentum = 0.05
     
     @staticmethod
     def roc_curve_gpu(y_score: torch.Tensor, y_true: torch.Tensor):
@@ -187,6 +195,16 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
         # Compute Cross-Entropy Loss
         ce_loss = self.loss_fn(predictions, targets)
 
+        # Ensure ce_moving_avg is on the same device
+        self.ce_moving_avg = self.ce_moving_avg.to(predictions.device)
+
+        # Update moving average (momentum = 0.05)
+        with torch.no_grad():
+            self.ce_moving_avg.mul_(1 - self.momentum).add_(self.momentum * ce_loss.detach())
+        
+        # Normalize CE loss using moving average
+        ce_loss = ce_loss / self.ce_moving_avg.clamp(min=1e-6)
+
         # Compute pAUC Loss
         pauc = self.calculate_pauc_at_recall(probs, targets)
         pauc_loss = 1 - torch.pow(torch.tensor(pauc, device=predictions.device), 2.0)
@@ -195,9 +213,7 @@ class CrossEntropyPAUCLoss(torch.nn.Module):
         total_loss = ((1 - self.lambda_pauc) * ce_loss) + (self.lambda_pauc * pauc_loss)
 
         return total_loss
-
-
-
+        
 # Image/Audio classification: Cross-Entropy + FPR Loss
 class CrossEntropyFPRLoss(nn.Module):
 

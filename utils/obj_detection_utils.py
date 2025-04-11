@@ -294,8 +294,8 @@ def init_distributed_mode(args):
 def prune_predictions(
     pred,
     score_threshold=0.66,
-    mask_threshold=0.5,
     iou_threshold=0.5,
+    best_candidate="area"
     ):
 
     """
@@ -303,29 +303,39 @@ def prune_predictions(
     1. Removing low-confidence detections based on the score threshold.
     2. Applying a binary mask threshold to filter out weak segmentation masks.
     3. Using Non-Maximum Suppression (NMS) to eliminate overlapping predictions.
+    4. Ensuring the highest-scoring prediction is always included.
+    5. Selecting the best-confident bounding box based on a criterion: largest area or highest score.
 
-    Parameters:
-    pred : dict
-        The raw predictions containing "boxes", "scores", "labels", and "masks".
-    score_threshold : float, optional
-        The minimum confidence score required to keep a prediction (default: 0.7).
-    mask_threshold : float, optional
-        The threshold for binarizing the segmentation masks (default: 0.5).
-    iou_threshold : float, optional
-        The Intersection over Union (IoU) threshold for NMS (default: 0.5).
+    Args:
+        pred: The raw predictions containing "boxes", "scores", "labels", and "masks".
+        score_threshold: The minimum confidence score required to keep a prediction (default: 0.66).
+        iou_threshold: The Intersection over Union (IoU) threshold for NMS (default: 0.5).
+        best_candidate: Selects, from the final set of bounding boxes, the best one based on a criterion:
+            -"area": the bounding box with the largest area is chosen
+            -"score": the bounding boxe with the highest score is chosen
+            -None: no criteion is used, maining the pruning method may contain one or more best bounding box candidates
 
     Returns:
-    dict
         A dictionary with filtered and refined predictions:
-        - "boxes": Tensor of kept bounding boxes.
-        - "scores": Tensor of kept scores.
-        - "labels": List of label strings.
-        - "masks": Tensor of kept segmentation masks. [OPTIONAL]
+            "boxes": Tensor of kept bounding boxes.
+            "scores": Tensor of kept scores.
+                "labels": Tensor of kept labels.
     """
     
+    if not (isinstance(best_candidate, str) or best_candidate is None):
+        raise ValueError("best_candidate must be either None, 'score', or 'area'")
+
     # Filter predictions based on confidence score threshold
     scores = pred["scores"]
+    best_idx = scores.argmax()
     high_conf_idx = scores > score_threshold
+
+    # Extract the best bounding box, score, and label
+    best_pred = {
+        "boxes": pred["boxes"][best_idx].unsqueeze(0).long(), 
+        "scores": pred["scores"][best_idx].unsqueeze(0),
+        "labels": pred["labels"][best_idx].unsqueeze(0),
+    }
 
     filtered_pred = {
         "boxes":  pred["boxes"][high_conf_idx].long(),
@@ -333,22 +343,56 @@ def prune_predictions(
         "labels": pred["labels"][high_conf_idx], #[f"roi: {s:.3f}" for s in scores[high_conf_idx]]
     }
 
-    # Only add "masks" if present in prediction output
-    if "masks" in pred:
-        filtered_pred["masks"] = (pred["masks"] > mask_threshold).squeeze(1)[high_conf_idx]
-
     # Apply Non-Maximum Suppression (NMS) to remove overlapping predictions
     if len(filtered_pred["boxes"]) == 0:
-        return filtered_pred  # No boxes to process
+        if len(best_pred["boxes"]) > 0:
+            return best_pred
+        else:
+            return filtered_pred 
+    
     keep_idx = ops.nms(filtered_pred["boxes"].float(), filtered_pred["scores"], iou_threshold)
 
     # Return filtered predictions
-    return {
+    keep_preds = {
         "boxes": filtered_pred["boxes"][keep_idx],
         "scores": filtered_pred["scores"][keep_idx],
         "labels": filtered_pred["labels"][keep_idx], #[i] for i in keep_idx],
-        **({"masks": filtered_pred["masks"][keep_idx]} if "masks" in filtered_pred else {})  # Only add "masks" if present
     }
+
+    # Ensure the best prediction is always included
+    best_box = best_pred["boxes"][0]
+    if not any(torch.equal(best_box, box) for box in keep_preds["boxes"]):
+        keep_preds["boxes"] = torch.cat([keep_preds["boxes"], best_pred["boxes"]])
+        keep_preds["scores"] = torch.cat([keep_preds["scores"], best_pred["scores"]])
+        keep_preds["labels"] = torch.cat([keep_preds["labels"], best_pred["labels"]])
+    
+    # Now we have a set of good candidates. Let's take the best one based on a criterion
+    if keep_preds["boxes"].shape[0] > 1:
+
+        # Return only the one with the highest score
+        if best_candidate == "score":            
+            idx = keep_preds['scores'].argmax().item()
+            final_pred = {
+                "boxes": keep_preds["boxes"][idx].unsqueeze(0),
+                "scores": keep_preds["scores"][idx].unsqueeze(0),
+                "labels": keep_preds["labels"][idx].unsqueeze(0),
+            }
+            return final_pred
+
+        # Compute area of each box and return the one with the largest area
+        elif best_candidate == "area":
+            areas = (keep_preds["boxes"][:, 2] - keep_preds["boxes"][:, 0]) * (keep_preds["boxes"][:, 3] - keep_preds["boxes"][:, 1])
+            idx = areas.argmax().item()            
+            final_pred = {
+                "boxes": keep_preds["boxes"][idx].unsqueeze(0),
+                "scores": keep_preds["scores"][idx].unsqueeze(0),
+                "labels": keep_preds["labels"][idx].unsqueeze(0),
+            }
+            return final_pred
+
+        
+    return keep_preds
+       
 
 
 # Function to display images with masks and boxes on the ROIs
@@ -416,29 +460,19 @@ def display_and_save_predictions(
             f"{label_to_class_dict[l.item()] if print_classes else ''}{': ' + f'{s.item():.3f}' if print_scores else ''}".strip(": ")
             for l, s in zip(filtered_pred["labels"], filtered_pred["scores"])
         ]
-        #labels  = [
-        #    f"{label_to_class_dict[l.item()]}: {s:.3f}"
-        #    for l, s in zip(filtered_pred["labels"], filtered_pred["scores"])
-        #]
 
         # Draw bounding boxes
-        output_image = draw_bounding_boxes(
-            image=image,
-            boxes=filtered_pred["boxes"],
-            labels=labels if print_classes or print_scores else None,
-            colors=box_color,
-            width=width,
-            font=font_type,
-            font_size=font_size)
-        
-        # Draw segmentation masks (if any)
-        if "masks" in filtered_pred and len(filtered_pred["masks"]) > 0:
-
-            # Merge all masks into one by taking the maximum along the mask dimension
-            masks = filtered_pred["masks"].sum(dim=0).clamp(0, 1).bool()
-
-            # Draw masks
-            output_image = draw_segmentation_masks(output_image, masks.unsqueeze(0), alpha=0.5, colors=mask_color)
+        if len(filtered_pred["boxes"]) > 0:
+            output_image = draw_bounding_boxes(
+                image=image,
+                boxes=filtered_pred["boxes"],
+                labels=labels if print_classes or print_scores else None,
+                colors=box_color,
+                width=width,
+                font=font_type,
+                font_size=font_size)
+        else:
+            output_image = image
 
         # Save Image (if save_dir is provided)
         if save_dir:
@@ -485,6 +519,7 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target)
         )
         axes[0].add_patch(rect)
     axes[0].set_title('Original Image')
+    axes[0].axis('off')
 
     # Transformed Image
     axes[1].imshow(transformed_img.permute(1, 2, 0))  # Convert CHW to HWC for plotting
@@ -496,5 +531,117 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target)
         )
         axes[1].add_patch(rect)
     axes[1].set_title('Transformed Image')
+    axes[1].axis('off')
 
     plt.show()
+
+
+class RandomCircleOcclusion(T.RandomErasing):
+
+    def __init__(self, p=0.5, scale=(0.02, 0.2), ratio=(0.3, 3.3), num_elems=6):
+
+        """
+        Initializes the RandomCircleOcclusion class.
+
+        Args:
+            p (float, optional): Probability of applying the occlusion. Defaults to 0.5.
+            scale (tuple, optional): Range of scale factors for the occlusion. Defaults to (0.02, 0.2).
+            ratio (tuple, optional): Range of aspect ratios for the occlusion. Defaults to (0.3, 3.3).
+
+        Note:
+            The occlusion color is set to a forest green color.
+        """
+
+        # Define the forest green color in a tuple format (R, G, B)
+        forest_green = (34/255, 139/255, 34/255)  # Normalized RGB values
+        self.colors = [
+            (0, 0, 0),          # Black
+            (53, 94, 59),       # Dark Green
+            (211, 211, 211),    # Light Gray
+            (34, 139, 34),      # Forest Green
+        ]
+        
+        super().__init__(p=p, scale=scale, ratio=ratio, value=forest_green)
+        self.num_elems = num_elems
+
+    def forward(self, img, target=None):
+        if torch.rand(1).item() > self.p:
+            return img, target
+
+        img_np = img.mul(255).byte().permute(1, 2, 0).numpy()  # Convert tensor to uint8 numpy
+        h, w, _ = img_np.shape
+
+        # Generate a random occlusion mask
+        num_blobs = np.random.randint(2, self.num_elems)
+        for _ in range(num_blobs):
+            x, y = np.random.randint(0, w), np.random.randint(0, h)
+            size = np.random.randint(h // 20, h // 5)
+            selected_color = np.array(self.colors[np.random.randint(len(self.colors))], dtype=np.uint8)
+            mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.circle(mask, (x, y), size, 255, -1)
+
+            # Apply selected color
+            img_np[mask > 0] = selected_color
+
+        img_tensor = torch.from_numpy(img_np).float().div(255).permute(2, 0, 1)  # Convert back to tensor
+        return img_tensor, target
+
+
+class RandomTextureOcclusion:
+    def __init__(self, plant_path, transparency=0.5, p=0.5):
+
+        """
+        Initializes the RandomTextureOcclusion class.
+
+        Args:
+            plant_path (list): List of paths to plant images.
+            transparency (float, optional): Transparency of the plant image. Defaults to 0.5.
+            p (float, optional): Probability of applying the occlusion. Defaults to 0.5.
+        """
+
+        #plant_path = ["T_Bush_Falcon.png"]
+        plant_images = [Image.open(path) for path in plant_path]
+        self.plant_images = plant_images 
+        self.transparency = transparency
+        self.p = p
+
+    def __call__(self, img, target=None):
+        if random.random() > self.p or not self.plant_images:
+            return img, target
+
+        # Convert to PIL Image if necessary
+        if isinstance(img, torch.Tensor):
+            img = F.to_pil_image(img)
+
+        # Select a random plant image        
+        plant_img = random.choice(self.plant_images)
+        
+        # Resize plant to a random size
+        w, h = img.size       
+        scale = random.uniform(0.25, 0.5)  # Random scale factor
+        new_h, new_w = int(w * scale), int(w * scale)
+        new_h, new_w = min(new_w, w), min(new_h, h)
+        plant_img = plant_img.resize((new_w, new_h), resample=Image.BILINEAR)
+
+        # Random placement        
+        x_offset = random.randint(0, w - new_w)
+        y_offset = random.randint(0, h - new_h)
+
+        # Convert plant image to numpy for blending
+        plant_np = np.array(plant_img).astype(float)
+        img_np = np.array(img).astype(float)
+
+        # Alpha channel
+        plant_alpha = plant_np[:, :, 3] > 128
+        
+        # Apply transparency
+        # Blend the RGB channels with the alpha channel
+        for c in range(3):  # Iterate over RGB channels
+            img_np[y_offset:y_offset+new_h, x_offset:x_offset+new_w, c] = (
+                plant_alpha * plant_np[:, :, c] + (1 - plant_alpha) * img_np[y_offset:y_offset+new_h, x_offset:x_offset+new_w, c]
+            )
+
+        # Convert back to PIL
+        img_occluded = Image.fromarray(img_np.astype(np.uint8))
+        
+        return F.pil_to_tensor(img_occluded), target

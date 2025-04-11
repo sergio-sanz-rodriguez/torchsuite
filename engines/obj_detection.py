@@ -1091,9 +1091,9 @@ class ObjectDetectionEngine(Common):
     @staticmethod
     def prune_predictions(
         pred,
-        score_threshold=0.66,
-        mask_threshold=0.5,
+        score_threshold=0.5,
         iou_threshold=0.5,
+        best_candidate="area"
         ):
 
         """
@@ -1101,29 +1101,44 @@ class ObjectDetectionEngine(Common):
         1. Removing low-confidence detections based on the score threshold.
         2. Applying a binary mask threshold to filter out weak segmentation masks.
         3. Using Non-Maximum Suppression (NMS) to eliminate overlapping predictions.
+        4. Ensuring the highest-scoring prediction is always included.
+        5. Selecting the best-confident bounding box based on a criterion: largest area or highest score.
 
-        Parameters:
-        pred : dict
-            The raw predictions containing "boxes", "scores", "labels", and "masks".
-        score_threshold : float, optional
-            The minimum confidence score required to keep a prediction (default: 0.7).
-        mask_threshold : float, optional
-            The threshold for binarizing the segmentation masks (default: 0.5).
-        iou_threshold : float, optional
-            The Intersection over Union (IoU) threshold for NMS (default: 0.5).
+        Args:
+            pred: The raw predictions containing "boxes", "scores", "labels", and "masks".
+            score_threshold: The minimum confidence score required to keep a prediction (default: 0.66).
+            iou_threshold: The Intersection over Union (IoU) threshold for NMS (default: 0.5).
+            best_candidate: Selects, from the final set of bounding boxes, the best one based on a criterion:
+                -"area": the bounding box with the largest area is chosen
+                -"score": the bounding boxe with the highest score is chosen
+                -None: no criteion is used, maining the pruning method may contain one or more best bounding box candidates
 
         Returns:
-        dict
             A dictionary with filtered and refined predictions:
-            - "boxes": Tensor of kept bounding boxes.
-            - "scores": Tensor of kept scores.
-            - "labels": List of label strings.
-            - "masks": Tensor of kept segmentation masks. [OPTIONAL]
+                "boxes": Tensor of kept bounding boxes.
+                "scores": Tensor of kept scores.
+                "labels": Tensor of kept labels.
         """
         
         # Filter predictions based on confidence score threshold
         scores = pred["scores"]
+        
+        if len(scores) == 0:
+            return {
+                "boxes": [],
+                "scores": [],
+                "labels": []
+                }
+        
+        best_idx = scores.argmax()
         high_conf_idx = scores > score_threshold
+
+        # Extract the best bounding box, score, and label
+        best_pred = {
+            "boxes": pred["boxes"][best_idx].unsqueeze(0).long(), 
+            "scores": pred["scores"][best_idx].unsqueeze(0),
+            "labels": pred["labels"][best_idx].unsqueeze(0),
+        }
 
         filtered_pred = {
             "boxes":  pred["boxes"][high_conf_idx].long(),
@@ -1131,22 +1146,55 @@ class ObjectDetectionEngine(Common):
             "labels": pred["labels"][high_conf_idx], #[f"roi: {s:.3f}" for s in scores[high_conf_idx]]
         }
 
-        # Only add "masks" if present in prediction output
-        if "masks" in pred:
-            filtered_pred["masks"] = (pred["masks"] > mask_threshold).squeeze(1)[high_conf_idx]
-
         # Apply Non-Maximum Suppression (NMS) to remove overlapping predictions
         if len(filtered_pred["boxes"]) == 0:
-            return filtered_pred  # No boxes to process
+            if len(best_pred["boxes"]) > 0:
+                return best_pred
+            else:
+                return filtered_pred 
+        
         keep_idx = ops.nms(filtered_pred["boxes"].float(), filtered_pred["scores"], iou_threshold)
 
         # Return filtered predictions
-        return {
+        keep_preds = {
             "boxes": filtered_pred["boxes"][keep_idx],
             "scores": filtered_pred["scores"][keep_idx],
             "labels": filtered_pred["labels"][keep_idx], #[i] for i in keep_idx],
-            **({"masks": filtered_pred["masks"][keep_idx]} if "masks" in filtered_pred else {})  # Only add "masks" if present
         }
+
+        # Ensure the best prediction is always included
+        best_box = best_pred["boxes"][0]
+        if not any(torch.equal(best_box, box) for box in keep_preds["boxes"]):
+            keep_preds["boxes"] = torch.cat([keep_preds["boxes"], best_pred["boxes"]])
+            keep_preds["scores"] = torch.cat([keep_preds["scores"], best_pred["scores"]])
+            keep_preds["labels"] = torch.cat([keep_preds["labels"], best_pred["labels"]])
+        
+        # Now we have a set of good candidates. Let's take the best one based on a criterion
+        if keep_preds["boxes"].shape[0] > 1:
+
+            # Return only the one with the highest score
+            if best_candidate == "score":            
+                idx = keep_preds['scores'].argmax().item()
+                final_pred = {
+                    "boxes": keep_preds["boxes"][idx].unsqueeze(0),
+                    "scores": keep_preds["scores"][idx].unsqueeze(0),
+                    "labels": keep_preds["labels"][idx].unsqueeze(0),
+                }
+                return final_pred
+
+            # Compute area of each box and return the one with the largest area
+            elif best_candidate == "area":
+                areas = (keep_preds["boxes"][:, 2] - keep_preds["boxes"][:, 0]) * (keep_preds["boxes"][:, 3] - keep_preds["boxes"][:, 1])
+                idx = areas.argmax().item()            
+                final_pred = {
+                    "boxes": keep_preds["boxes"][idx].unsqueeze(0),
+                    "scores": keep_preds["scores"][idx].unsqueeze(0),
+                    "labels": keep_preds["labels"][idx].unsqueeze(0),
+                }
+                return final_pred
+
+            
+        return keep_preds
 
     def predict(
         self,

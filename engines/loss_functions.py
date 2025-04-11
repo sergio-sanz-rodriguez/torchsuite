@@ -515,3 +515,84 @@ class DiceCrossEntropyLoss(nn.Module):
         ce_loss = self.ce_loss(y_pred, y_true.float())
         
         return self.alpha * dice_loss + (1 - self.alpha) * ce_loss
+
+
+class FocalLoss(nn.Module):
+
+    """
+    Focal Loss for multi-class classification tasks.
+
+    This loss function is designed to address class imbalance by down-weighting easy examples
+    and focusing training on hard negatives.
+
+    Parameters:
+        alpha (float or Tensor, optional): 
+            - Class weights. Can be a float (e.g., 0.25) for binary classification
+              or a Tensor of shape [num_classes] for multi-class.
+            - If None, no class weighting is applied.
+        gamma (float): 
+            - Focusing parameter that controls how much to down-weight easy examples.
+              A typical value is 2.0.
+        reduction (str): 
+            - Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+              - 'none': no reduction will be applied,
+              - 'mean': the sum of the output will be divided by the number of elements,
+              - 'sum': the output will be summed.
+
+    Usage:
+        loss_fn = FocalLoss(gamma=2.0)
+        logits = torch.randn(16, 5)  # batch size 16, 5 classes
+        targets = torch.randint(0, 5, (16,))
+        loss = loss_fn(logits, targets)
+
+        # With class weights (e.g., for class imbalance)
+        class_weights = torch.tensor([1.0, 2.0, 1.0, 0.5, 1.5])  # must be float tensor
+        loss_fn_weighted = FocalLoss(alpha=class_weights, gamma=2.0)
+        loss_weighted = loss_fn_weighted(logits, targets)
+    """
+
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha  # Can be a float (e.g. 0.25) or a tensor (for class weighting)
+        self.gamma = gamma
+        self.reduction = reduction
+
+        """
+        Focal Loss for multi-class classification tasks.
+
+        This loss function is designed to address class imbalance by down-weighting easy examples
+        and focusing training on hard negatives.
+
+        Parameters:
+            alpha (float or Tensor, optional): 
+                - Class weights. Can be a float (e.g., 0.25) for binary classification
+                or a Tensor of shape [num_classes] for multi-class.
+                - If None, no class weighting is applied.
+            gamma (float): 
+                - Focusing parameter that controls how much to down-weight easy examples.
+                A typical value is 2.0.
+            reduction (str): 
+                - Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+                - 'none': no reduction will be applied,
+                - 'mean': the sum of the output will be divided by the number of elements,
+                - 'sum': the output will be summed.
+        """
+
+    def forward(self, inputs, targets):
+
+        # Compute standard cross entropy (with optional class weights), no reduction yet
+        ce_loss = F.cross_entropy(inputs, targets, weight=self.alpha, reduction='none')
+        
+        # Get the probability of the correct class
+        pt = torch.exp(-ce_loss)  # probability of the correct class
+
+        # Compute focal loss scaling factor
+        focal_loss = (1 - pt) ** self.gamma * ce_loss
+
+        # Apply the specified reduction
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss

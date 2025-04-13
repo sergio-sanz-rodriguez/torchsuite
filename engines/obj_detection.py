@@ -129,7 +129,6 @@ class ObjectDetectionEngine(Common):
         # Create model save path
         if not any(model_name.endswith(ext) for ext in valid_extensions):
             self.error(f"'model_name' should end with one of {valid_extensions}.")
-        #assert any(model_name.endswith(ext) for ext in valid_extensions), f"model_name should end with one of {valid_extensions}"
         model_save_path = Path(target_dir) / model_name
 
         # Save the model state_dict()
@@ -159,7 +158,6 @@ class ObjectDetectionEngine(Common):
         # Create the model path
         if not any(model_name.endswith(ext) for ext in valid_extensions):
             self.error(f"'model_name' should end with one of {valid_extensions}.")
-        #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
         model_path = Path(target_dir) / model_name
 
         # Load the model
@@ -1093,7 +1091,7 @@ class ObjectDetectionEngine(Common):
         pred,
         score_threshold=0.5,
         iou_threshold=0.5,
-        best_candidate="area"
+        best_candidate=None
         ):
 
         """
@@ -1172,7 +1170,7 @@ class ObjectDetectionEngine(Common):
         # Now we have a set of good candidates. Let's take the best one based on a criterion
         if keep_preds["boxes"].shape[0] > 1:
 
-            # Return only the one with the highest score
+            # Select the bounding box with the highest confidence score
             if best_candidate == "score":            
                 idx = keep_preds['scores'].argmax().item()
                 final_pred = {
@@ -1182,7 +1180,7 @@ class ObjectDetectionEngine(Common):
                 }
                 return final_pred
 
-            # Compute area of each box and return the one with the largest area
+            # Compute the area of each box and select the one with the largest area to help eliminate spurious boxes.
             elif best_candidate == "area":
                 areas = (keep_preds["boxes"][:, 2] - keep_preds["boxes"][:, 0]) * (keep_preds["boxes"][:, 3] - keep_preds["boxes"][:, 1])
                 idx = areas.argmax().item()            
@@ -1192,7 +1190,6 @@ class ObjectDetectionEngine(Common):
                     "labels": keep_preds["labels"][idx].unsqueeze(0),
                 }
                 return final_pred
-
             
         return keep_preds
 

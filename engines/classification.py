@@ -570,7 +570,7 @@ class ClassificationEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
             break
     
         # Initialize the best model and model_epoch list based on the specified mode.
@@ -1048,7 +1048,7 @@ class ClassificationEngine(Common):
                         break
             except RuntimeError:
                 inference_context = torch.no_grad()
-                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
             # Turn on inference context manager 
             with inference_context:
@@ -1596,7 +1596,7 @@ class ClassificationEngine(Common):
                     break
         except RuntimeError:
             inference_context = torch.no_grad()
-            self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+            #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
         # Free up unused GPU memory after shape-checking
         torch.cuda.empty_cache()
@@ -1621,7 +1621,7 @@ class ClassificationEngine(Common):
                     elif X.ndimension() == 2:  # [batch_size, time_steps]
                         pass  # No change needed
                     else:
-                        raise ValueError(f"Unexpected input shape after exception handling: {X.shape}")
+                        self.error(f"Unexpected input shape after exception handling: {X.shape}")
                 break
         
         # Free up unused GPU memory after shape-checking
@@ -1806,7 +1806,7 @@ class ClassificationEngine(Common):
                     check = model(signal)
             except RuntimeError:
                 inference_context = torch.no_grad()
-                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
             
             # Attempt a forward pass to check if the shape of transformed_image is compatible
             try:
@@ -1826,7 +1826,7 @@ class ClassificationEngine(Common):
                 elif signal.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {signal.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {signal.shape}")
             
             # Get prediction probability, predicition label and prediction class
             with inference_context:
@@ -2726,7 +2726,7 @@ class DistillationEngine(Common):
                         break
             except RuntimeError:
                 inference_context = torch.no_grad()
-                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
             # Turn on inference context manager 
             with inference_context:
@@ -3280,7 +3280,7 @@ class DistillationEngine(Common):
                     break
         except RuntimeError:
             inference_context = torch.no_grad()
-            self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+            #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
 
         # Turn on inference context manager 
         with inference_context:
@@ -3465,7 +3465,7 @@ class DistillationEngine(Common):
                 elif transformed_image.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    raise ValueError(f"Unexpected input shape after exception handling: {transformed_image.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {transformed_image.shape}")
 
             # Set inference context
             try:
@@ -3474,7 +3474,7 @@ class DistillationEngine(Common):
                     check = model(transformed_image)
             except RuntimeError:
                 inference_context = torch.no_grad()
-                self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
             
             # Get prediction probability, predicition label and prediction class
             with inference_context:

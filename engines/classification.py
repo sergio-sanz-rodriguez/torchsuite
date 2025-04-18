@@ -565,7 +565,7 @@ class ClassificationEngine(Common):
                     self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
-                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
                     self.squeeze_dim = True
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
@@ -696,7 +696,7 @@ class ClassificationEngine(Common):
         train_loss, train_acc, train_f1 = 0, 0, 0
         all_preds = []
         all_labels = []
-
+        
         # Loop through data loader data batches
         for batch, (X, y) in self.progress_bar(
             dataloader=dataloader,
@@ -707,7 +707,8 @@ class ClassificationEngine(Common):
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)
             X = X.squeeze(1) if self.squeeze_dim else X
-
+            
+            print(X.shape)
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
@@ -880,7 +881,7 @@ class ClassificationEngine(Common):
             # Send data to target device
             X, y = X.to(self.device), y.to(self.device)            
             X = X.squeeze(1) if self.squeeze_dim else X
-
+            
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
@@ -1044,6 +1045,7 @@ class ClassificationEngine(Common):
                 inference_context = torch.inference_mode()
                 with torch.inference_mode():        
                     for batch, (X, y) in enumerate(dataloader):
+                        X = X.squeeze(1) if self.squeeze_dim else X
                         test_pred = self.get_predictions(self.model(X.to(self.device)))
                         break
             except RuntimeError:
@@ -1592,6 +1594,8 @@ class ClassificationEngine(Common):
             inference_context = torch.inference_mode()
             with torch.inference_mode():
                 for batch, (X, y) in enumerate(dataloader):
+                    if X.ndimension() == 3 and X.shape[1] == 1:
+                        X = X.squeeze(1)
                     check = self.get_predictions(model(X.to(self.device)))
                     break
         except RuntimeError:
@@ -1616,7 +1620,7 @@ class ClassificationEngine(Common):
                         self.warning(f"Attempting to reshape X.")
 
                     # Check the current shape of X and attempt a fix
-                    if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                    if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
                         self.squeeze_dim = True
                     elif X.ndimension() == 2:  # [batch_size, time_steps]
                         pass  # No change needed
@@ -1793,6 +1797,7 @@ class ClassificationEngine(Common):
                     transform = transform.to("cpu")
                     signal = transform(signal)
                 
+            # Simulate batch
             signal = signal.unsqueeze(0).to(self.device)
 
             # Prepare model for inference by sending it to target device and turning on eval() mode
@@ -1802,8 +1807,11 @@ class ClassificationEngine(Common):
             # Set inference context
             try:
                 inference_context = torch.inference_mode()
-                with torch.inference_mode():        
-                    check = model(signal)
+                with torch.inference_mode():
+                    if signal.ndimension() == 3 and signal.shape[1] == 1:
+                        check = model(signal.squeeze(1))
+                    else:
+                        check = model(signal)
             except RuntimeError:
                 inference_context = torch.no_grad()
                 #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
@@ -1820,9 +1828,9 @@ class ClassificationEngine(Common):
                 else:
                     self.warning(f"Attempting to reshape X.")
 
-                # Check the current shape of X and attempt a fix
-                if signal.ndimension() == 3:  # [batch_size, 1, time_steps]
-                    self.squeeze_dim = True
+                # Check the current shape of signal and attempt a fix
+                if signal.ndimension() == 3 and signal.shape[1] == 1:  # [batch_size, 1, time_steps]
+                    signal = signal.squeeze(1)
                 elif signal.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
@@ -1830,9 +1838,7 @@ class ClassificationEngine(Common):
             
             # Get prediction probability, predicition label and prediction class
             with inference_context:
-                signal = signal.squeeze(1) if self.squeeze_dim else signal
-                pred_logit = model(signal) # perform inference on target sample 
-                #pred_logit = pred_logit.contiguous()
+                pred_logit = model(signal) # perform inference on target sample             
                 pred_prob = torch.softmax(pred_logit, dim=1) # turn logits into prediction probabilities
                 pred_label = torch.argmax(pred_prob, dim=1) # turn prediction probabilities into prediction label
                 pred_class = class_names[pred_label.cpu()] # hardcode prediction class to be on CPU
@@ -2400,7 +2406,7 @@ class DistillationEngine(Common):
                     self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
-                if X.ndimension() == 3:  # [batch_size, 1, time_steps]
+                if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
                     self.squeeze_dim = True
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
@@ -2548,8 +2554,9 @@ class DistillationEngine(Common):
             stage="train"):
             
             # Send data to target device
-            X, y = X.to(self.device), y.to(self.device)
-            X_tch = X_tch.to(self.device)
+            X, X_tch, y = X.to(self.device), X_tch.to(self.device), y.to(self.device)
+            X = X.squeeze(1) if self.squeeze_dim else X
+            X_tch = X_tch.squeeze(1) if self.squeeze_dim else X_tch
 
             # Optimize training with amp if available
             if amp:
@@ -2722,6 +2729,7 @@ class DistillationEngine(Common):
                 inference_context = torch.inference_mode()
                 with torch.inference_mode():        
                     for batch, (X, y) in enumerate(dataloader_std):
+                        X = X.squeeze(1) if self.squeeze_dim else X
                         test_pred = self.get_predictions(self.model(X.to(self.device)))
                         break
             except RuntimeError:
@@ -2740,9 +2748,10 @@ class DistillationEngine(Common):
                     stage="test"
                     ):
 
-                    # Send data to target device
-                    X, y = X.to(self.device), y.to(self.device)
-                    X_tch = X_tch.to(self.device)
+                    # Send data to target device                    
+                    X, X_tch, y = X.to(self.device), X_tch.to(self.device), y.to(self.device)
+                    X = X.squeeze(1) if self.squeeze_dim else X
+                    X_tch = X_tch.squeeze(1) if self.squeeze_dim else X_tch
 
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
@@ -3276,11 +3285,42 @@ class DistillationEngine(Common):
             inference_context = torch.inference_mode()
             with torch.inference_mode():        
                 for batch, (X, y) in enumerate(dataloader):
+                    if X.ndimension() == 3 and X.shape[1] == 1:
+                        X = X.squeeze(1)                    
                     test_pred = self.get_predictions(self.model(X.to(self.device)))
                     break
         except RuntimeError:
             inference_context = torch.no_grad()
             #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+        
+        # Free up unused GPU memory after shape-checking
+        torch.cuda.empty_cache()
+
+        # Attempt a forward pass to check if the shape of X is compatible
+        with inference_context:
+            for batch, (X, y) in enumerate(dataloader):            
+                try:
+                    # This is where the model will "complain" if the shape is incorrect
+                    check = self.get_predictions(model(X.to(self.device)))
+                except Exception as e:
+                    # If the shape is wrong, reshape X and try again
+                    match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                    if match:
+                        self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                    else:
+                        self.warning(f"Attempting to reshape X.")
+
+                    # Check the current shape of X and attempt a fix
+                    if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
+                        self.squeeze_dim = True
+                    elif X.ndimension() == 2:  # [batch_size, time_steps]
+                        pass  # No change needed
+                    else:
+                        self.error(f"Unexpected input shape after exception handling: {X.shape}")
+                break
+        
+        # Free up unused GPU memory after shape-checking
+        torch.cuda.empty_cache()
 
         # Turn on inference context manager 
         with inference_context:
@@ -3292,6 +3332,7 @@ class DistillationEngine(Common):
 
                 # Send data and targets to target device
                 X, y = X.to(self.device), y.to(self.device)
+                X = X.squeeze(1) if self.squeeze_dim else X
                 
                 # Do the forward pass
                 y_logit = model(X)
@@ -3430,27 +3471,52 @@ class DistillationEngine(Common):
             pred_dict = {}
 
             # Get the sample path and ground truth class name
-            pred_dict["image_path"] = path
+            pred_dict["path"] = path
             class_name = path.parent.stem
             pred_dict["class_name"] = class_name
             
             # Start the prediction timer
             start_time = timer()
             
-            # Open image path
-            img = Image.open(path)
-            
-            # Transform the image, add batch dimension and put image on target device
-            transformed_image = transform(img).unsqueeze(0).to(self.device) 
+            # Process image or audio
+            if path.suffix.lower() in image_extensions:
+                # Load and transform image
+                signal = Image.open(path) #.convert("RGB")
+            elif path.suffix.lower() in audio_extensions:
+                # Load and transform audio
+                signal, sample_rate = torchaudio.load(path)
+            if transform:
+                try:
+                    tranform = transform.to(self.device)
+                    signal = transform(signal)
+                except:
+                    # Fall back to cpu if error
+                    transform = transform.to("cpu")
+                    signal = transform(signal)
+                
+            # Simulate batch
+            signal = signal.unsqueeze(0).to(self.device)
             
             # Prepare model for inference by sending it to target device and turning on eval() mode
             model.to(self.device)
             model.eval()
 
+            # Set inference context
+            try:
+                inference_context = torch.inference_mode()
+                with torch.inference_mode():
+                    if signal.ndimension() == 3 and signal.shape[1] == 1:
+                        check = model(signal.squeeze(1))
+                    else:
+                        check = model(signal)
+            except RuntimeError:
+                inference_context = torch.no_grad()
+                #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+
             # Attempt a forward pass to check if the shape of transformed_image is compatible
             try:
                 # This is where the model will "complain" if the shape is incorrect
-                check = model(transformed_image)
+                check = model(signal)
             except Exception as e:
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
@@ -3460,26 +3526,16 @@ class DistillationEngine(Common):
                     self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
-                if transformed_image.ndimension() == 3:  # [batch_size, 1, time_steps]
-                    self.squeeze_dim = True
-                elif transformed_image.ndimension() == 2:  # [batch_size, time_steps]
+                if signal.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
+                    signal = signal.squeeze(1)
+                elif signal.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    self.error(f"Unexpected input shape after exception handling: {transformed_image.shape}")
-
-            # Set inference context
-            try:
-                inference_context = torch.inference_mode()
-                with torch.inference_mode():        
-                    check = model(transformed_image)
-            except RuntimeError:
-                inference_context = torch.no_grad()
-                #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+                    self.error(f"Unexpected input shape after exception handling: {signal.shape}")
             
             # Get prediction probability, predicition label and prediction class
             with inference_context:
-                pred_logit = model(transformed_image) # perform inference on target sample 
-                #pred_logit = pred_logit.contiguous()
+                pred_logit = model(signal) # perform inference on target sample 
                 pred_prob = torch.softmax(pred_logit, dim=1) # turn logits into prediction probabilities
                 pred_label = torch.argmax(pred_prob, dim=1) # turn prediction probabilities into prediction label
                 pred_class = class_names[pred_label.cpu()] # hardcode prediction class to be on CPU

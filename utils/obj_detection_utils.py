@@ -7,288 +7,39 @@ import datetime
 import errno
 import os
 import time
+import cv2
 import torch
+import random
+import hashlib
+import numpy as np
 import torch.distributed as dist
 import torchvision.ops as ops
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from PIL import Image
 from typing import List
 from collections import defaultdict, deque
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 from torchvision.transforms.functional import to_pil_image
-
-class SmoothedValue:
-    """Track a series of values and provide access to smoothed values over a
-    window or the global series average.
-    """
-
-    def __init__(self, window_size=20, fmt=None):
-        if fmt is None:
-            fmt = "{median:.4f} ({global_avg:.4f})"
-        self.deque = deque(maxlen=window_size)
-        self.total = 0.0
-        self.count = 0
-        self.fmt = fmt
-
-    def update(self, value, n=1):
-        self.deque.append(value)
-        self.count += n
-        self.total += value * n
-
-    def synchronize_between_processes(self):
-        """
-        Warning: does not synchronize the deque!
-        """
-        if not is_dist_avail_and_initialized():
-            return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device="cuda")
-        dist.barrier()
-        dist.all_reduce(t)
-        t = t.tolist()
-        self.count = int(t[0])
-        self.total = t[1]
-
-    @property
-    def median(self):
-        d = torch.tensor(list(self.deque))
-        return d.median().item()
-
-    @property
-    def avg(self):
-        d = torch.tensor(list(self.deque), dtype=torch.float32)
-        return d.mean().item()
-
-    @property
-    def global_avg(self):
-        return self.total / self.count
-
-    @property
-    def max(self):
-        return max(self.deque)
-
-    @property
-    def value(self):
-        return self.deque[-1]
-
-    def __str__(self):
-        return self.fmt.format(
-            median=self.median, avg=self.avg, global_avg=self.global_avg, max=self.max, value=self.value
-        )
-
-
-def all_gather(data):
-    """
-    Run all_gather on arbitrary picklable data (not necessarily tensors)
-    Args:
-        data: any picklable object
-    Returns:
-        list[data]: list of data gathered from each rank
-    """
-    world_size = get_world_size()
-    if world_size == 1:
-        return [data]
-    data_list = [None] * world_size
-    dist.all_gather_object(data_list, data)
-    return data_list
-
-
-def reduce_dict(input_dict, average=True):
-    """
-    Args:
-        input_dict (dict): all the values will be reduced
-        average (bool): whether to do average or sum
-    Reduce the values in the dictionary from all processes so that all processes
-    have the averaged results. Returns a dict with the same fields as
-    input_dict, after reduction.
-    """
-    world_size = get_world_size()
-    if world_size < 2:
-        return input_dict
-    with torch.inference_mode():
-        names = []
-        values = []
-        # sort the keys so that they are consistent across processes
-        for k in sorted(input_dict.keys()):
-            names.append(k)
-            values.append(input_dict[k])
-        values = torch.stack(values, dim=0)
-        dist.all_reduce(values)
-        if average:
-            values /= world_size
-        reduced_dict = {k: v for k, v in zip(names, values)}
-    return reduced_dict
-
-
-class MetricLogger:
-    def __init__(self, delimiter="\t"):
-        self.meters = defaultdict(SmoothedValue)
-        self.delimiter = delimiter
-
-    def update(self, **kwargs):
-        for k, v in kwargs.items():
-            if isinstance(v, torch.Tensor):
-                v = v.item()
-            assert isinstance(v, (float, int))
-            self.meters[k].update(v)
-
-    def __getattr__(self, attr):
-        if attr in self.meters:
-            return self.meters[attr]
-        if attr in self.__dict__:
-            return self.__dict__[attr]
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
-
-    def __str__(self):
-        loss_str = []
-        for name, meter in self.meters.items():
-            loss_str.append(f"{name}: {str(meter)}")
-        return self.delimiter.join(loss_str)
-
-    def synchronize_between_processes(self):
-        for meter in self.meters.values():
-            meter.synchronize_between_processes()
-
-    def add_meter(self, name, meter):
-        self.meters[name] = meter
-
-    def log_every(self, iterable, print_freq, header=None):
-        i = 0
-        if not header:
-            header = ""
-        start_time = time.time()
-        end = time.time()
-        iter_time = SmoothedValue(fmt="{avg:.4f}")
-        data_time = SmoothedValue(fmt="{avg:.4f}")
-        space_fmt = ":" + str(len(str(len(iterable)))) + "d"
-        if torch.cuda.is_available():
-            log_msg = self.delimiter.join(
-                [
-                    header,
-                    "[{0" + space_fmt + "}/{1}]",
-                    "eta: {eta}",
-                    "{meters}",
-                    "time: {time}",
-                    "data: {data}",
-                    "max mem: {memory:.0f}",
-                ]
-            )
-        else:
-            log_msg = self.delimiter.join(
-                [header, "[{0" + space_fmt + "}/{1}]", "eta: {eta}", "{meters}", "time: {time}", "data: {data}"]
-            )
-        MB = 1024.0 * 1024.0
-        for obj in iterable:
-            data_time.update(time.time() - end)
-            yield obj
-            iter_time.update(time.time() - end)
-            if i % print_freq == 0 or i == len(iterable) - 1:
-                eta_seconds = iter_time.global_avg * (len(iterable) - i)
-                eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
-                if torch.cuda.is_available():
-                    print(
-                        log_msg.format(
-                            i,
-                            len(iterable),
-                            eta=eta_string,
-                            meters=str(self),
-                            time=str(iter_time),
-                            data=str(data_time),
-                            memory=torch.cuda.max_memory_allocated() / MB,
-                        )
-                    )
-                else:
-                    print(
-                        log_msg.format(
-                            i, len(iterable), eta=eta_string, meters=str(self), time=str(iter_time), data=str(data_time)
-                        )
-                    )
-            i += 1
-            end = time.time()
-        total_time = time.time() - start_time
-        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print(f"{header} Total time: {total_time_str} ({total_time / len(iterable):.4f} s / it)")
-
+import torchvision.transforms.functional as F
+from torchvision.transforms import v2 as T
 
 def collate_fn(batch):
     return tuple(zip(*batch))
 
 
-def mkdir(path):
-    try:
-        os.makedirs(path)
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise
+# Function to set random seed
+def set_seeds(seed: int=42):
+    """Sets random seeds for torch operations.
 
-
-def setup_for_distributed(is_master):
+    Args:
+        seed (int, optional): Random seed to set. Defaults to 42.
     """
-    This function disables printing when not in master process
-    """
-    import builtins as __builtin__
+    # Set the seed for general torch operations
+    torch.manual_seed(seed)
+    # Set the seed for CUDA torch operations (ones that happen on the GPU)
+    torch.cuda.manual_seed(seed)
 
-    builtin_print = __builtin__.print
-
-    def print(*args, **kwargs):
-        force = kwargs.pop("force", False)
-        if is_master or force:
-            builtin_print(*args, **kwargs)
-
-    __builtin__.print = print
-
-
-def is_dist_avail_and_initialized():
-    if not dist.is_available():
-        return False
-    if not dist.is_initialized():
-        return False
-    return True
-
-
-def get_world_size():
-    if not is_dist_avail_and_initialized():
-        return 1
-    return dist.get_world_size()
-
-
-def get_rank():
-    if not is_dist_avail_and_initialized():
-        return 0
-    return dist.get_rank()
-
-
-def is_main_process():
-    return get_rank() == 0
-
-
-def save_on_master(*args, **kwargs):
-    if is_main_process():
-        torch.save(*args, **kwargs)
-
-
-def init_distributed_mode(args):
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ["WORLD_SIZE"])
-        args.gpu = int(os.environ["LOCAL_RANK"])
-    elif "SLURM_PROCID" in os.environ:
-        args.rank = int(os.environ["SLURM_PROCID"])
-        args.gpu = args.rank % torch.cuda.device_count()
-    else:
-        print("Not using distributed mode")
-        args.distributed = False
-        return
-
-    args.distributed = True
-
-    torch.cuda.set_device(args.gpu)
-    args.dist_backend = "nccl"
-    print(f"| distributed init (rank {args.rank}): {args.dist_url}", flush=True)
-    torch.distributed.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank
-    )
-    torch.distributed.barrier()
-    setup_for_distributed(args.rank == 0)
 
 # Function to remove redundant boxes and masks
 def prune_predictions(
@@ -319,7 +70,7 @@ def prune_predictions(
         A dictionary with filtered and refined predictions:
             "boxes": Tensor of kept bounding boxes.
             "scores": Tensor of kept scores.
-                "labels": Tensor of kept labels.
+            "labels": Tensor of kept labels.
     """
     
     if not (isinstance(best_candidate, str) or best_candidate is None):
@@ -327,6 +78,14 @@ def prune_predictions(
 
     # Filter predictions based on confidence score threshold
     scores = pred["scores"]
+
+    if len(scores) == 0:
+        return {
+            "boxes": [],
+            "scores": [],
+            "labels": []
+            }
+
     best_idx = scores.argmax()
     high_conf_idx = scores > score_threshold
 
@@ -538,6 +297,13 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target)
 
 class RandomCircleOcclusion(T.RandomErasing):
 
+    """
+    Applies random circular occlusions to an image tensor. Inherits from torchvision.transforms.RandomErasing.
+
+    This transform overlays multiple randomly placed circles of various sizes and predefined colors onto 
+    the image. It is useful for data augmentation to simulate occlusions or visual noise.
+    """
+
     def __init__(self, p=0.5, scale=(0.02, 0.2), ratio=(0.3, 3.3), num_elems=6):
 
         """
@@ -565,6 +331,18 @@ class RandomCircleOcclusion(T.RandomErasing):
         self.num_elems = num_elems
 
     def forward(self, img, target=None):
+
+        """
+        Applies the random circular occlusion to the input image tensor.
+
+        Args:
+            img (Tensor): Image tensor with shape (C, H, W).
+            target (optional): Target corresponding to the image, returned unchanged.
+
+        Returns:
+            Tuple[Tensor, Any]: Transformed image and original target.
+        """
+
         if torch.rand(1).item() > self.p:
             return img, target
 
@@ -588,25 +366,47 @@ class RandomCircleOcclusion(T.RandomErasing):
 
 
 class RandomTextureOcclusion:
-    def __init__(self, plant_path, transparency=0.5, p=0.5):
+
+    """
+    Applies random occlusions to an image using RGBA texture objects (e.g., plants) 
+    to simulate natural occlusions. Occlusions are applied stochastically with a 
+    user-defined probability.
+
+    This class is useful for data augmentation in computer vision tasks such as object 
+    detection or classification, where robustness to occlusion is desired.
+    """
+
+    def __init__(self, obj_path, transparency=0.5, p=0.5):
 
         """
         Initializes the RandomTextureOcclusion class.
 
         Args:
-            plant_path (list): List of paths to plant images.
+            obj_path (list): List of paths to plant images.
             transparency (float, optional): Transparency of the plant image. Defaults to 0.5.
             p (float, optional): Probability of applying the occlusion. Defaults to 0.5.
         """
 
-        #plant_path = ["T_Bush_Falcon.png"]
-        plant_images = [Image.open(path) for path in plant_path]
-        self.plant_images = plant_images 
+        #obj_path = ["T_Bush_Falcon.png"]
+        obj_images = [Image.open(path).convert("RGBA") for path in obj_path]
+        self.obj_images = obj_images 
         self.transparency = transparency
         self.p = p
 
     def __call__(self, img, target=None):
-        if random.random() > self.p or not self.plant_images:
+
+        """
+        Applies a randomly placed, scaled, and rotated texture occlusion to the input image.
+
+        Args:
+            img (PIL.Image or torch.Tensor): Input image.
+            target: Optional target data (e.g., labels or bounding boxes).
+
+        Returns:
+            Tuple: Transformed image as torch.Tensor, and the unmodified target.
+        """
+
+        if random.random() > self.p or not self.obj_images:
             return img, target
 
         # Convert to PIL Image if necessary
@@ -614,34 +414,147 @@ class RandomTextureOcclusion:
             img = F.to_pil_image(img)
 
         # Select a random plant image        
-        plant_img = random.choice(self.plant_images)
+        obj_img = random.choice(self.obj_images)
         
         # Resize plant to a random size
         w, h = img.size       
         scale = random.uniform(0.25, 0.5)  # Random scale factor
         new_h, new_w = int(w * scale), int(w * scale)
         new_h, new_w = min(new_w, w), min(new_h, h)
-        plant_img = plant_img.resize((new_w, new_h), resample=Image.BILINEAR)
+        obj_img = obj_img.resize((new_w, new_h), resample=Image.BILINEAR)
 
-        # Random placement        
+        # Random rotation
+        angle = random.uniform(0, 360)
+        obj_img = obj_img.rotate(angle, expand=True)
+        # Make sure it fits into base image (w, h)
+        new_w, new_h = obj_img.size
+        if new_w >= w or new_h >= h:
+            scale = min(w / new_w, h / new_h) * 0.8  # a bit smaller than max
+            new_w, new_h = int(new_w * scale), int(new_h * scale)
+            obj_img = obj_img.resize((new_w, new_h), resample=Image.BILINEAR)
+
+        # Random placement
         x_offset = random.randint(0, w - new_w)
-        y_offset = random.randint(0, h - new_h)
+        y_offset = random.randint(0, h - new_h)        
 
         # Convert plant image to numpy for blending
-        plant_np = np.array(plant_img).astype(float)
+        obj_np = np.array(obj_img).astype(float)
         img_np = np.array(img).astype(float)
 
         # Alpha channel
-        plant_alpha = plant_np[:, :, 3] > 128
+        obj_alpha = obj_np[:, :, 3] > 128
         
         # Apply transparency
         # Blend the RGB channels with the alpha channel
         for c in range(3):  # Iterate over RGB channels
             img_np[y_offset:y_offset+new_h, x_offset:x_offset+new_w, c] = (
-                plant_alpha * plant_np[:, :, c] + (1 - plant_alpha) * img_np[y_offset:y_offset+new_h, x_offset:x_offset+new_w, c]
+                obj_alpha * obj_np[:, :, c] + (1 - obj_alpha) * img_np[y_offset:y_offset+new_h, x_offset:x_offset+new_w, c]
             )
 
         # Convert back to PIL
         img_occluded = Image.fromarray(img_np.astype(np.uint8))
         
+        return F.pil_to_tensor(img_occluded), target
+
+import hashlib
+
+class RandomTextureOcclusionDeterministic:
+
+    """
+    Applies deterministic occlusions using RGBA texture objects (e.g., plants) based on 
+    the hash of the input image or its filename. This ensures reproducibility of the 
+    augmentation, which is useful for validation or consistent visual testing.
+    """
+
+    def __init__(self, obj_path, transparency=0.5, p=0.5):
+        
+        """
+        Initializes the RandomTextureOcclusionDeterministic class.
+
+        Args:
+            obj_path (list): List of paths to RGBA plant images to be used for occlusion.
+            transparency (float): Transparency level for occlusions (not currently used).
+            p (float): Probability of applying the occlusion.
+        """
+
+        self.obj_images = [Image.open(path).convert("RGBA") for path in obj_path]
+        self.transparency = transparency
+        self.p = p
+
+    def __call__(self, img, target=None):
+
+        """
+        Applies a reproducible texture occlusion to the image using a hash-based seed 
+        (from the filename or image bytes).
+
+        Args:
+            img (PIL.Image or torch.Tensor): Input image.
+            target: Optional target data (e.g., labels or bounding boxes).
+
+        Returns:
+            Tuple: Transformed image as torch.Tensor, and the unmodified target.
+        """
+                
+        # Convert to PIL if needed
+        if isinstance(img, torch.Tensor):
+            img = F.to_pil_image(img)
+
+        # Try to extract filename-based seed
+        try:
+            filename = img.filename  # Works if loaded via PIL.Image.open(path)
+            seed = int(hashlib.sha256(filename.encode()).hexdigest(), 16) % (2**32)
+        except Exception:
+            # If filename not available, hash first 1000 bytes of image content
+            img_bytes = np.array(img).tobytes()[:1000]
+            seed = int(hashlib.sha256(img_bytes).hexdigest(), 16) % (2**32)
+
+        rng = random.Random(seed)
+
+        if rng.random() > self.p or not self.obj_images:
+            if isinstance(img, Image.Image):
+                img = F.pil_to_tensor(img)
+            return img, target
+
+        # Choose plant
+        obj_img = rng.choice(self.obj_images)
+
+        # Resize randomly
+        w, h = img.size
+        scale = rng.uniform(0.25, 0.5)
+        new_w, new_h = int(w * scale), int(w * scale)
+        new_w, new_h = min(new_w, w), min(new_h, h)
+        obj_img = obj_img.resize((new_w, new_h), resample=Image.BILINEAR)
+
+        # Random rotation
+        angle = rng.uniform(0, 360)
+        obj_img = obj_img.rotate(angle, expand=True)
+        # Make sure it fits into base image (w, h)
+        new_w, new_h = obj_img.size
+        if new_w >= w or new_h >= h:
+            scale = min(w / new_w, h / new_h) * 0.8  # a bit smaller than max
+            new_w, new_h = int(new_w * scale), int(new_h * scale)
+            obj_img = obj_img.resize((new_w, new_h), resample=Image.BILINEAR)
+
+        # Random placement
+        x_offset = rng.randint(0, w - new_w)
+        y_offset = rng.randint(0, h - new_h)
+
+        # Convert to NumPy
+        obj_np = np.array(obj_img).astype(float)
+        img_np = np.array(img).astype(float)
+
+        # Alpha channel
+        obj_alpha = obj_np[:, :, 3] > 128
+
+        # Apply transparency
+        # Blend the RGB channels with the alpha channel
+        for c in range(3):  # Iterate over RGB channels
+            img_np[y_offset:y_offset+new_h, x_offset:x_offset+new_w, c] = (
+                obj_alpha * obj_np[:, :, c] + (1 - obj_alpha) * img_np[y_offset:y_offset+new_h, x_offset:x_offset+new_w, c]
+            )
+
+        #img_occluded = Image.fromarray(np.clip(img_np, 0, 255).astype(np.uint8))
+        # Convert back to PIL
+        img_occluded = Image.fromarray(img_np.astype(np.uint8))
+
         return F.pil_to_tensor(img_occluded), target

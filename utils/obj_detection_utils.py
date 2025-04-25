@@ -46,16 +46,18 @@ def prune_predictions(
     pred,
     score_threshold=0.66,
     iou_threshold=0.5,
-    best_candidate="area"
+    best_candidate="area",
+    remove_large_boxes=None
     ):
 
     """
     Filters and refines predictions by:
-    1. Removing low-confidence detections based on the score threshold.
-    2. Applying a binary mask threshold to filter out weak segmentation masks.
-    3. Using Non-Maximum Suppression (NMS) to eliminate overlapping predictions.
-    4. Ensuring the highest-scoring prediction is always included.
-    5. Selecting the best-confident bounding box based on a criterion: largest area or highest score.
+    1. Removing unusually large bounding boxes if specified
+    2. Removing low-confidence detections based on the score threshold.
+    3. Applying a binary mask threshold to filter out weak segmentation masks.
+    4. Using Non-Maximum Suppression (NMS) to eliminate overlapping predictions.
+    6. Ensuring the highest-scoring prediction is always included.
+    7. Selecting the best-confident bounding box based on a criterion: largest area or highest score.
 
     Args:
         pred: The raw predictions containing "boxes", "scores", "labels", and "masks".
@@ -73,8 +75,30 @@ def prune_predictions(
             "labels": Tensor of kept labels.
     """
     
-    if not (isinstance(best_candidate, str) or best_candidate is None):
-        raise ValueError("best_candidate must be either None, 'score', or 'area'")
+    # Validate score_threshold
+    if not isinstance(score_threshold, (int, float)) or not (0 <= score_threshold <= 1):
+        raise ValueError("'score_threshold' must be a float between 0 and 1")
+
+    # Validate iou_threshold
+    if not isinstance(iou_threshold, (int, float)) or not (0 <= iou_threshold <= 1):
+        raise ValueError("'iou_threshold' must be a float between 0 and 1")
+
+    # Validate best_candidate
+    if best_candidate not in ("area", "score", None):
+        raise ValueError("'best_candidate' must be one of: 'area', 'score', or None")
+    
+    # Validate remove_large_boxes
+    if remove_large_boxes is not None and not isinstance(remove_large_boxes, numbers.Number):
+        raise ValueError("'remove_large_boxes' must be a numeric value or None")
+
+    # Filter big boxes
+    if remove_large_boxes is not None:
+        areas = (pred["boxes"][:, 2] - pred["boxes"][:, 0]) * (pred["boxes"][:, 3] - pred["boxes"][:, 1])
+        keep_idx = areas < remove_large_boxes
+        pred["boxes"] = pred["boxes"][keep_idx]
+        pred["scores"] = pred["scores"][keep_idx]
+        pred["labels"] = pred["labels"][keep_idx]
+
 
     # Filter predictions based on confidence score threshold
     scores = pred["scores"]
@@ -148,7 +172,6 @@ def prune_predictions(
                 "labels": keep_preds["labels"][idx].unsqueeze(0),
             }
             return final_pred
-
         
     return keep_preds
        
@@ -376,19 +399,21 @@ class RandomTextureOcclusion:
     detection or classification, where robustness to occlusion is desired.
     """
 
-    def __init__(self, obj_path, transparency=0.5, p=0.5):
+    def __init__(self, obj_path, scale=(0.2, 0.5), transparency=0.5, p=0.5):
 
         """
         Initializes the RandomTextureOcclusion class.
 
         Args:
             obj_path (list): List of paths to plant images.
+            scale (tuple, optional): Range of scale factors for the occlusion. Defaults to (0.2, 0.5).
             transparency (float, optional): Transparency of the plant image. Defaults to 0.5.
             p (float, optional): Probability of applying the occlusion. Defaults to 0.5.
         """
 
         #obj_path = ["T_Bush_Falcon.png"]
         obj_images = [Image.open(path).convert("RGBA") for path in obj_path]
+        self.scale = scale
         self.obj_images = obj_images 
         self.transparency = transparency
         self.p = p
@@ -418,7 +443,7 @@ class RandomTextureOcclusion:
         
         # Resize plant to a random size
         w, h = img.size       
-        scale = random.uniform(0.25, 0.5)  # Random scale factor
+        scale = random.uniform(self.scale[0], self.scale[1])  # Random scale factor
         new_h, new_w = int(w * scale), int(w * scale)
         new_h, new_w = min(new_w, w), min(new_h, h)
         obj_img = obj_img.resize((new_w, new_h), resample=Image.BILINEAR)
@@ -456,7 +481,6 @@ class RandomTextureOcclusion:
         
         return F.pil_to_tensor(img_occluded), target
 
-import hashlib
 
 class RandomTextureOcclusionDeterministic:
 
@@ -466,18 +490,20 @@ class RandomTextureOcclusionDeterministic:
     augmentation, which is useful for validation or consistent visual testing.
     """
 
-    def __init__(self, obj_path, transparency=0.5, p=0.5):
+    def __init__(self, obj_path, scale=(0.2, 0.5), transparency=0.5, p=0.5):
         
         """
         Initializes the RandomTextureOcclusionDeterministic class.
 
         Args:
             obj_path (list): List of paths to RGBA plant images to be used for occlusion.
+            scale (tuple, optional): Range of scale factors for the occlusion. Defaults to (0.2, 0.5).
             transparency (float): Transparency level for occlusions (not currently used).
             p (float): Probability of applying the occlusion.
         """
 
         self.obj_images = [Image.open(path).convert("RGBA") for path in obj_path]
+        self.scale = scale
         self.transparency = transparency
         self.p = p
 
@@ -520,7 +546,7 @@ class RandomTextureOcclusionDeterministic:
 
         # Resize randomly
         w, h = img.size
-        scale = rng.uniform(0.25, 0.5)
+        scale = random.uniform(self.scale[0], self.scale[1])  # Random scale factor
         new_w, new_h = int(w * scale), int(w * scale)
         new_w, new_h = min(new_w, w), min(new_h, h)
         obj_img = obj_img.resize((new_w, new_h), resample=Image.BILINEAR)

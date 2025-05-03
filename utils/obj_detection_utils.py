@@ -276,7 +276,7 @@ def display_and_save_predictions(
     plt.show()
 
 
-def visualize_transformed_data(img, target, transformed_img, transformed_target):
+def visualize_transformed_data(img, target, transformed_img, transformed_target, color_conversion=None):
 
     """
     Visualizes the original and transformed image along with bounding boxes and masks.
@@ -286,13 +286,26 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target)
     - target: Original target dictionary (contains boxes, masks, labels).
     - transformed_img: Transformed image tensor.
     - transformed_target: Transformed target dictionary.
+    - color_conversion: Optional OpenCV color conversion code (e.g., cv2.COLOR_HSV2RGB).
+                        https://docs.opencv.org/3.4/d8/d01/group__imgproc__color__conversions.html
+                        If None, assumes image is already in RGB.
     """
     
     # Visualize original image
     fig, axes = plt.subplots(1, 2, figsize=(15, 7))
+
+    # Convert tensors to numpy and apply color conversion if needed
+    def convert_for_plot(tensor_img):
+        img_np = (tensor_img * 255).byte().permute(1, 2, 0).cpu().numpy() # Convert CHW to HWC for plotting
+        if color_conversion is not None:
+            img_np = cv2.cvtColor(img_np, color_conversion)
+        return img_np
+    
+    img = convert_for_plot(img)
+    transformed_img = convert_for_plot(transformed_img)
     
     # Original Image
-    axes[0].imshow(img.permute(1, 2, 0))  # Convert CHW to HWC for plotting
+    axes[0].imshow(img)
     for box in target['boxes']:
         x_min, y_min, x_max, y_max = box
         rect = patches.Rectangle(
@@ -304,7 +317,7 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target)
     axes[0].axis('off')
 
     # Transformed Image
-    axes[1].imshow(transformed_img.permute(1, 2, 0))  # Convert CHW to HWC for plotting
+    axes[1].imshow(transformed_img)
     for box in transformed_target['boxes']:
         x_min, y_min, x_max, y_max = box
         rect = patches.Rectangle(

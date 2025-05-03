@@ -24,6 +24,7 @@ class StandardFasterRCNN(torch.nn.Module):
         num_classes: int = 2,
         backbone: str = "resnet50", #['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
         weights: Union[str, Path] = "DEFAULT",
+        nms: list = None,
         hidden_layer: int = 256,
         device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ):
@@ -38,6 +39,12 @@ class StandardFasterRCNN(torch.nn.Module):
                     3. 'mobilenet_v3_large': moderate accuracy, very high speed
                     4. 'mobilenet_v3_large_320': moderate-high accuracy, very high speed
                     ['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
+        - nms (Non-Maximum Suppression): A list with the following values:
+            - pre_nms_top_n_train: Number of proposals before NMS algorithm the RPN will generate during training.
+            - post_nms_top_n_train: Number of proposal to be reatined after applying NMS during training.
+            - pre_nms_top_n_test: Same as pre_nms_top_n_train but for testing.
+            - post_nms_top_n_test: Same as post_nms_top_n_train but for testing.
+            Default: None with default numbers. E.g. [20, 5, 50, 2]
         - hidden_layer: Number of hidden units for the mask prediction head. Default is 256.
         - device: Target device: GPU or CPU
         """
@@ -88,6 +95,15 @@ class StandardFasterRCNN(torch.nn.Module):
                 self.model.load_state_dict(checkpoint)
             else:
                 raise ValueError(f"[ERROR] Custom weights path '{weights}' is not valid or does not point to a valid checkpoint file.")
+
+        # RPN proposals
+        if isinstance(nms, list) and len(nms) == 4:
+            self.model.rpn.pre_nms_top_n_train = nms[0]
+            self.model.rpn.post_nms_top_n_train = nms[1]
+            self.model.rpn.pre_nms_top_n_test = nms[2]
+            self.model.rpn.post_nms_top_n_test = nms[3]
+        else:
+            logger.error("'nms' must be a list of four integers or None.")
 
         # Move the model to the specified device
         self.model.to(device)

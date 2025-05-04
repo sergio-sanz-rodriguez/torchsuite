@@ -618,9 +618,15 @@ class ObjectDetectionEngine(Common):
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
-                    
+                                        
                     # Forward pass
-                    loss_dict = self.model(images, targets)
+                    try:
+                        loss_dict = self.model(images, targets)
+                    except AssertionError as e:
+                        self.warning(f"{e} Skipping batch...")
+                        continue  # Skip this batch
+                    
+                    # Sum the losses
                     loss = sum(item for item in loss_dict.values())
                     
                     # Check if the output has NaN or Inf values
@@ -650,7 +656,13 @@ class ObjectDetectionEngine(Common):
 
             else:
                 # Forward pass
-                loss_dict = self.model(images, targets)
+                try:
+                    loss_dict = self.model(images, targets)
+                except AssertionError as e:
+                    self.warning(f"{e} Skipping batch...")
+                    continue  # Skip this batch
+                
+                # Sum the losses
                 loss = sum(item for item in loss_dict.values())
 
                 # Divide into accumulation_steps
@@ -769,8 +781,14 @@ class ObjectDetectionEngine(Common):
                     # Enable AMP if specified
                     with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
 
-                         # Forward pass
-                        loss_dict = self.model(images, targets)
+                        # Forward pass
+                        try:
+                            loss_dict = self.model(images, targets)
+                        except AssertionError as e:
+                            self.warning(f"{e} Skipping batch...")
+                            continue  # Skip this batch
+                        
+                        # Sum the losses
                         loss = sum(item for item in loss_dict.values())
 
                         # Check if the output has NaN or Inf values

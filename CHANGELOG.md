@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-03-04
+### Added
+- General improvements in object detection
+
 ## [0.3.0-rc1] - 2025-03-28
 ### Added
 - Image segmentation: prediction

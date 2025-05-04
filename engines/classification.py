@@ -1790,7 +1790,7 @@ class ClassificationEngine(Common):
                 signal, sample_rate = torchaudio.load(path)
             if transform:
                 try:
-                    tranform = transform.to(self.device)
+                    transform = transform.to(self.device)
                     signal = transform(signal)
                 except:
                     # Fall back to cpu if error

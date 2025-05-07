@@ -316,7 +316,14 @@ class Common(Logger):
             return output.logits.contiguous()
         else:
             self.error(f"Unexpected model output type: {type(output)}")
-        
+    
+    def clear_cuda_memory(self, var_names, namespace):
+        """Clears listed variable names and empties CUDA cache."""
+        if torch.cuda.is_available():
+            for name in var_names:
+                if name in namespace:
+                    del namespace[name]
+            torch.cuda.empty_cache()
 
     def save_model(self, model: torch.nn.Module, target_dir: str, model_name: str):
 

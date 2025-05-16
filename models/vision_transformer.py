@@ -3,89 +3,290 @@ import torchvision
 from torch import nn
 from torch.nn.init import trunc_normal_
 #, xavier_normal_, zeros_, orthogonal_, kaiming_normal_
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import torchvision.transforms.functional as TF
 
-# Create Pytorch's default ViT models
-def create_vit(
-    vit_model: str="vitbase16",
-    num_classes: int=1000,
-    dropout: float=0.1,
-    seed: float=42,
-    device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
-    ) -> torchvision.models.VisionTransformer:
+class HyperspectralToRGB(nn.Module):
+    def __init__(self):
+        super(HyperspectralToRGB, self).__init__()
+        self.conv1 = nn.Conv3d(in_channels=125, out_channels=3, kernel_size=(3, 3, 3), padding=1)
+    
+    def forward(self, x):
+        return self.conv1(x) 
 
-    """Creates a pretrained PyTorch's default ViT model.
+class SpatialConcatenation(nn.Module):
+    def __init__(
+        self,
+        in_channels: int=125,
+        spatial_dim: int=384,
+        row_blocks: int=6,
+        column_blocks: int=6,
+        device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
+        ):
+        super(SpatialConcatenation, self).__init__()
 
-    Args:
-        vit_model (str, optional): Name of ViT model to create. Default is "vitbase16".
-        num_classes (int, optional): Number of classes in the classifier head. Default is 1000.
-        dropout (float, optional): Dropout rate in the classifier head. Default is 0.1.
-        device (torch.device, optional): Device to run model on. Default is "cuda" if available else "cpu".
+        # Convolutional layer to reduce the number of channels to 108
+        self.spatial_dim = spatial_dim
+        self.row_blocks = row_blocks
+        self.column_blocks = column_blocks
+        out_channels = 3 * row_blocks * column_blocks
 
-    Returns:
-        torchvision.models.VisionTransformer: A pretrained ViT model.
-    """
+        # Expand the image by spatially concatenating channels
+        self.convert_channels = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1).to(device)
 
-    # Get pretrained weights for ViT-Base/16
-    if vit_model == "vitbase16":
-        pretrained_vit_weights = torchvision.models.ViT_B_16_Weights.DEFAULT
-        # Setup a ViT model instance with pretrained weights
-        pretrained_vit = torchvision.models.vit_b_16(weights=pretrained_vit_weights, dropout=dropout).to(device)
+        # Compute the number of layers needed to downsample to the target size
+        self.num_halvings = int(torch.log2(torch.tensor(768 // spatial_dim, dtype=torch.float)).item())
+    
+        # Sequential block for downsampling the spatial size using Conv2d with stride=2
+        layers = []
+        for _ in range(self.num_halvings):
+            layers.append(nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, stride=2, padding=1))
+            layers.append(nn.BatchNorm2d(num_features=3))
+            layers.append(nn.ReLU(inplace=True))
 
-    # Get pretrained weights for ViT-Base/16
-    elif vit_model == "vitbase16_2":
-        pretrained_vit_weights = torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1
-        # Setup a ViT model instance with pretrained weights
-        pretrained_vit = torchvision.models.vit_b_16(weights=pretrained_vit_weights, dropout=dropout).to(device)
+        self.downsampling = nn.Sequential(*layers)
 
-    # Get pretrained weights for ViT-Base/16
-    elif vit_model == "vitbase32":
-        pretrained_vit_weights = torchvision.models.ViT_B_32_Weights.DEFAULT
-        # Setup a ViT model instance with pretrained weights
-        pretrained_vit = torchvision.models.vit_b_32(weights=pretrained_vit_weights, dropout=dropout).to(device)
+        # Optional final adaptive pooling to adjust exactly to target size
+        #final_output_size = 768 // (2 ** self.num_halvings)
+        #if final_output_size != spatial_dim:
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((spatial_dim, spatial_dim))
+        #else:
+        #    self.adaptive_pool = nn.Identity()
 
-    # Get pretrained weights for ViT-Large/16
-    elif vit_model == "vitlarge16":
-        pretrained_vit_weights = torchvision.models.ViT_L_16_Weights.DEFAULT
-        pretrained_vit = torchvision.models.vit_l_16(weights=pretrained_vit_weights, dropout=dropout).to(device)
+        self.pool = nn.MaxPool2d(2, 2)
 
-    # Get pretrained weights for ViT-Large/16
-    elif vit_model == "vitlarge16_2":
-        pretrained_vit_weights = torchvision.models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1
-        pretrained_vit = torchvision.models.vit_l_16(weights=pretrained_vit_weights, dropout=dropout).to(device)
 
-    # Get pretrained weights for ViT-Large/32
-    elif vit_model == "vitlarge32":
-        pretrained_vit_weights = torchvision.models.ViT_L_32_Weights.DEFAULT
-        pretrained_vit = torchvision.models.vit_l_32(weights=pretrained_vit_weights, dropout=dropout).to(device)
 
-    # Get pretrained weights for ViT-Huge/14
-    elif vit_model == "vithuge14":
-        pretrained_vit_weights = torchvision.models.ViT_H_14_Weights.DEFAULT
-        pretrained_vit = torchvision.models.vit_l_32(weights=pretrained_vit_weights, dropout=dropout).to(device)
+    def forward(self, x):
+                
+        # Step 1: Modify the channel dimension
+        x = self.convert_channels(x)
+        #x = x[:, :108, :, :]
+
+        # Step 2: Reshape the tensor to (BATCH, 3, img_dim * row_blocks, img_dim * column_blocks)
+        #x = x.view(x.size(0), 3, x.size(-2) * self.row_blocks, x.size(-1) * self.column_blocks)  
+        x = x.reshape(x.size(0), 3, x.size(-2) * self.row_blocks, x.size(-1) * self.column_blocks)  
         
-    else:
-        print("Invalid model name, exiting...")
-        exit()
+        # Step 3: Resample the tensor to target WxH
+        x = F.interpolate(x, size=(self.spatial_dim, self.spatial_dim), mode='bilinear', align_corners=False)
+        # Step 3: Apply CNN-based downsampling
+        #x = self.downsampling(x)
 
-    # Unfreeze the base parameters
-    for parameter in pretrained_vit.parameters():
-        parameter.requires_grad = True
+        # Step 4: Final resizing (if necessary) using AdaptiveAvgPool2d
+        #x = self.adaptive_pool(x)
+        #x = self.pool(x)
 
-    # Set the seed for general torch operations
-    torch.manual_seed(seed)
+        # === Visualization block (for the first sample in the batch only) ===
+        #output_img = x[0].detach().cpu().clamp(0, 1)  # shape: (3, H, W)
+        #img = TF.to_pil_image(output_img)
+        #plt.imshow(img)
+        #plt.title("Output Image from SpatialConcatenation")
+        #plt.axis("off")
+        #plt.show()
+        
+        return x
+    
+class HyperspectralConv3D(nn.Module):
+    def __init__(
+        self,
+        in_channels: int=1,
+        out_channels: int=3,
+        kernel_size=(125, 1, 1),
+        stride: int=1,
+        padding: int=0, #(7 // 2, 0, 0),
+        bias: bool=False,
+        device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
+        ):
 
-    # Set the seed for CUDA torch operations (ones that happen on the GPU)
-    torch.cuda.manual_seed(seed)
+        super(HyperspectralConv3D, self).__init__()
+        
+        self.conv3d = nn.Conv3d(
+            in_channels=in_channels,  # input is (B, 1, C, H, W)
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding, #(kernel_size[0] // 2, 0, 0),  # preserve spectral size
+            bias=False
+        ).to(device)
+        
+    def forward(self, x):
+        # Input x: (B, C, H, W)
+        x = x.unsqueeze(1)  # -> (B, 1, C, H, W)
+        #print(x.shape)
+        x = self.conv3d(x)  # -> (B, 3, C, H, W)
+        #print(x.shape)
+        x = x.squeeze(2)    # -> (B, 3, H, W)
+        #print(x.shape)
+        return x
 
-    # Change the classifier head (set the seeds to ensure same initialization with linear head)
-    if "vitbase" in vit_model:
-        pretrained_vit.heads = nn.Linear(in_features=768, out_features=num_classes).to(device)
-    elif "vitlarge" in vit_model:
-        pretrained_vit.heads = nn.Linear(in_features=1024, out_features=num_classes).to(device)
-    else:
-        pretrained_vit.heads = nn.Linear(in_features=1280, out_features=num_classes).to(device)
 
-    return pretrained_vit
+class SpectralViT(nn.Module):
+    def __init__(
+        self,
+        model: str='vitbase16',
+        embedding_alg: str='spatial_concat',     
+        spatial_dim: int=384,
+        block_size_spatial_emb: int=6, 
+        num_classes: int = 1,
+        dropout: float=0.0,
+        kernel_size: tuple=(125, 1, 1),
+        freeze_model: bool=False,
+        seed: int=42,
+        device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
+        ):
+        
+        super().__init__()
+
+        self.device = device
+        
+        if embedding_alg == 'spatial_concat':
+            self.embedding = SpatialConcatenation(
+                in_channels=kernel_size[0],
+                spatial_dim=spatial_dim,
+                row_blocks=block_size_spatial_emb,
+                column_blocks=block_size_spatial_emb,
+                device=device
+                )
+        else:
+            self.embedding = HyperspectralConv3D(
+                in_channels=1,
+                out_channels=3,
+                kernel_size=kernel_size,
+                stride=1,
+                padding = 0, #(kernel_size // 2, 0, 0),
+                bias=False,
+                device=device
+                )
+
+        self.model = self.create_model(
+            model=model,
+            num_classes=num_classes,
+            dropout=dropout,
+            freeze=freeze_model,
+            seed=seed,
+            device=device,
+            )
+
+    @staticmethod
+    def create_model(
+        model: str = "vitbase16",
+        num_classes: int = 1,
+        dropout: float = 0.0,
+        freeze: bool = False,
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        seed: int = 42
+    ):
+
+        model_map = {
+            # ViT-Base / -Large / -Huge
+            "vitbase16":    (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.DEFAULT,                  768),
+            "vitbase16_2":  (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1,  768),
+            "vitbase32":    (torchvision.models.vit_b_32,    torchvision.models.ViT_B_32_Weights.DEFAULT,                  768),
+            "vitlarge16":   (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.DEFAULT,                 1024),
+            "vitlarge16_2": (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1, 1024),
+            "vitlarge32":   (torchvision.models.vit_l_32,    torchvision.models.ViT_L_32_Weights.DEFAULT,                 1024),
+            "vithuge14":    (torchvision.models.vit_h_14,    torchvision.models.ViT_H_14_Weights.DEFAULT,                 1280),
+
+            # Swin-T / -S / -B
+            "swin_t":       (torchvision.models.swin_t,      torchvision.models.Swin_T_Weights.DEFAULT,                   768),
+            "swin_s":       (torchvision.models.swin_s,      torchvision.models.Swin_S_Weights.DEFAULT,                   768),
+            "swin_b":       (torchvision.models.swin_b,      torchvision.models.Swin_B_Weights.DEFAULT,                  1024),
+
+            # Swin-V2 T / S / B
+            "swin_v2_t":    (torchvision.models.swin_v2_t,   torchvision.models.Swin_V2_T_Weights.DEFAULT,                768),
+            "swin_v2_s":    (torchvision.models.swin_v2_s,   torchvision.models.Swin_V2_S_Weights.DEFAULT,                768),
+            "swin_v2_b":    (torchvision.models.swin_v2_b,   torchvision.models.Swin_V2_B_Weights.DEFAULT,               1024),
+
+            # EfficientNet
+            "efficientnet_b0": (torchvision.models.efficientnet_b0, torchvision.models.EfficientNet_B0_Weights.DEFAULT, 1280),
+            "efficientnet_b1": (torchvision.models.efficientnet_b1, torchvision.models.EfficientNet_B1_Weights.DEFAULT, 1280),
+            "efficientnet_b2": (torchvision.models.efficientnet_b2, torchvision.models.EfficientNet_B2_Weights.DEFAULT, 1408),
+            "efficientnet_b3": (torchvision.models.efficientnet_b3, torchvision.models.EfficientNet_B3_Weights.DEFAULT, 1536),
+            "efficientnet_b4": (torchvision.models.efficientnet_b4, torchvision.models.EfficientNet_B4_Weights.DEFAULT, 1792),
+
+            # ResNet v1
+            "resnet18":     (torchvision.models.resnet18,    torchvision.models.ResNet18_Weights.IMAGENET1K_V1,                 512),
+            "resnet34":     (torchvision.models.resnet34,    torchvision.models.ResNet34_Weights.IMAGENET1K_V1,                 512),
+            "resnet50":     (torchvision.models.resnet50,    torchvision.models.ResNet50_Weights.IMAGENET1K_V1,                2048),
+            "resnet101":    (torchvision.models.resnet101,   torchvision.models.ResNet101_Weights.IMAGENET1K_V1,               2048),
+            "resnet152":    (torchvision.models.resnet152,   torchvision.models.ResNet152_Weights.IMAGENET1K_V1,               2048),
+
+            # ResNet v2
+            "resnet50_v2":  (torchvision.models.resnet50,    torchvision.models.ResNet50_Weights.IMAGENET1K_V2,                     2048),
+            "resnet101_v2": (torchvision.models.resnet101,   torchvision.models.ResNet101_Weights.IMAGENET1K_V2,                    2048),
+            "resnet152_v2": (torchvision.models.resnet152,   torchvision.models.ResNet152_Weights.IMAGENET1K_V2,                    2048),
+
+            # MobileNet
+            "mobilenet_v2": (torchvision.models.mobilenet_v2, torchvision.models.MobileNet_V2_Weights.DEFAULT,           1280),
+            "mobilenet_v3_small": (torchvision.models.mobilenet_v3_small, torchvision.models.MobileNet_V3_Small_Weights.DEFAULT, 1024),
+            "mobilenet_v3_large": (torchvision.models.mobilenet_v3_large, torchvision.models.MobileNet_V3_Large_Weights.DEFAULT, 1280),
+
+            # ConvNeXt
+            "convnext_t":   (torchvision.models.convnext_tiny,  torchvision.models.ConvNeXt_Tiny_Weights.DEFAULT,         768),
+            "convnext_s":   (torchvision.models.convnext_small, torchvision.models.ConvNeXt_Small_Weights.DEFAULT,       768),
+            "convnext_b":   (torchvision.models.convnext_base,  torchvision.models.ConvNeXt_Base_Weights.DEFAULT,       1024),
+            "convnext_l":   (torchvision.models.convnext_large, torchvision.models.ConvNeXt_Large_Weights.DEFAULT,      1536),
+        }
+
+        
+        if model not in model_map:
+            raise ValueError(f"Unsupported ViT model name: {model}")
+
+        vit_fn, weights_enum, hidden_dim = model_map[model]
+        model = vit_fn(weights=weights_enum, dropout=dropout).to(device)
+
+        # Optional freezing
+        if freeze:
+            for param in model.parameters():
+                param.requires_grad = False
+
+        # Set the seed for general torch operations
+        torch.manual_seed(seed)
+
+        # Set the seed for CUDA torch operations (ones that happen on the GPU)
+        torch.cuda.manual_seed(seed)
+
+        # Replace head
+        # Replace head / classifier / fc
+        if hasattr(model, "heads"):  # ViT models
+            model.heads = nn.Linear(hidden_dim, num_classes).to(device)
+        elif hasattr(model, "head"):  # ViT models
+            model.head = nn.Linear(hidden_dim, num_classes).to(device)
+        elif hasattr(model, "classifier"):  # EfficientNet, MobileNet, ConvNeXt
+            if isinstance(model.classifier, nn.Sequential):  # MobileNet, EfficientNet
+                model.classifier[-1] = nn.Linear(hidden_dim, num_classes).to(device)
+            else:
+                model.classifier = nn.Linear(hidden_dim, num_classes).to(device)
+        elif hasattr(model, "fc"):  # ResNet
+            model.fc = nn.Linear(hidden_dim, num_classes).to(device)
+        else:
+            raise ValueError(f"Cannot replace classifier head for model type: {type(model)}")
+
+
+        #model.heads = nn.Sequential(
+        #        nn.LayerNorm(normalized_shape=emb_dim),
+        #        nn.Linear(in_features=emb_dim, out_features=num_classes)
+        #    )
+
+        #model.heads = nn.Sequential(
+        #    nn.LayerNorm(hidden_dim),
+        #    nn.Linear(hidden_dim, 100),
+        #    nn.GELU(),
+        #    nn.Linear(100, 1)
+        #)
+
+        return model
+
+    def forward(self, x):
+
+        x = self.embedding(x)  # -> (B, 3, H, W)
+        x = self.model(x)  # -> (B, num_classes)
+
+        return x
+
 
 
 # Implementation of a vision transformer following the paper "AN IMAGE IS WORTH 16X16 WORDS: TRANSFORMERS FOR IMAGE RECOGNITION AT SCALE"

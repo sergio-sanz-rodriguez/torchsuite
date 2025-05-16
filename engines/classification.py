@@ -207,6 +207,7 @@ class ClassificationEngine(Common):
         self.info(f"Batch size: {batch_size}")
         self.info(f"Accumulation steps: {accumulation_steps}")
         self.info(f"Effective batch size: {batch_size * accumulation_steps}")
+        self.info(f"Learning rate: {self.optimizer.param_groups[0]['lr']}")
         self.info(f"Recall threshold - fpr: {recall_threshold}")
         self.info(f"Recall threshold - pauc: {recall_threshold_pauc}")
         self.info(f"Apply validation: {self.apply_validation}")
@@ -527,6 +528,12 @@ class ClassificationEngine(Common):
         if not any(self.model_name.endswith(ext) for ext in valid_extensions):
             self.model_name += '.pth'
 
+        # Initialize optimizer, loss_fn, scheduler, and result_log
+        self.optimizer = optimizer
+        self.loss_fn = loss_fn
+        self.scheduler = scheduler
+        self.init_results()
+
         # Print configuration parameters
         self.print_config(
             batch_size=batch_size,
@@ -539,12 +546,6 @@ class ClassificationEngine(Common):
             accumulation_steps=accumulation_steps,            
             debug_mode=debug_mode
             )
-        
-        # Initialize optimizer, loss_fn, scheduler, and result_log
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.scheduler = scheduler
-        self.init_results()
 
         # Set the model in train mode
         self.model.train()
@@ -821,6 +822,9 @@ class ClassificationEngine(Common):
             self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
+        del all_preds, all_labels
+        self.clear_cuda_memory(['X', 'y', 'y_pred', 'y_pred_class', 'loss'], locals())
+
         return train_loss, train_acc, train_f1, train_fpr, train_pauc
 
     # This train step function includes gradient accumulation (experimental)
@@ -997,7 +1001,10 @@ class ClassificationEngine(Common):
         except Exception as e:
             self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
-
+        
+        del all_preds, all_labels
+        self.clear_cuda_memory(['X', 'y', 'y_pred', 'y_pred_class', 'loss'], locals())
+        
         return train_loss, train_acc, train_f1, train_fpr, train_pauc
 
     def test_step(
@@ -1132,6 +1139,9 @@ class ClassificationEngine(Common):
         # Otherwise set params with initial values
         else:
             test_loss, test_acc, test_f1, test_fpr, test_pauc = self.best_test_loss, self.best_test_acc, self.best_test_f1, self.best_test_fpr, self.best_test_pauc
+
+        del all_preds, all_labels
+        self.clear_cuda_memory(['X', 'y', 'y_pred', 'y_pred_class', 'loss'], locals())
 
         return test_loss, test_acc, test_f1, test_fpr, test_pauc
 
@@ -2054,6 +2064,7 @@ class DistillationEngine(Common):
         self.info(f"Batch size: {batch_size}")
         self.info(f"Accumulation steps: {accumulation_steps}")
         self.info(f"Effective batch size: {batch_size * accumulation_steps}")
+        self.info(f"Learning rate: {self.optimizer.param_groups[0]['lr']}")
         self.info(f"Recall threshold - fpr: {recall_threshold}")
         self.info(f"Recall threshold - pauc: {recall_threshold_pauc}")
         self.info(f"Apply validation: {self.apply_validation}")
@@ -2373,6 +2384,12 @@ class DistillationEngine(Common):
         if not any(self.model_name.endswith(ext) for ext in valid_extensions):
             self.model_name += '.pth'
 
+        # Initialize optimizer, loss_fn, and scheduler
+        self.optimizer = optimizer
+        self.loss_fn = loss_fn
+        self.scheduler = scheduler
+        self.init_results()
+
         # Print configuration parameters
         self.print_config(
             batch_size=batch_size,
@@ -2386,11 +2403,8 @@ class DistillationEngine(Common):
             debug_mode=debug_mode
             )
         
-        # Initialize optimizer, loss_fn, and scheduler
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.scheduler = scheduler
-        self.init_results()
+        # Set the model in train mode
+        self.model.train()
 
         # Attempt a forward pass to check if the shape of X is compatible
         for batch, (X, y) in enumerate(dataloader):
@@ -2676,6 +2690,9 @@ class DistillationEngine(Common):
             self.error(f"Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
 
+        del all_preds, all_labels
+        self.clear_cuda_memory(['X', 'X_tch', 'y', 'y_pred', 'y_pred_tch', 'y_pred_class', 'loss'], locals())
+
         return train_loss, train_acc, train_f1, train_fpr, train_pauc
 
     def test_step(
@@ -2815,6 +2832,9 @@ class DistillationEngine(Common):
         # Otherwise set params with initial values
         else:
             test_loss, test_acc, test_f1, test_fpr, test_pauc = self.best_test_loss, self.best_test_acc, self.best_test_f1, self.best_test_fpr, self.best_test_pauc
+        
+        del all_preds, all_labels
+        self.clear_cuda_memory(['X', 'X_tch', 'y', 'test_pred', 'test_pred_tch', 'test_pred_class', 'loss'], locals())
 
         return test_loss, test_acc, test_f1, test_fpr, test_pauc
 

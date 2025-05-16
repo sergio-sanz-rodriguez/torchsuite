@@ -3,6 +3,7 @@ Contains common classes for training and testing a PyTorch models.
 """
 
 import torch
+import gc
 import numpy as np
 import warnings
 import sys
@@ -323,6 +324,7 @@ class Common(Logger):
             for name in var_names:
                 if name in namespace:
                     del namespace[name]
+            gc.collect()
             torch.cuda.empty_cache()
 
     def save_model(self, model: torch.nn.Module, target_dir: str, model_name: str):
@@ -389,5 +391,14 @@ class Common(Logger):
         model.load_state_dict(torch.load(model_save_path, weights_only=True))
         
         return model
+
+    def encode_ordinary_regression(self, label, num_classes=100):
+        # label in range 1–100 → target vector of length 99
+        return torch.FloatTensor([1 if i < label - 1 else 0 for i in range(num_classes - 1)])
+    
+    def decode_ordinary_regression(self, logits):
+        # logits → sigmoid → binary decisions
+        probs = torch.sigmoid(logits)
+        return (probs > 0.5).sum(dim=1) + 1
 
         

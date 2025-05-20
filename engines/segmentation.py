@@ -191,6 +191,7 @@ class SegmentationEngine(Common):
         self.info(f"Batch size: {batch_size}")
         self.info(f"Accumulation steps: {accumulation_steps}")
         self.info(f"Effective batch size: {batch_size * accumulation_steps}")
+        self.info(f"Learning rate: {self.optimizer.param_groups[0]['lr']}")
         self.info(f"Apply validation: {self.apply_validation}")
         self.info(f"Plot curves: {plot_curves}")
         self.info(f"Automatic Mixed Precision (AMP): {amp}")
@@ -483,6 +484,12 @@ class SegmentationEngine(Common):
         if not any(self.model_name.endswith(ext) for ext in valid_extensions):
             self.model_name += '.pth'
 
+        # Initialize optimizer, loss_fn, scheduler, and result_log
+        self.optimizer = optimizer
+        self.loss_fn = loss_fn
+        self.scheduler = scheduler
+        self.init_results()
+        
         # Print configuration parameters
         self.print_config(
             batch_size=batch_size,            
@@ -493,12 +500,6 @@ class SegmentationEngine(Common):
             accumulation_steps=accumulation_steps,            
             debug_mode=debug_mode,            
             )
-        
-        # Initialize optimizer, loss_fn, scheduler, and result_log
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.scheduler = scheduler
-        self.init_results()
 
         # Set the model in train mode
         self.model.train()

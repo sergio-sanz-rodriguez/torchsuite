@@ -53,7 +53,7 @@ class Colors:
         'light_yellow': '#FFFACD',
         'light_magenta': '#EE82EE',
         'light_cyan': '#E0FFFF'
-}
+    	}
 
     @staticmethod
     def get_console_color(color_name):

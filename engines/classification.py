@@ -1945,6 +1945,7 @@ class DistillationEngine(Common):
         self.model_name_f1 = None
         self.model_name_fpr = None
         self.model_name_pauc = None
+        self.squeeze_dim = False
         self.log_verbose = log_verbose
      
         # Initialize colors
@@ -2560,9 +2561,8 @@ class DistillationEngine(Common):
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting        
-        for (batch, (X, y)), (_, (X_tch, _)) in self.progress_bar(
-            dataloader_std=dataloader_std,
-            dataloader_tch=dataloader_tch,
+        for batch, ((X, y), (X_tch, _)) in self.progress_bar(
+            dataloader=zip(dataloader_std, dataloader_tch),            
             total=len_dataloader,
             epoch_number=epoch_number,
             stage="train"):
@@ -2757,13 +2757,11 @@ class DistillationEngine(Common):
             with inference_context:
 
                 # Loop through DataLoader batches                   
-                for (batch, (X, y)), (_, (X_tch, _)) in self.progress_bar(
-                    dataloader_std=dataloader_std,
-                    dataloader_tch=dataloader_tch,
+                for batch, ((X, y), (X_tch, _)) in self.progress_bar(
+                    dataloader=zip(dataloader_std, dataloader_tch),            
                     total=len_dataloader,
                     epoch_number=epoch_number,
-                    stage="test"
-                    ):
+                    stage="test"):
 
                     # Send data to target device                    
                     X, X_tch, y = X.to(self.device), X_tch.to(self.device), y.to(self.device)

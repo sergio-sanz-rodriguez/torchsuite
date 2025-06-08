@@ -1290,6 +1290,10 @@ class ClassificationEngine(Common):
                         if isinstance(self.model_epoch, list) and epoch < len(self.model_epoch):
                             self.model_epoch[epoch].load_state_dict(self.model.state_dict())
                     save_model(self.model_name)
+            
+            if epoch % 100 == 0:
+                model_name_of = self.model_name.replace(".","_of.")     
+                save_model(model_name_of)
 
         # Save results to CSV
         name, _ = self.model_name.rsplit('.', 1)

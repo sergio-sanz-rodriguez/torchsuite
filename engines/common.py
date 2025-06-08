@@ -174,6 +174,56 @@ class Common(Logger):
         else:
             self.error("Invalid value for 'average'. Choose 'macro', 'weighted', or 'micro'.")
 
+    
+    def calculate_threshold_at_recall(y_true, y_probs, recall_target=0.95):
+
+        """
+        Compute threshold for class 1 such that recall >= recall_target.
+        y_true: (N_samples,), binary labels (0 for clean, 1 for dirty)
+        y_probs: (N_samples,), probabilities for class 1 (dirty)
+        """
+
+        _, recall, thresholds = precision_recall_curve(y_true, y_probs)
+        
+        # Find the threshold with recall >= recall_target
+        idxs = np.where(recall >= recall_target)[0]
+        if len(idxs) == 0:
+            return None  # no threshold satisfies the recall condition
+        
+        # Select the *highest* threshold (i.e., most confident) that satisfies recall
+        selected_idx = idxs[-1] - 1 if idxs[-1] > 0 else 0
+        return thresholds[selected_idx]
+
+    def calculate_thresholds_at_recall(y_true, y_pred_probs, recall_target=0.95):
+
+        """
+        Returns the threshold per class that achieves at least `recall_target`.
+        """
+
+        n_classes = y_pred_probs.shape[1]
+        thresholds_per_class = []
+
+        for class_idx in range(n_classes):
+            # Binary ground truth for current class
+            y_true_bin = (y_true == class_idx).cpu().numpy().astype(int)
+            y_scores = y_pred_probs[:, class_idx]
+
+            # Get PR curve
+            _, recall, thresholds = precision_recall_curve(y_true_bin, y_scores)
+
+            # Find threshold where recall >= recall_target
+            idxs = np.where(recall >= recall_target)[0]
+
+            if len(idxs) == 0:
+                thresholds_per_class.append(None)  # Cannot achieve desired recall
+            else:
+                # The threshold array is one element shorter than recall/precision
+                # So we subtract 1 from the index
+                selected_idx = idxs[-1] - 1 if idxs[-1] > 0 else 0
+                thresholds_per_class.append(thresholds[selected_idx])
+
+        return thresholds_per_class
+
     def calculate_fpr_at_recall(self, y_true, y_pred_probs, recall_threshold):
         
         """

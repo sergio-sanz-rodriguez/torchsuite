@@ -99,6 +99,43 @@ def create_dataloaders(
 
     return train_dataloader, test_dataloader, class_names
 
+
+import hashlib
+import torch
+from torchvision.datasets import ImageFolder
+from torchvision.transforms import v2
+from PIL import Image
+
+class DeterministicDataset(ImageFolder):
+    def __init__(self, root, transform: v2.Compose):
+        super().__init__(root)
+        self.transform = transform
+
+    def __getitem__(self, index):
+        path, label = self.samples[index]
+        image = self.loader(path)
+
+        # Seed from path
+        seed = int(hashlib.md5(path.encode()).hexdigest(), 16) % (2**32)
+        generator = torch.Generator().manual_seed(seed)
+
+        # Inject generator into transforms that support it
+        image = self.apply_deterministic_transform(image, generator)
+        return image, label
+
+    def apply_deterministic_transform(self, image: Image.Image, generator: torch.Generator):
+        transformed = []
+        for t in self.transform.transforms:
+            if hasattr(t, 'forward') and 'generator' in t.forward.__code__.co_varnames:
+                # Inject generator if supported
+                transformed.append(lambda img, t=t: t(img, generator=generator))
+            else:
+                transformed.append(lambda img, t=t: t(img))
+        for t in transformed:
+            image = t(image)
+        return image
+
+
 def resample_data(data, labels, samples_0=None, samples_1=None):
     """
     Resamples the dataset by specifying the number of samples for class 0 and class 1.
@@ -176,8 +213,8 @@ def create_dataloaders_with_resampling(
     """
     # Load datasets
     train_data = datasets.ImageFolder(train_dir, transform=train_transform)
-    test_data = datasets.ImageFolder(test_dir, transform=test_transform)
-
+    test_data = DeterministicDataset(root=test_dir, transform=test_transform)
+    
     # Extract labels
     train_labels = train_data.targets
     test_labels = test_data.targets

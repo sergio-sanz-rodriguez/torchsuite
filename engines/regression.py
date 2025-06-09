@@ -26,7 +26,7 @@ try:
     from torch.amp import GradScaler, autocast
 except ImportError:
     from torch.cuda.amp import GradScaler, autocast
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, r2_score
 from contextlib import nullcontext
 from .common import Common, Colors
 
@@ -728,8 +728,7 @@ class RegressionEngine(Common):
 
             # Accumulate metrics
             train_loss += loss.item() * accumulation_steps  # Scale back to original loss            
-            y_pred = y_pred.float().view(-1)
-            train_r2 += self.calculate_r2(y, y_pred).item()
+            y_pred = y_pred.float().view(-1)            
 
             all_y_pred.append(y_pred.detach().cpu())
             all_y.append(y.detach().cpu())
@@ -737,10 +736,10 @@ class RegressionEngine(Common):
             self.clear_cuda_memory(['X', 'y', 'loss'], locals())
 
         # Adjust metrics to get average loss and accuracy per batch
-        train_loss = train_loss / len_dataloader
-        train_r2 = train_r2 / len_dataloader
+        train_loss = train_loss / len_dataloader        
         all_y_pred = torch.cat(all_y_pred).numpy()
         all_y = torch.cat(all_y).numpy()
+        train_r2 = r2_score(all_y, all_y_pred)
         
         return train_loss, train_r2, all_y_pred, all_y
 
@@ -839,7 +838,6 @@ class RegressionEngine(Common):
                     
                     # Calculate and accumulate R2                    
                     y_pred = y_pred.float().view(-1)                       
-                    test_r2 += self.calculate_r2(y, y_pred).item()
 
                     all_y_pred.append(y_pred.detach().cpu())
                     all_y.append(y.detach().cpu())
@@ -848,9 +846,9 @@ class RegressionEngine(Common):
 
             # Adjust metrics to get average loss and accuracy per batch 
             test_loss = test_loss / len_dataloader
-            test_r2 = test_r2 / len_dataloader
             all_y_pred = torch.cat(all_y_pred).numpy()
             all_y = torch.cat(all_y).numpy()
+            test_r2 = r2_score(all_y, all_y_pred)
         
         # Otherwise set params with initial values
         else:

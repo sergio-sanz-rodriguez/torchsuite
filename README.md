@@ -23,7 +23,7 @@ Future versions will include support for other data types, such as video and tex
 
 ## Modules  
 - **CPU and GPU-accelerated computation:** optimized for both CPU and GPU, enabling flexible model training and inference
-- **Training and inference engines:** `classification.py`, `obj_detection.py`, `segmentation.py` for training and evaluation workflows
+- **Training and inference engines:** `classification.py`, `regression.py` (new feature), `obj_detection.py`, `segmentation.py` for training and evaluation workflows
 - **Flexible data loading:** `image/audio/obj_dect/segmentation_dataloaders.py` to streamline dataset preparation and augmentation.
 - **Utility functions:** `classification/obj_detection/segmentation_utils.py` offering a collection of utility functions to enhance productivity.
 - **Vision Transformer (ViT) support:** `vision_transformer.py` for implementing ViTs with PyTorch.

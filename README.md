@@ -27,6 +27,7 @@ Future versions will include support for other data types, such as video and tex
 - **Flexible data loading:** `image/audio/obj_dect/segmentation_dataloaders.py` to streamline dataset preparation and augmentation.
 - **Utility functions:** `classification/obj_detection/segmentation_utils.py` offering a collection of utility functions to enhance productivity.
 - **Vision Transformer (ViT) support:** `vision_transformer.py` for implementing ViTs with PyTorch.
+- **ConvNeXT suppor:**  `convnext.py`, the [original implementation](https://github.com/facebookresearch/ConvNeXt) by Meta Platforms, Inc.
 - **Wav2Vec2 support:** `wav2vec2.py` includes a Transformer-based acoustic model for audio classification.
 - **Region-based CNN (R-CNN) support:** `faster_rcnn.py` to create deep learning networks for object detection.
 - **U-Net support:** `unet.py` for a flexible design of U-Net models tailored to image segmentation. Pretrained U-Net modeling is taken from [mberkay0](https://github.com/mberkay0/pretrained-backbones-unet). The library includes the canonical vanilla U-Net architecture as well.

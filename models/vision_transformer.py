@@ -824,7 +824,7 @@ class ViTv2(nn.Module):
         - emb_dropout (float, optional): The dropout rate applied to patch and position embeddings. Default is 0.1.
         - attn_dropout (float, optional): The dropout rate applied to attention layers. Default is 0.
         - mlp_dropout (float, optional): The dropout rate applied to the MLP layers. Default is 0.1.
-        - classif_head (nn.Module, optional): An optional extra classification header. Default is None, no hidden layer is used.        
+        - classif_heads (nn.Module, optional): An optional extra classification headers. Default is None, no hidden layer is used.        
         - num_classes (int, optional): The number of output classes. Default is 1000 for ImageNet, but can be customized.
 
         Note:

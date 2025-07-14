@@ -1025,3 +1025,53 @@ class ViTv2(nn.Module):
         x = torch.mean(torch.stack(x_list), dim=0)
 
         return x
+    
+
+    # Algorithm to be tested. We have a luma reconstructed (previoulsy compressed) block and you want
+    # to predit the chroma blocks using ViT.
+
+from timm.models.vision_transformer import vit_small_patch16_224
+
+class ViTChromaPredictor(nn.Module):
+    def __init__(self, input_size=32, patch_size=4, embed_dim=384, output_channels=2):
+        super().__init__()
+        self.input_size = input_size
+        self.patch_size = patch_size
+        self.num_patches = (input_size // patch_size) ** 2
+        self.embed_dim = embed_dim
+
+        # Load a ViT (you can also define your own or use LViT)
+        self.vit = vit_small_patch16_224(pretrained=False, img_size=input_size, in_chans=1, num_classes=0)
+        
+        # Conv head: reshape [B, N, D] → [B, D, H', W']
+        self.conv_head_1 = nn.Sequential(
+            nn.Conv2d(embed_dim, 128, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=patch_size, mode='bilinear', align_corners=False),
+            nn.Conv2d(128, output_channels, kernel_size=1)  # Output chroma channels (Cb, Cr)
+        )
+
+        self.conv_head_2 = nn.Sequential(
+            nn.Conv2d(embed_dim, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=patch_size),
+            nn.Conv2d(64, output_channels, kernel_size=1)
+        )
+
+    def forward(self, x):
+        # x: [B, 1, H, W]
+        B = x.size(0)
+        x = self.vit.patch_embed(x)  # [B, N, D]
+        x = x + self.vit.pos_embed[:, 1:(self.num_patches + 1)]
+        x = self.vit.blocks(x)
+        x = self.vit.norm(x)  # [B, N, D]
+
+        # Reshape to feature map
+        H_p = W_p = self.input_size // self.patch_size
+        x = x.transpose(1, 2).reshape(B, self.embed_dim, H_p, W_p)  # [B, D, H', W']
+
+        # Conv head
+        chroma_pred = self.conv_head_1(x)  # [B, 2, H, W]
+        return chroma_pred

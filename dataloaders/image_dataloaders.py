@@ -15,7 +15,6 @@ from collections import defaultdict
 from typing import List, Tuple, Optional, Union
 from PIL import Image
 
-
 NUM_WORKERS = os.cpu_count()
 
 def create_dataloaders(
@@ -525,3 +524,60 @@ def create_dataloaders_swin(
     )
 
     return train_dataloader, test_dataloader, class_names
+
+
+class YUVBlockDataset(Dataset):
+    def __init__(self, yuv_paths, width, height, block_size=32, stride=16):
+        self.block_size = block_size
+        self.yuv_paths = yuv_paths
+        self.width = width
+        self.height = height
+        self.stride = stride
+        self.coords = []  # Store (file_idx, top, left)
+
+        for file_idx, path in enumerate(yuv_paths):
+            with open(path, 'rb') as f:
+                y, u, v = self.read_yuv420_frame(f, width, height)
+                for top in range(0, height - block_size + 1, stride):
+                    for left in range(0, width - block_size + 1, stride):
+                        self.coords.append((file_idx, top, left))
+
+        self.frames = [self.read_yuv420_frame(open(p, 'rb'), width, height) for p in yuv_paths]
+
+    @staticmethod
+    def read_yuv420_frame(file, width, height):
+        frame_size = width * height
+        uv_size = frame_size // 4
+
+        y = np.frombuffer(file.read(frame_size), dtype=np.uint8).reshape((height, width))
+        u = np.frombuffer(file.read(uv_size), dtype=np.uint8).reshape((height // 2, width // 2))
+        v = np.frombuffer(file.read(uv_size), dtype=np.uint8).reshape((height // 2, width // 2))
+
+        return y, u, v
+
+    def __len__(self):
+        return len(self.coords)
+
+    def __getitem__(self, idx):
+        file_idx, top, left = self.coords[idx]
+        y, u, v = self.frames[file_idx]
+
+        # Crop 32×32 from Y
+        luma = y[top:top+32, left:left+32]  # shape (32, 32)
+
+        # Crop 16×16 from U and V (because of 4:2:0 subsampling)
+        uv_top, uv_left = top // 2, left // 2
+        cb = u[uv_top:uv_top+16, uv_left:uv_left+16]
+        cr = v[uv_top:uv_top+16, uv_left:uv_left+16]
+
+        # Convert to torch tensors
+        luma_tensor = torch.from_numpy(luma).unsqueeze(0).float() / 255.0  # [1, 32, 32]
+        chroma_tensor = torch.stack([
+            torch.from_numpy(cb).float(),
+            torch.from_numpy(cr).float()
+        ]) / 255.0  # [2, 16, 16]
+
+        return luma_tensor, chroma_tensor
+
+#dataset = YUVBlockDataset(yuv_paths=['video1.yuv'], width=128, height=128)
+#loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)

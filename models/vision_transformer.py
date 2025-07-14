@@ -1032,8 +1032,9 @@ class ViTv2(nn.Module):
 
 from timm.models.vision_transformer import vit_small_patch16_224
 
+# Without QP
 class ViTChromaPredictor(nn.Module):
-    def __init__(self, input_size=32, patch_size=4, embed_dim=384, output_channels=2):
+    def __init__(self, input_size=32, patch_size=4, embed_dim=384, output_channels=2, qp_embed_dim=128):
         super().__init__()
         self.input_size = input_size
         self.patch_size = patch_size
@@ -1043,6 +1044,12 @@ class ViTChromaPredictor(nn.Module):
         # Load a ViT (you can also define your own or use LViT)
         self.vit = vit_small_patch16_224(pretrained=False, img_size=input_size, in_chans=1, num_classes=0)
         
+        self.qp_embedding = nn.Sequential(
+            nn.Linear(1, qp_embed_dim),
+            nn.ReLU(),
+            nn.Linear(qp_embed_dim, embed_dim)
+        )
+
         # Conv head: reshape [B, N, D] → [B, D, H', W']
         self.conv_head_1 = nn.Sequential(
             nn.Conv2d(embed_dim, 128, kernel_size=3, padding=1),
@@ -1075,3 +1082,82 @@ class ViTChromaPredictor(nn.Module):
         # Conv head
         chroma_pred = self.conv_head_1(x)  # [B, 2, H, W]
         return chroma_pred
+
+
+from torchvision.models.vision_transformer import vit_b_16  # or a smaller one
+
+class ViTChromaPredictor(nn.Module):
+    def __init__(self, patch_size=4, embed_dim=768, output_channels=2, meta_embed_dim=128):
+        super().__init__()
+        
+        # ViT encoder (can use pretrained encoder if you like)
+        self.patch_size = patch_size
+        self.vit = vit_b_16(pretrained=False)
+        self.vit.conv_proj = nn.Conv2d(1, embed_dim, kernel_size=patch_size, stride=patch_size)  # for grayscale
+
+        # Map QP to an embedding vector
+        self.meta_embedding = nn.Sequential(
+            nn.Linear(3, meta_embed_dim), #[qp, h_img, w_img]
+            nn.ReLU(),
+            nn.Linear(meta_embed_dim, embed_dim)
+        )
+        
+        # CNN decoder head (predicts chroma block from ViT features)
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(embed_dim, 128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(128, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, output_channels, kernel_size=1)  # 2 channels for U and V
+        )
+
+    def forward(self, luma_block, h_chroma, w_chroma, qp, h_img, w_img):
+        """
+        luma_blcok: [B, 1, H, W] — grayscale input block
+        h_chroma, w_chroma: int — target chroma height and width
+        qp: [B] or [B,1] — scalar QP values (normalized)
+        h_img, w_img: [B] or [B,1] — scalar image height/width (normalized)
+        """
+
+        # Remove last dimension if QP, h_img or w_img are [B,1] tensors
+        qp = qp.squeeze(-1) if qp.ndim == 2 else qp
+        h_img = h_img.squeeze(-1) if h_img.ndim == 2 else h_img
+        w_img = w_img.squeeze(-1) if w_img.ndim == 2 else w_img
+        
+        # Ensure the input luma block size is divisible by patch size (required by ViT)
+        B, _, h_luma, w_luma = luma_block.shape
+        assert h_luma % self.patch_size == 0 and w_luma % self.patch_size == 0, "Luma block size must be divisible by patch size"
+
+        # ViT encoding
+
+        # Pass luma through the ViT convolutional projection to create patch embeddings
+        # Resulting shape: [B, embed_dim, H_p, W_p], where H_p = h_luma/patch_size
+        x = self.vit.conv_proj(luma_block)  # [B, embed_dim, H_p, W_p]
+        h_p, w_p = x.shape[2], x.shape[3] #8x8 by default
+
+        # Flatten spatial patches and transpose to get sequence of patch embeddings
+        # Resulting shape: [B, N, D], where N = number of patches (H_p * W_p), D = embedding dim
+        x = x.flatten(2).transpose(1, 2)  # [B, N, D]
+
+        # 1) Prepare, 2) embed, and 3) add meta features as a token
+        meta_input = torch.stack([qp, w_img, h_img], dim=1).float() #[B, 3]
+        meta_embed = self.meta_embedding(meta_input).unsqueeze(1)  # [B, 1, D]
+        x = torch.cat([meta_embed, x], dim=1)  # [B, N+1, D]
+
+        # Run transformer encoder on sequence of tokens including meta token. Skip classification head.
+        x = self.vit.encoder(x)  # [B, N+1, D]
+
+        # Discard the meta token to keep only patch tokens
+        x = x[:, 1:, :]  # [B, N, D]
+
+        # Reshape tokens back to spatial layout
+        x = x.transpose(1, 2).reshape(B, self.vit.hidden_dim, h_p, w_p)  # [B, D, h_p, w_p]
+
+        # If the spatial size after encoding differs from target chroma size, then interpolate the signal
+        if (h_p != h_chroma) or (w_p != w_chroma):
+            x = F.interpolate(x, size=(h_chroma, w_chroma), mode='bilinear', align_corners=False)
+
+        # CNN decoder: decode the features to predict chroma channels (U and V)
+        chroma = self.decoder(x)  # [B, 2, H, W]
+
+        return chroma

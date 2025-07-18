@@ -615,6 +615,10 @@ class ObjectDetectionEngine(Common):
         self.optimizer.zero_grad()  # Clear gradients before starting
         for batch, (images, targets) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='train'):
             
+            # Skip empty batches
+            if images == None or targets == None:
+                continue
+
             images, targets = self.prepare_data(images, targets)
 
             # Optimize training with amp if available
@@ -624,11 +628,10 @@ class ObjectDetectionEngine(Common):
                     # Forward pass
                     try:
                         loss_dict = self.model(images, targets)
-                    except AssertionError as e:
-                        self.warning(f"{e} Skipping batch...")
-                        continue  # Skip this batch
-                    
-                    # Sum the losses
+                    except Exception as e:
+                        self.warning(f"Skipping batch: {e}")
+                        continue
+                                                
                     loss = sum(item for item in loss_dict.values())
                     
                     # Check if the output has NaN or Inf values
@@ -660,11 +663,10 @@ class ObjectDetectionEngine(Common):
                 # Forward pass
                 try:
                     loss_dict = self.model(images, targets)
-                except AssertionError as e:
-                    self.warning(f"{e} Skipping batch...")
-                    continue  # Skip this batch
-                
-                # Sum the losses
+                except Exception as e:                    
+                    self.warning(f"Skipping batch: {e}")
+                    continue
+                    
                 loss = sum(item for item in loss_dict.values())
 
                 # Divide into accumulation_steps
@@ -778,6 +780,10 @@ class ObjectDetectionEngine(Common):
                 # Loop through DataLoader batches                
                 for batch, (images, targets) in self.progress_bar(dataloader=dataloader, total=len_dataloader, epoch_number=epoch_number, stage='test'):
 
+                    # Skip empty batches
+                    if images == None or targets == None:
+                        continue
+
                     images, targets = self.prepare_data(images, targets)
 
                     # Enable AMP if specified
@@ -786,11 +792,10 @@ class ObjectDetectionEngine(Common):
                         # Forward pass
                         try:
                             loss_dict = self.model(images, targets)
-                        except AssertionError as e:
-                            self.warning(f"{e} Skipping batch...")
-                            continue  # Skip this batch
-                        
-                        # Sum the losses
+                        except Exception as e:                        
+                            self.warning(f"Skipping batch: {e}")
+                            continue
+                            
                         loss = sum(item for item in loss_dict.values())
 
                         # Check if the output has NaN or Inf values

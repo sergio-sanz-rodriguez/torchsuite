@@ -220,19 +220,24 @@ class ProcessDatasetYOLO(torch.utils.data.Dataset):
         # There is only one class
         num_objs = bboxes_xyxy.size(0)
 
-        # Calculate labels
-        labels = torch.ones((num_objs,), dtype=torch.int64)
-
         # Ensure bounding boxes exist
         if num_objs > 0:
-            bboxes_xyxy = bboxes_xyxy[:, 1:]  # Remove class_id
-            xmin, ymin, xmax, ymax = bboxes_xyxy.unbind(dim=1)
-            bboxes_xyxy = torch.stack([xmin, ymin, xmax, ymax], dim=1)
 
+            # Generalized label shift if background class needs to be reserved
+            labels = bboxes_xyxy[:, 0].to(dtype=torch.int64)
+            if labels.min().item() == 0:
+                labels += 1
+
+            # Get boxes and labesl and filter out the bad ones
+            bboxes_xyxy = bboxes_xyxy[:, 1:]
             bboxes_yolo = bboxes_yolo[:, 1:]
-            xc, yc, w, h = bboxes_yolo.unbind(dim=1)
-            bboxes_yolo = torch.stack([xc, yc, w, h], dim=1)
+            xmin, ymin, xmax, ymax = bboxes_xyxy.unbind(dim=1)
+            valid_mask = (xmax > xmin) & (ymax > ymin)            
+            bboxes_xyxy = torch.stack([xmin, ymin, xmax, ymax], dim=1)[valid_mask]            
+            bboxes_yolo = bboxes_yolo[valid_mask]                                    
+            labels = labels[valid_mask]
         else:
+
             # Handle empty cases
             bboxes_xyxy = torch.zeros((0, 4), dtype=torch.float32)
             bboxes_yolo = torch.zeros((0, 4), dtype=torch.float32)
@@ -250,6 +255,11 @@ class ProcessDatasetYOLO(torch.utils.data.Dataset):
         # Preprocess image and target
         if self.transforms is not None:
             img, target = self.transforms(img, target)
+
+        # Extract boxes from target after transforms
+        boxes = target["boxes"]
+        if boxes.numel() == 0 or not torch.all(boxes[:, 2] > boxes[:, 0]) or not torch.all(boxes[:, 3] > boxes[:, 1]):
+            return None, None
 
         return img, target
 

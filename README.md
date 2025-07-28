@@ -15,7 +15,8 @@ The main highlights of the library are listed next:
 - Easy-to-use API for seamless experimentation
 
 Currently, TorchSuite is fully optimized for the following machine learning areas:
-- Image and audio classification
+- Image and audio classification and distillation
+- Image regression 
 - Object detection
 - Image segmentation
 
@@ -34,6 +35,9 @@ Future versions will include support for other data types, such as video and tex
 - **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies. Some classes have been taken from [kamrulhasanrony](https://github.com/kamrulhasanrony/Vision-Transformer-based-Food-Classification/tree/master). 
 - **Custom loss functions:** `loss_functions.py` including various loss formulations for different tasks.
 - **Code examples:** a series of notebooks demonstrating Python code for training deep learning models.
+
+## ToDo
+- Code example for regression taks.
 
 ## Installation
 
@@ -103,7 +107,8 @@ The following notebooks demonstrate how to implement and train deep learning mod
 
 - `image_classification.ipynb` shows the implementation of a transformer-based image classification model using the library.
 - `image_distillation.ipynb` shows how to implement model distillation for image-based tasks.
-- `audio_waveform_classification.ipynb` and `audio_spectrogram_classification.ipynb` focuse on training and evaluating models for audio classification based on raw waveforms and spectrograms.
+- `audio_waveform_classification.ipynb` and `audio_spectrogram_classification.ipynb` focuses on training and evaluating models for audio classification based on raw waveforms and spectrograms.
+- `object_detection_custom.ipynb` and `object_detection_standard.ipynb` to train custom and PyTorch-standard R-CNN models for object detection and segmentation taks.
 
 These notebooks provide hands-on examples of the core functionality of the library.
 

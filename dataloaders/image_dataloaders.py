@@ -581,3 +581,12 @@ class YUVBlockDataset(Dataset):
 
 #dataset = YUVBlockDataset(yuv_paths=['video1.yuv'], width=128, height=128)
 #loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
+#loss = F.mse_loss(predicted_chroma, target_chroma)
+# loss = torch.mean(torch.sqrt((predicted - target)**2 + 1e-6))
+#loss_cb = F.mse_loss(predicted[:,0,:,:], target[:,0,:,:])
+#loss_cr = F.mse_loss(predicted[:,1,:,:], target[:,1,:,:])
+#loss = 0.5 * loss_cb + 0.5 * loss_cr
+#MSE + perceptual loss:
+#Use MSE as main loss.
+#Add a small perceptual loss (e.g. on a low-level VGG feature layer) if artifacts are an issue.
+#This is rare for YUV block prediction but useful in high-quality upsampling tasks.

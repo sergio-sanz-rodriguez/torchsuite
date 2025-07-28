@@ -709,7 +709,6 @@ class ClassificationEngine(Common):
             X, y = X.to(self.device), y.to(self.device)
             X = X.squeeze(1) if self.squeeze_dim else X
             
-            print(X.shape)
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
@@ -753,6 +752,17 @@ class ClassificationEngine(Common):
                     scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
 
+                # ToDo: scaler to be removed (deprecated)
+                #if debug_mode:
+                #    with torch.autograd.detect_anomaly():
+                #        loss.backward()
+                #else:
+                #    loss.backward()
+
+                # Gradient clipping
+                #if enable_clipping:
+                #    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
                 # Check gradients for NaN or Inf values
                 if debug_mode:
                     for name, param in self.model.named_parameters():
@@ -766,6 +776,9 @@ class ClassificationEngine(Common):
                 # otherwise, optimizer.step() is skipped.
                 scaler.step(self.optimizer)
                 scaler.update()
+
+                # ToDo: remove scaler
+                #self.optimizer.step()
 
                 # Optimizer zero grad
                 self.optimizer.zero_grad()

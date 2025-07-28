@@ -175,6 +175,192 @@ def prune_predictions(
         
     return keep_preds
        
+# Prune predictions v2 with support for multi-class prunning
+def prune_predictions_v2(
+    pred,
+    class_id_to_name={1: 'roi'},
+    score_threshold=0.66,
+    iou_threshold=0.5,
+    best_candidate="area",
+    remove_large_boxes=None,
+    remove_small_boxes=None,
+    apply_cc_prunning=False,
+    cc_iou_threshold=0.5,
+    keep_best_scoring_box=True
+    ):
+
+    """
+    Filters and refines object detection predictions.
+
+    Steps performed:
+    1. (Optional) Removes boxes that are too large or too small.
+    2. For each class:
+       - Filters boxes by confidence score.
+       - Optionally ensures the single highest-scoring box is kept.
+       - Applies Non-Maximum Suppression (NMS) per class.
+       - Optionally selects only one box (based on highest score or largest area).
+    3. (Optional) Applies cross-class pruning if multiple class predictions overlap.
+    4. Returns pruned predictions in the same dict format.
+
+    Args:
+        pred (dict): Dictionary with keys "boxes", "scores", and "labels".
+        class_id_to_name (dict): Maps class IDs to class names.
+        score_threshold (float): Minimum confidence score for keeping predictions.
+        iou_threshold (float): IoU threshold for NMS.
+        best_candidate (str|None): Strategy for selecting a single box:
+            - "area": Keep the largest box.
+            - "score": Keep the highest-scoring box.
+            - None: Keep all boxes.
+        remove_large_boxes (float|None): Remove boxes larger than this area.
+        remove_small_boxes (float|None): Remove boxes smaller than this area.
+        apply_cc_prunning (bool): If True, apply cross-class NMS.
+        cc_iou_threshold (float): IoU threshold for cross-class NMS.
+        keep_best_scoring_box (bool): Always keep the highest-scoring box per class.
+
+    Returns:
+        dict: {
+            "boxes": Tensor of shape [N,4],
+            "scores": Tensor of shape [N],
+            "labels": Tensor of shape [N]
+        }
+    """
+    
+    # Validate score_threshold
+    if not isinstance(score_threshold, (int, float)) or not (0 <= score_threshold <= 1):
+        raise ValueError("'score_threshold' must be a float between 0 and 1")
+
+    # Validate iou_threshold
+    if not isinstance(iou_threshold, (int, float)) or not (0 <= iou_threshold <= 1):
+        raise ValueError("'iou_threshold' must be a float between 0 and 1")
+
+    # Validate best_candidate
+    if best_candidate not in ("area", "score", None):
+        raise ValueError("'best_candidate' must be one of: 'area', 'score', or None")
+    
+    # Validate remove_large_boxes
+    if remove_large_boxes is not None and not isinstance(remove_large_boxes, numbers.Number):
+        raise ValueError("'remove_large_boxes' must be a numeric value or None")
+    
+    if remove_small_boxes is not None and not isinstance(remove_small_boxes, numbers.Number):
+        raise ValueError("'remove_large_boxes' must be a numeric value or None")
+
+    # --- Optional box size filtering ---
+    # Removes boxes that are too large or too small.
+    if remove_large_boxes is not None or remove_small_boxes is not None:
+        boxes = pred["boxes"]
+        areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+        keep_idx = torch.ones_like(areas, dtype=torch.bool)
+        if remove_large_boxes is not None:
+            keep_idx &= areas < remove_large_boxes
+        if remove_small_boxes is not None:
+            keep_idx &= areas > remove_small_boxes
+
+        for key in ["boxes", "scores", "labels"]:
+            pred[key] = pred[key][keep_idx]
+
+    # If only one class exists, cross-class pruning is meaningless.
+    if len(class_id_to_name) == 1:
+        apply_cc_prunning = False
+
+    final_boxes = []
+    final_scores = []
+    final_labels = []
+   
+    final_predictions = []
+
+    # Process each class separately
+    for class_id, class_name in class_id_to_name.items():
+
+        # Find indices for this class
+        #indexes = [i for i, label in enumerate(pred["labels"]) if label == key]
+        idxs = (pred["labels"] == class_id).nonzero(as_tuple=True)[0]
+        
+        if idxs.numel() == 0:
+            continue
+
+        class_scores = pred["scores"][idxs]
+        class_boxes = pred["boxes"][idxs]
+        class_labels = pred["labels"][idxs]
+
+        # Filter by score threshold
+        keep_scores_mask = class_scores > score_threshold
+
+        # Boxes and scores that pass threshold
+        filtered_boxes = class_boxes[keep_scores_mask]
+        filtered_scores = class_scores[keep_scores_mask]
+        filtered_labels = class_labels[keep_scores_mask]
+
+        # Always keep best scoring box (even if below threshold)
+        if keep_best_scoring_box:
+
+            best_score_idx = class_scores.argmax().item()
+
+            # If no boxes pass threshold, fallback to best scoring box only
+            if filtered_boxes.shape[0] == 0:
+                filtered_boxes = class_boxes[best_score_idx].unsqueeze(0)
+                filtered_scores = class_scores[best_score_idx].unsqueeze(0)
+                filtered_labels = class_labels[best_score_idx].unsqueeze(0)
+
+        # Non-Maximum Suppression (NMS)
+        keep_nms_idx = ops.nms(filtered_boxes.float(), filtered_scores, iou_threshold)
+        nms_boxes = filtered_boxes[keep_nms_idx]
+        nms_scores = filtered_scores[keep_nms_idx]
+        nms_labels = filtered_labels[keep_nms_idx]
+
+        # Ensure best box is included even if NMS removed it
+        if keep_best_scoring_box:
+            best_box = class_boxes[best_score_idx]
+            if not any(torch.all(best_box == b) for b in nms_boxes):
+                nms_boxes = torch.cat([nms_boxes, best_box.unsqueeze(0)])
+                nms_scores = torch.cat([nms_scores, class_scores[best_score_idx].unsqueeze(0)])
+                nms_labels = torch.cat([nms_labels, class_labels[best_score_idx].unsqueeze(0)])
+
+        # Select best candidate if multiple remain
+        if nms_boxes.shape[0] > 1 and best_candidate is not None:
+
+            if best_candidate == "score":
+                best_idx = nms_scores.argmax().item()
+            elif best_candidate == "area":
+                areas = (nms_boxes[:, 2] - nms_boxes[:, 0]) * (nms_boxes[:, 3] - nms_boxes[:, 1])
+                best_idx = areas.argmax().item()
+            else:
+                best_idx = 0  # fallback to first box
+
+            nms_boxes = nms_boxes[best_idx].unsqueeze(0)
+            nms_scores = nms_scores[best_idx].unsqueeze(0)
+            nms_labels = nms_labels[best_idx].unsqueeze(0)
+
+        # Collect final results per class
+        final_boxes.append(nms_boxes)
+        final_scores.append(nms_scores)
+        final_labels.append(nms_labels)
+
+    # Return if no boxes remain
+    if len(final_boxes) == 0:
+        return {"boxes": [], "scores": [], "labels": []}
+    
+    # Apply Cross-class pruning (optional)
+    if apply_cc_prunning:
+        # Combine final results
+        all_boxes = torch.cat(final_boxes, dim=0)
+        all_scores = torch.cat(final_scores, dim=0)
+        all_labels = torch.cat(final_labels, dim=0)
+
+        # Run cross-class NMS to remove duplicates with lower scores
+        keep = ops.nms(all_boxes, all_scores, cc_iou_threshold)  # same threshold can work
+
+        return {
+            "boxes": all_boxes[keep],
+            "scores": all_scores[keep],
+            "labels": all_labels[keep],
+        }
+    
+    # No cross-class pruning
+    return {
+        "boxes": torch.cat(final_boxes, dim=0),
+        "scores": torch.cat(final_scores, dim=0),
+        "labels": torch.cat(final_labels, dim=0),
+    }
 
 
 # Function to display images with masks and boxes on the ROIs

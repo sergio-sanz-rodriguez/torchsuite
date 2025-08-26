@@ -1240,8 +1240,8 @@ class ObjectDetectionEngine(Common):
         """
  
         # Check model to use
-        valid_modes =  {"loss", "last", "all"}
-        if model_state not in valid_modes or not isinstance(model_state, int):
+        valid_modes =  {"loss", "last"}
+        if not(model_state in valid_modes or isinstance(model_state, int)):
             self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
         #assert model_state in valid_modes or isinstance(model_state, int), f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer."
 

@@ -25,6 +25,8 @@ class StandardFasterRCNN(torch.nn.Module):
         backbone: str = "resnet50", #['resnet50', 'resnet50_v2', 'mobilenet_v3_large', 'mobilenet_v3_large_320']
         weights: Union[str, Path] = "DEFAULT",
         nms: list = None,
+        detections_per_img = None,
+        nms_thres: float = None,
         hidden_layer: int = 256,
         device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ):
@@ -44,11 +46,23 @@ class StandardFasterRCNN(torch.nn.Module):
             - post_nms_top_n_train: Number of proposal to be reatined after applying NMS during training.
             - pre_nms_top_n_test: Same as pre_nms_top_n_train but for testing.
             - post_nms_top_n_test: Same as post_nms_top_n_train but for testing.
-            Default: None with default numbers. E.g. [20, 5, 50, 2]
+            Default: by Pytorch' FasterRCNN
+        - detections_per_img : int, default=2
+            Max number of final detections per image returned by the ROI heads (after classification + ROI NMS).
+            For crowded scenes, use a higher value (typical default is 100).
+        - nms_thres : float in (0, 1), default=0.5
+            IoU threshold used by the ROI heads' NMS (this is *not* the RPN NMS threshold).
+            Lower = more aggressive suppression (fewer overlapping boxes).
         - hidden_layer: Number of hidden units for the mask prediction head. Default is 256.
         - device: Target device: GPU or CPU
-        """
 
+        Notes
+        -----
+        - RPN limits (`nms`) control *how many* region proposals survive to the ROI heads (recall vs. speed trade-off).
+        - `detections_per_img` and `nms_thres` control the final per-image outputs from the ROI heads.
+        - If you only need bounding boxes, choose a Faster R-CNN backbone; masks are only produced for the 'resnet50' Mask R-CNN path.
+        """
+        
         super().__init__()
 
         logger = Logger()
@@ -102,8 +116,13 @@ class StandardFasterRCNN(torch.nn.Module):
             self.model.rpn.post_nms_top_n_train = nms[1]
             self.model.rpn.pre_nms_top_n_test = nms[2]
             self.model.rpn.post_nms_top_n_test = nms[3]
-        else:
-            logger.error("'nms' must be a list of four integers or None.")
+
+        # ROI head settings        
+        if isinstance(detections_per_img, int):
+            self.model.roi_heads.detections_per_img = detections_per_img  
+        
+        if isinstance(nms_thres, float):
+            self.model.roi_heads.nms_thresh = nms_thres
 
         # Move the model to the specified device
         self.model.to(device)

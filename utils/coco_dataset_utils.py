@@ -34,7 +34,7 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 set_seeds(42)
 
 
-def COCO_2_PennFundanPed(coco_images_path, coco_annotations_path, output_images_dir, output_masks_dir, label=""):
+def COCO_2_PennFudanPed(coco_images_path, coco_annotations_path, output_images_dir, output_masks_dir, label=""):
     
     """
     Converts the COCO dataset to match the PennFudanPed dataset format.

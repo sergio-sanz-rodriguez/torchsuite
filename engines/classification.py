@@ -848,6 +848,7 @@ class ClassificationEngine(Common):
         recall_threshold: float=0.99,
         recall_threshold_pauc: float=0.0,
         epoch_number: int = 1,
+        epoch_switch: int = float('inf'),
         amp: bool=True,
         enable_clipping=False,
         accumulation_steps: int = 1,
@@ -885,6 +886,10 @@ class ClassificationEngine(Common):
         train_loss, train_acc, train_f1 = 0, 0, 0
         all_preds = []
         all_labels = []
+
+        # Check if augmentation must be removed or not
+        if epoch_number >= epoch_switch:
+            dataloader.dataset.set_augmentation(False)
 
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting

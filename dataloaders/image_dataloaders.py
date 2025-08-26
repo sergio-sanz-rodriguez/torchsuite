@@ -17,6 +17,28 @@ from PIL import Image
 
 NUM_WORKERS = os.cpu_count()
 
+class DualTransformDataset(datasets.ImageFolder):
+    def __init__(self, root, transform_aug, transform_noaug, use_aug=True):
+        super().__init__(root, transform=transform_aug)
+        self.transform_aug = transform_aug
+        self.transform_noaug = transform_noaug
+        self.use_aug = use_aug
+
+    def set_augmentation(self, use_aug):
+        self.use_aug = use_aug
+
+    def __getitem__(self, index):
+        #img, label = super().__getitem__(index)
+        path, label = self.samples[index]
+        image = Image.open(path).convert('RGB')
+
+        # Reapply the chosen transform:
+        if self.use_aug:
+            img = self.transform_aug(image)
+        else:
+            img = self.transform_noaug(image)
+        return img, label
+    
 def create_dataloaders(
         train_dir: str, 
         test_dir: str, 
@@ -54,8 +76,10 @@ def create_dataloaders(
                                 num_workers=4)
     """
     # Use ImageFolder to create dataset(s)
-    train_data = datasets.ImageFolder(train_dir, transform=train_transform)
-    test_data = datasets.ImageFolder(test_dir, transform=test_transform)
+    #train_data = datasets.ImageFolder(train_dir, transform=train_transform)
+    # Create custom dataset
+    train_data = DualTransformDataset(root=train_dir, transform_aug=train_transform, transform_noaug=test_transform, use_aug=True)
+    test_data = datasets.ImageFolder(root=test_dir, transform=test_transform)
 
     # Get class names
     class_names = train_data.classes

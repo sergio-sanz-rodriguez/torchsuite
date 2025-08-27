@@ -6,7 +6,7 @@ import os
 import torch
 import pandas as pd
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFile
 from torchvision import tv_tensors
 from torchvision.io import read_image
 from torch.utils.data import DataLoader, Subset, Dataset
@@ -14,6 +14,8 @@ from torchvision import datasets, transforms
 from torchvision.transforms import v2
 from torchvision.ops.boxes import masks_to_boxes
 from torchvision.transforms.v2 import functional as F
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # Implement a class that processes the database
 class ProcessDataset(torch.utils.data.Dataset):
@@ -54,6 +56,14 @@ class ProcessDataset(torch.utils.data.Dataset):
         # load all image files, sorting them to ensure that they are aligned
         self.imgs = list(sorted(os.listdir(os.path.join(root, image_path))))
         self.masks = list(sorted(os.listdir(os.path.join(root, mask_path))))
+    
+    @staticmethod
+    def open_image(path):
+        try:
+            img = Image.open(path).convert("RGB")
+            return img
+        except (OSError, IOError) as e:            
+            return None
 
     def __getitem__(self, idx):
 
@@ -80,7 +90,9 @@ class ProcessDataset(torch.utils.data.Dataset):
         mask_path = os.path.join(self.root, self.mask_path, self.masks[idx])
 
         # Read image
-        img = Image.open(img_path).convert("RGB")
+        img = self.open_image(img_path)
+        if img is None:
+            return None
         img = F.to_tensor(img)
 
         # Read mask

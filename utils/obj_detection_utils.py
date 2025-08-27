@@ -24,9 +24,14 @@ from torchvision.transforms.functional import to_pil_image
 import torchvision.transforms.functional as F
 from torchvision.transforms import v2 as T
 
-def collate_fn(batch):
-    return tuple(zip(*batch))
+#def collate_fn(batch):
+#    return tuple(zip(*batch))
 
+def collate_fn(batch):
+    batch = [b for b in batch if b is not None]
+    if len(batch) == 0:
+        return None  # all were corrupted, rare case
+    return tuple(zip(*batch))
 
 # Function to set random seed
 def set_seeds(seed: int=42):

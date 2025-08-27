@@ -715,9 +715,9 @@ class ObjectDetectionEngine(Common):
             # Accumulate metrics for each loss in loss_dict
             for loss_name, loss_value in loss_dict.items():
                 if loss_name in train_loss_dict:
-                    train_loss_dict[loss_name] += loss_value.item() * accumulation_steps  # Scale back to original loss
+                    train_loss_dict[loss_name] += loss_value.item()
                 else:
-                    train_loss_dict[loss_name] = loss_value.item() * accumulation_steps
+                    train_loss_dict[loss_name] = loss_value.item()
             train_loss += loss.item() * accumulation_steps  # Scale back to original loss
 
         # Adjust metrics to get average losses per batch
@@ -725,7 +725,12 @@ class ObjectDetectionEngine(Common):
             train_loss_dict[loss_name] /= len_dataloader                
         train_loss /= len_dataloader
 
-        train_loss_dict.update({"total_loss": train_loss})        
+        train_loss_dict.update({"total_loss": train_loss})
+        
+        self.clear_cuda_memory(
+            var_names=["loss_dict", "loss", "images", "targets"],
+            namespace=locals()
+        )
 
         return train_loss, train_loss_dict
 
@@ -831,6 +836,11 @@ class ObjectDetectionEngine(Common):
         else:            
             test_loss = None
             test_loss_dict = None            
+
+        self.clear_cuda_memory(
+            var_names=["loss_dict", "loss", "images", "targets"],
+            namespace=locals()
+        )
 
         return test_loss, test_loss_dict
 

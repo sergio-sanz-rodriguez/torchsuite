@@ -211,6 +211,7 @@ class ClassificationEngine(Common):
         self.info(f"Recall threshold - fpr: {recall_threshold}")
         self.info(f"Recall threshold - pauc: {recall_threshold_pauc}")
         self.info(f"Apply validation: {self.apply_validation}")
+        self.info(f"Stabilization epochs: {self.stabilization_epochs}")
         self.info(f"Plot curves: {plot_curves}")
         self.info(f"Automatic Mixed Precision (AMP): {amp}")
         self.info(f"Enable clipping: {enable_clipping}")
@@ -406,14 +407,14 @@ class ClassificationEngine(Common):
         self,
         target_dir: str=None,
         model_name: str=None,
-        dataloader: torch.utils.data.DataLoader=None,
+        dataloaders: dict[str, torch.utils.data.DataLoader] = None,
         apply_validation: bool=True,
+        stabilization_epochs : int=0,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         keep_best_models_in_memory: bool=False,
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
-        batch_size: int=64,
         recall_threshold: float=0.95,
         recall_threshold_pauc: float=0.95,
         epochs: int=30, 
@@ -430,11 +431,12 @@ class ClassificationEngine(Common):
         Args:
             target_dir (str, optional): Directory to save the models. Defaults to "models" if not provided.
             model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
-            dataloader: A DataLoader instance for the model to be trained on.
+            dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).            
+            apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
+            stabilization_epochs (int, optional): Wheter to disable augmentation in the lat N epochs to stabilize training. Default is 0
             optimizer (torch.optim.Optimizer, optional): The optimizer to minimize the loss function.
             loss_fn (torch.nn.Module, optional): The loss function to minimize during training.
             scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler for the optimizer.
-            batch_size (int, optional): Batch size for the training process. Default is 64.
             recall_threshold (float, optional): Recall threshold for fpr calculation. Must be a float between 0.0 and 1.0. Default is 0.95.
             recall_threshold (float, optional): Recall threshold for pAUC calculation. Must be a float between 0.0 and 1.0. Default is 0.95.
             epochs (int, optional): Number of epochs to train. Must be an integer greater than or equal to 1. Default is 30.
@@ -475,7 +477,7 @@ class ClassificationEngine(Common):
         if not isinstance(apply_validation, (bool)):
             self.error(f"'apply_validation' must be True or False.")
         else:
-            self.apply_validation = apply_validation
+            self.apply_validation = apply_validation      
       
         # Validate recall_threshold
         if not isinstance(recall_threshold, (int, float)) or not (0.0 <= float(recall_threshold) <= 1.0):
@@ -492,6 +494,12 @@ class ClassificationEngine(Common):
         # Validate epochs
         if not isinstance(epochs, int) or epochs < 1:
             self.error(f"'epochs' must be an integer greater than or equal to 1.")
+        
+        # Validate apply_validation
+        if not isinstance(stabilization_epochs, (int)):
+            self.error(f"'stabilization_epochs' must be a positive integer.")
+        else:
+            self.stabilization_epochs = min(stabilization_epochs, epochs)    
 
         # Ensure save_best_model is correctly handled
         if save_best_model is None:
@@ -512,6 +520,33 @@ class ClassificationEngine(Common):
             for m in mode:
                 if m not in valid_modes:
                     self.error(f"Invalid mode value: '{m}'. Must be one of {valid_modes}")
+
+        # Validate dataloaders
+        if dataloaders is None:
+            self.error("dataloaders dictionary must be provided")
+
+        # 'train' is always required
+        if "train" not in dataloaders or not isinstance(dataloaders["train"], torch.utils.data.DataLoader):
+            self.error("dataloaders dictionary must contain key 'train' with a DataLoader instance")
+        
+        # 'test' is required only if apply_validation is True        
+        if apply_validation:
+            if "test" not in dataloaders or not isinstance(dataloaders["test"], torch.utils.data.DataLoader):
+                self.error("dataloaders dictionary must contain key 'test' with a DataLoader instance when apply_validation=True")
+        
+        # 'train_last_epochs' is required only if stabilization_epochs > 0        
+        if isinstance(stabilization_epochs, int) and stabilization_epochs > 0:
+            if "train_last_epochs" not in dataloaders or not isinstance(dataloaders["train_last_epochs"], torch.utils.data.DataLoader):
+                self.error("dataloaders dictionary must contain key 'train_last_epochs' with a DataLoader instance when stabilization_epochs>0")
+
+        self.dataloaders = dataloaders            
+
+        # Get batch size from dataloaders
+        if hasattr(dataloaders['train'], 'batch_size'):
+            batch_size = dataloaders['train'].batch_size
+        else:
+            self.warning("Parameter 'batch_size' does not exist in the dataloader. Set to 1.")
+            batch_size = 1  # or set a default value
 
         # Assign the validated mode list
         self.mode = mode
@@ -551,7 +586,7 @@ class ClassificationEngine(Common):
         self.model.train()
 
         # Attempt a forward pass to check if the shape of X is compatible
-        for batch, (X, y) in enumerate(dataloader):
+        for batch, (X, y) in enumerate(dataloaders['train']):
             
             try:
                 # This is where the model will "complain" if the shape is incorrect
@@ -651,6 +686,29 @@ class ClassificationEngine(Common):
         progress.set_description(desc)
 
         return progress
+
+    def switch_dataloaders(self, epoch):
+
+        """
+        Selects the appropriate training dataloader for the current epoch.
+
+        Uses the standard dataloader for most epochs, and switches to the
+        no-augmentation dataloader for the last `stabilization_epochs` to stabilize training.
+
+        Args:
+            epoch (int): Current epoch number.
+
+        Returns:
+            torch.utils.data.DataLoader: Dataloader to use for this epoch.
+        """
+
+        if self.stabilization_epochs > 0 and epoch >= (self.epochs - self.stabilization_epochs):
+            train_dataloader = self.dataloaders['train_last_epochs']
+            self.info(f"Epoch {epoch+1}/{self.epochs}: Switching to no-augmentation dataloader for stabilization.")
+        else:
+            train_dataloader = self.dataloaders['train']
+        
+        return train_dataloader
 
     def train_step(
         self,
@@ -1340,9 +1398,9 @@ class ClassificationEngine(Common):
         model_name: str=None,
         save_best_model: Union[str, List[str]] = "last",
         keep_best_models_in_memory: bool=False,
-        train_dataloader: torch.utils.data.DataLoader=None, 
-        test_dataloader: torch.utils.data.DataLoader=None,
+        dataloaders: dict[str, torch.utils.data.DataLoader] = None,
         apply_validation: bool=True,
+        stabilization_epochs: int=0,
         num_classes: int=2, 
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
@@ -1384,9 +1442,9 @@ class ClassificationEngine(Common):
                 - "all" (save models for all epochs),
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
             keep_best_models_in_memory (bool, optional): If True, the best models are kept in memory for future inference. The model state from the last epoch will always be kept in memory.
-            train_dataloader (torch.utils.data.DataLoader, optional): Dataloader for training the model.
-            test_dataloader (torch.utils.data.DataLoader, optional): Dataloader for testing/validating the model.
+            dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).            
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
+            stabilization_epochs (int, optional): Wheter to disable augmentation in the lat N epochs to stabilize training. Default is 0
             num_classes (int, optional): Number of output classes for the model (default is 2).
             optimizer (torch.optim.Optimizer, optional): Optimizer to use during training.
             loss_fn (torch.nn.Module, optional): Loss function used for training.
@@ -1438,20 +1496,20 @@ class ClassificationEngine(Common):
         """
 
         # Starting training time
-        train_start_time = time.time()
+        train_start_time = time.time()      
 
         # Initialize training process
         self.init_train(
             target_dir=target_dir,
             model_name=model_name,
-            dataloader=train_dataloader,
+            dataloader=dataloaders,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,
-            apply_validation= apply_validation,
+            apply_validation=apply_validation,
+            estabilization_epochs=stabilization_epochs,
             optimizer=optimizer,
             loss_fn=loss_fn,
             scheduler=scheduler,
-            batch_size=train_dataloader.batch_size,
             recall_threshold=recall_threshold,
             recall_threshold_pauc=recall_threshold_pauc,
             epochs=epochs, 
@@ -1464,6 +1522,10 @@ class ClassificationEngine(Common):
 
         # Loop through training and testing steps for a number of epochs
         for epoch in range(epochs):
+
+            # Determine which dataloader to use
+            train_dataloader = self.switch_dataloaders(epoch)
+            test_dataloader = self.dataloaders['test'] if 'test' in self.dataloaders else None
 
             # Perform training step and time it
             train_epoch_start_time = time.time()
@@ -2386,7 +2448,7 @@ class DistillationEngine(Common):
 
             for m in mode:
                 if m not in valid_modes:
-                    self.error(f"Invalid mode value: '{m}'. Must be one of {valid_modes}")
+                    self.error(f"Invalid mode value: '{m}'. Must be one of {valid_modes}")             
 
         # Assign the validated mode list
         self.mode = mode

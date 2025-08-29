@@ -160,7 +160,7 @@ class ProcessDataset(torch.utils.data.Dataset):
         # Apply safe transformation
         if self.transforms is not None:
             img_t, target_t = self.transforms(img, target)
-            if self.are_valid_boxes(target["boxes"]):
+            if self.are_valid_boxes(target_t["boxes"]):
                 img, target = img_t, target_t        
             else:
                 # Skip transformed version and keep the original image/target

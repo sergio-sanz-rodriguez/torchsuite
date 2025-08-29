@@ -18,10 +18,10 @@ from typing import Tuple, Dict, Any, List, Union, Optional
 from tqdm.auto import tqdm 
 from IPython.display import clear_output
 from pathlib import Path
-try:
-    from torch.amp import GradScaler, autocast
-except ImportError:
-    from torch.cuda.amp import GradScaler, autocast
+#try:
+from torch.amp import GradScaler, autocast
+#except ImportError:
+#    from torch.cuda.amp import GradScaler, autocast
 #from sklearn.metrics import precision_recall_curve, roc_curve, auc
 from contextlib import nullcontext
 from .common import Common, Colors
@@ -165,7 +165,7 @@ class ObjectDetectionEngine(Common):
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
         
         return self
-    
+
     def print_config(
             self,
             batch_size,
@@ -186,7 +186,7 @@ class ObjectDetectionEngine(Common):
         self.info(f"Batch size: {batch_size}")
         self.info(f"Accumulation steps: {accumulation_steps}")
         self.info(f"Effective batch size: {batch_size * accumulation_steps}")
-        self.info(f"Learning rate: {self.optimizer.param_groups[0]['lr']}")
+        self.info(f"Initial learning rate: {self.optimizer.param_groups[0]['lr']}")
         self.info(f"Apply validation: {self.apply_validation}")
         self.info(f"Plot curves: {plot_curves}")
         self.info(f"Automatic Mixed Precision (AMP): {amp}")
@@ -471,6 +471,8 @@ class ObjectDetectionEngine(Common):
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.scheduler = scheduler
+
+        
         
         # Print configuration parameters
         self.print_config(

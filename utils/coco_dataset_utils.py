@@ -6,6 +6,7 @@ images and `masks` for the corresponding segmentation masks.
 
 # Generic libraries
 import os
+import sys
 import json
 import shutil
 import random
@@ -18,13 +19,18 @@ from torchvision import datasets
 from torchvision.transforms import v2 as T
 
 # Import custom libraries
+sys.path.append(os.path.abspath("../engines"))
 from .classification_utils import set_seeds
+from common import Logger
 
 # Warnings
 import warnings
 os.environ['TORCH_USE_CUDA_DSA'] = "1"
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.autograd.graph")
 warnings.filterwarnings("ignore", category=FutureWarning, module="onnxscript.converter")
+
+# Instantiate logger
+logger = Logger()
 
 # Create target model directory
 MODEL_DIR = Path("outputs")
@@ -109,7 +115,7 @@ def COCO_2_PennFudanPed(coco_images_path, coco_annotations_path, output_images_d
         else:
             os.remove(os.path.join(output_images_dir, filename))  # Remove image if mask is invalid
 
-    print(f"Dataset conversion completed: {image_count} images and masks saved.")
+    logger.info(f"Dataset conversion completed: {image_count} images and masks saved.")
 
 
 def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, output_masks_dir, 
@@ -153,7 +159,7 @@ def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, ou
         if coco_name == value
     }
 
-    print(f"Category ID Mapping: {category_id_mapping}")
+    logger.info(f"Category ID Mapping: {category_id_mapping}")
 
     # Initialize counter for filenames
     image_count = 0  
@@ -189,7 +195,7 @@ def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, ou
             
             # Check if category_id exists in the new mapping
             if category_id not in category_id_mapping:
-                print(f"Warning: Category ID {category_id} not found in the new mapping. Skipping this annotation.")
+                logger.warning(f"Category ID {category_id} not found in the new mapping. Skipping this annotation.")
                 continue  # Skip if category_id is not in the new mapping
  
             # Get the new category ID using the mapping
@@ -208,7 +214,7 @@ def COCO_2_ImgMsk(coco_images_path, coco_annotations_path, output_images_dir, ou
         else:
             os.remove(os.path.join(output_images_dir, filename))  
 
-    print(f"Dataset conversion completed: {image_count} images and masks saved.")
+    logger.info(f"Dataset conversion completed: {image_count} images and masks saved.")
 
     return category_id_mapping # Return the mapping of COCO category IDs to internal category IDs
 
@@ -243,7 +249,7 @@ def select_and_copy_samples(input_images_dir, input_masks_dir, output_images_dir
 
     # Ensure enough samples exist
     if len(images_set) < num_samples or len(masks_set) < num_samples:
-        raise ValueError(f"Requested {num_samples} samples, but fewer images are available.")
+        logger.error(f"Requested {num_samples} samples, but fewer images are available.")
 
     # Set random seed and select samples
     random.seed(seed)
@@ -258,7 +264,7 @@ def select_and_copy_samples(input_images_dir, input_masks_dir, output_images_dir
             shutil.copy(img_path, os.path.join(output_images_dir, file + ".png"))
             shutil.copy(mask_path, os.path.join(output_masks_dir, file + ".png"))
 
-    print(f"Successfully copied {num_samples} image-mask pairs to new folders.")
+    logger.info(f"Successfully copied {num_samples} image-mask pairs to new folders.")
 
 def move_samples(input_images_dir, input_masks_dir, output_val_dir, output_test_dir, num_samples_to_move, seed=42):
 
@@ -287,7 +293,7 @@ def move_samples(input_images_dir, input_masks_dir, output_val_dir, output_test_
     
     # Ensure that there are enough samples to move
     if num_samples_to_move > len(combined):
-        raise ValueError(f"Requested {num_samples_to_move} samples, but only {len(combined)} are available.")
+        logger.error(f"Requested {num_samples_to_move} samples, but only {len(combined)} are available.")
 
     # Split the dataset into validation and test
     val_samples = combined[:-num_samples_to_move]
@@ -306,7 +312,7 @@ def move_samples(input_images_dir, input_masks_dir, output_val_dir, output_test_
         shutil.move(os.path.join(input_images_dir, img_name), os.path.join(output_test_dir, img_name))
         shutil.move(os.path.join(input_masks_dir, mask_name), os.path.join(output_test_dir, mask_name))
 
-    print(f"Moved {num_samples_to_move} samples to the test dataset. {len(val_samples)} samples remain in the validation dataset.")
+    logger.info(f"Moved {num_samples_to_move} samples to the test dataset. {len(val_samples)} samples remain in the validation dataset.")
 
 
 def copy_files(src, dst):
@@ -392,5 +398,5 @@ def split_dataset(src_images, src_masks, dst_train_images, dst_train_masks, dst_
         shutil.copy2(os.path.join(src_images, file), os.path.join(dst_test_images, file))
         shutil.copy2(os.path.join(src_masks, file), os.path.join(dst_test_masks, file))
 
-    print("Dataset split successfully.")
+    logger.info("Dataset split successfully.")
 

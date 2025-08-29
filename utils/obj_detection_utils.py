@@ -3,10 +3,11 @@ Provides utility functions for deep learning object detection workflows in PyTor
 Some functions are based on https://raw.githubusercontent.com/pytorch/vision/main/references/detection/coco_utils.py"
 """
 
+import os
+import sys
+import time
 import datetime
 import errno
-import os
-import time
 import cv2
 import torch
 import random
@@ -23,6 +24,14 @@ from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 from torchvision.transforms.functional import to_pil_image
 import torchvision.transforms.functional as F
 from torchvision.transforms import v2 as T
+
+# Import custom libraries
+sys.path.append(os.path.abspath("../engines"))
+from .classification_utils import set_seeds
+from common import Logger
+
+# Instantiate logger
+logger = Logger()
 
 #def collate_fn(batch):
 #    return tuple(zip(*batch))
@@ -82,19 +91,19 @@ def prune_predictions(
     
     # Validate score_threshold
     if not isinstance(score_threshold, (int, float)) or not (0 <= score_threshold <= 1):
-        raise ValueError("'score_threshold' must be a float between 0 and 1")
+        logger.error("'score_threshold' must be a float between 0 and 1")
 
     # Validate iou_threshold
     if not isinstance(iou_threshold, (int, float)) or not (0 <= iou_threshold <= 1):
-        raise ValueError("'iou_threshold' must be a float between 0 and 1")
+        logger.error("'iou_threshold' must be a float between 0 and 1")
 
     # Validate best_candidate
     if best_candidate not in ("area", "score", None):
-        raise ValueError("'best_candidate' must be one of: 'area', 'score', or None")
+        logger.error("'best_candidate' must be one of: 'area', 'score', or None")
     
     # Validate remove_large_boxes
     if remove_large_boxes is not None and not isinstance(remove_large_boxes, numbers.Number):
-        raise ValueError("'remove_large_boxes' must be a numeric value or None")
+        logger.error("'remove_large_boxes' must be a numeric value or None")
 
     # Filter big boxes
     if remove_large_boxes is not None:
@@ -232,22 +241,22 @@ def prune_predictions_v2(
     
     # Validate score_threshold
     if not isinstance(score_threshold, (int, float)) or not (0 <= score_threshold <= 1):
-        raise ValueError("'score_threshold' must be a float between 0 and 1")
+        logger.error("'score_threshold' must be a float between 0 and 1")
 
     # Validate iou_threshold
     if not isinstance(iou_threshold, (int, float)) or not (0 <= iou_threshold <= 1):
-        raise ValueError("'iou_threshold' must be a float between 0 and 1")
+        logger.error("'iou_threshold' must be a float between 0 and 1")
 
     # Validate best_candidate
     if best_candidate not in ("area", "score", None):
-        raise ValueError("'best_candidate' must be one of: 'area', 'score', or None")
+        logger.error("'best_candidate' must be one of: 'area', 'score', or None")
     
     # Validate remove_large_boxes
     if remove_large_boxes is not None and not isinstance(remove_large_boxes, numbers.Number):
-        raise ValueError("'remove_large_boxes' must be a numeric value or None")
+        logger.error("'remove_large_boxes' must be a numeric value or None")
     
     if remove_small_boxes is not None and not isinstance(remove_small_boxes, numbers.Number):
-        raise ValueError("'remove_large_boxes' must be a numeric value or None")
+        logger.error("'remove_large_boxes' must be a numeric value or None")
 
     # --- Optional box size filtering ---
     # Removes boxes that are too large or too small.
@@ -372,6 +381,7 @@ def prune_predictions_v2(
 def display_and_save_predictions(
     preds: List=None,
     dataloader: torch.utils.data.Dataset | torch.utils.data.DataLoader = None,
+    num_images: int=None,
     box_color: str='white',
     mask_color: str='blue',
     width: int=1,
@@ -388,6 +398,7 @@ def display_and_save_predictions(
     Arguments:
         preds (List): A list of predictions, each containing 'boxes', 'labels', 'scores', and optionally 'masks'.
         dataloader (torch.utils.data.DataLoader): A DataLoader object containing the images.
+        num_images (int): Number of images to display. Defaults to None (all images)
         box_color (str): Color of the bounding boxes drawn on the image.
         mask_color (str): Color of the segmentation masks drawn on the image.
         width (int): The width of the bounding box lines.
@@ -402,6 +413,9 @@ def display_and_save_predictions(
     # Convert dataset to DataLoader if needed
     if isinstance(dataloader, torch.utils.data.Dataset):
         dataloader = torch.utils.data.DataLoader(dataloader, batch_size=1, shuffle=False, collate_fn=collate_fn)
+
+    if not (num_images is not None and isinstance(num_images, int) and num_images > 0):
+        logger.error("'num_images' must be a positive integer")
 
     # Create save directory if saving images
     if save_dir:
@@ -458,6 +472,9 @@ def display_and_save_predictions(
         ax.imshow(output_image.permute(1, 2, 0))  # Convert from (C, H, W) to (H, W, C)
         ax.set_title(f"Prediction {idx + 1}")
         ax.axis("off")
+
+        if num_images is not None and idx + 1 > num_images:
+            break
 
     # Hide unused subplots (if any)
     for i in range(idx + 1, len(axes)):

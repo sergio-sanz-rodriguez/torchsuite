@@ -5,8 +5,12 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict
+# Import custom libraries
 sys.path.append(os.path.abspath("../engines"))
-from engines.common import Logger
+from common import Logger
+
+# Instantiate logger
+logger = Logger()
 
 def num_to_rgb(num_arr, color_map: Dict=None):
     
@@ -22,13 +26,13 @@ def num_to_rgb(num_arr, color_map: Dict=None):
     """
 
     if not isinstance(num_arr, np.ndarray):
-        Logger().error("The input array is not a numpy array. Please provide a numpy array.")
+        logger.error("The input array is not a numpy array. Please provide a numpy array.")
 
     if len(num_arr.shape) != 2:
-        Logger().error("The input array is not 2D. Please provide a 2D numpy array.")
+        logger.error("The input array is not 2D. Please provide a 2D numpy array.")
 
     if color_map == None:
-        Logger().error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
+        logger.error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
 
     single_layer = np.squeeze(num_arr)
     output = np.zeros(num_arr.shape[:2] + (3,))
@@ -81,7 +85,7 @@ def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0
     """
 
     if color_map == None:
-        Logger().error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
+        logger.error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
 
     # Convert tensors to numpy arrays for displaying
     image = image.permute(1, 2, 0).cpu().numpy()  # (C, H, W) -> (H, W, C)

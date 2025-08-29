@@ -10,28 +10,35 @@ Functions:
 - **ROC & AUC Analysis**: `find_roc_threshold_tpr`, `find_roc_threshold_fpr`, `find_roc_threshold_f1`, `find_roc_threshold_accuracy`, `partial_auc_score`, `cross_val_partial_auc_score`
 """
 
+import os
+import sys
+import zipfile
 import torch
 import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 import numpy as np
-from torch import nn
-import os
-import zipfile
-from pathlib import Path
 import requests
 import torchvision
-from typing import List, Dict, Tuple
 import random
+import itertools
+import IPython.display as ipd
+from torch import nn
+from pathlib import Path
+from typing import List, Dict, Tuple
 from PIL import Image
 from torchvision.transforms import v2
 from tqdm.auto import tqdm
 from tkinter import Tk
 from torch.utils.data import DataLoader
+from sklearn.model_selection import StratifiedKFold
 from torchvision import datasets, transforms
 from sklearn.metrics import f1_score, accuracy_score, roc_curve, auc
 from IPython.core.display import display, HTML
-import IPython.display as ipd
+sys.path.append(os.path.abspath("../engines"))
+from common import Logger
 
+logger = Logger()
 
 # Walk through an image classification directory and find out how many files (images)
 # are in each subdirectory.
@@ -48,7 +55,7 @@ def walk_through_dir(dir_path):
       name of each subdirectory
     """
     for dirpath, dirnames, filenames in os.walk(dir_path):
-        print(f"There are {len(dirnames)} directories and {len(filenames)} images in '{dirpath}'.")
+        logger.info(f"There are {len(dirnames)} directories and {len(filenames)} images in '{dirpath}'.")
 
 def plot_decision_boundary(model: torch.nn.Module, X: torch.Tensor, y: torch.Tensor):
     """Plots decision boundaries of model predicting on X in comparison to y.
@@ -123,7 +130,7 @@ def print_train_time(start, end, device=None):
         float: time between start and end in seconds (higher is longer).
     """
     total_time = end - start
-    print(f"\nTrain time on {device}: {total_time:.3f} seconds")
+    logger.info(f"\nTrain time on {device}: {total_time:.3f} seconds")
     return total_time
 
 
@@ -333,21 +340,21 @@ def download_data(source: str,
 
     # If the image folder doesn't exist, download it and prepare it... 
     if image_path.is_dir():
-        print(f"[INFO] {image_path} directory exists, skipping download.")
+        logger.info(f"{image_path} directory exists, skipping download.")
     else:
-        print(f"[INFO] Did not find {image_path} directory, creating one...")
+        logger.info(f"Did not find {image_path} directory, creating one...")
         image_path.mkdir(parents=True, exist_ok=True)
         
         # Download pizza, steak, sushi data
         target_file = Path(source).name
         with open(data_path / target_file, "wb") as f:
             request = requests.get(source)
-            print(f"[INFO] Downloading {target_file} from {source}...")
+            logger.info(f"Downloading {target_file} from {source}...")
             f.write(request.content)
 
         # Unzip pizza, steak, sushi data
         with zipfile.ZipFile(data_path / target_file, "r") as zip_ref:
-            print(f"[INFO] Unzipping {target_file} data...") 
+            logger.info(f"Unzipping {target_file} data...") 
             zip_ref.extractall(image_path)
 
         # Remove .zip file
@@ -392,7 +399,7 @@ def display_random_images(dataset: torch.utils.data.dataset.Dataset, # or torchv
     if n > rows*cols:
         n = rows*cols
         #display_shape = False
-        print(f"For display purposes, n shouldn't be larger than {rows*cols}, setting to {n} and removing shape display.")
+        logger.warining(f"For display purposes, n shouldn't be larger than {rows*cols}, setting to {n} and removing shape display.")
     
     # 3. Set random seed
     if seed:
@@ -448,7 +455,7 @@ def save_model(model: torch.nn.Module,
     model_save_path = target_dir_path / model_name
 
     # Save the model state_dict()
-    print(f"[INFO] Saving model to: {model_save_path}")
+    logger.info(f"Saving model to: {model_save_path}")
     torch.save(obj=model.state_dict(), f=model_save_path)
     
 
@@ -481,7 +488,7 @@ def load_model(model: torch.nn.Module,
     model_path = model_dir_path / model_weights_name
 
     # Load the model
-    print(f"[INFO] Loading model from: {model_path}")
+    logger.info(f"Loading model from: {model_path}")
     
     model.load_state_dict(torch.load(model_path, weights_only=True))
     
@@ -681,7 +688,7 @@ def find_roc_threshold_f1(pred_prob, y):
     """
     
     # Get predicted probabilities for the positive class
-    pred_prob = model.predict_proba(X)[:, 1]
+    #pred_prob = model.predict_proba(X)[:, 1]
 
     best_threshold = 0.5
     best_f1_score = 0.0
@@ -783,7 +790,7 @@ def cross_val_partial_auc_score(X, y, model, n_splits):
     cont = 1
     for train_idx, val_idx in skf.split(X, y):
 
-        print(f'Processing fold {cont} of {n_splits}... ', end='', flush=True)
+        logger.info(f'Processing fold {cont} of {n_splits}... ', end='', flush=True)
         
         # Create the folds
         X_train_fold, X_val_fold = X.iloc[train_idx], X.iloc[val_idx]
@@ -823,9 +830,9 @@ def plot_confusion_matrix(cm, classes,
 
     if normalize:
         cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        print("Normalized confusion matrix")
+        logger.info("Normalized confusion matrix")
     else:
-        print('Confusion matrix, without normalization')
+        logger.info('Confusion matrix, without normalization')
  
     # Plot the confusion matrix
     plt.figure(figsize = figsize)

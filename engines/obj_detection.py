@@ -443,7 +443,7 @@ class ObjectDetectionEngine(Common):
             self.error(f"'save_best_model' must be None, a string, or a list of strings.")
 
         # Validate mode only if save_best_model is True
-        valid_modes = {"loss", "acc", "fpr", "pauc", "last", "all"}
+        valid_modes = {"loss", "last", "all"}
         if self.save_best_model:
             if not isinstance(mode, list):
                 self.error(f"'mode' must be a string or a list of strings.")
@@ -933,7 +933,8 @@ class ObjectDetectionEngine(Common):
                         save_model(self.model_name_loss)
                 # Last-epoch criterion
                 elif mode == "last":
-                    remove_previous_best(self.model_name)
+                    if "all" not in self.mode:
+                        remove_previous_best(self.model_name)
                     save_model(self.model_name)
                 # All epochs
                 elif mode == "all":

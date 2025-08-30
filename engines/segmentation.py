@@ -950,7 +950,8 @@ class SegmentationEngine(Common):
                         save_model(self.model_name_iou)
                 # Last-epoch criterion
                 elif mode == "last":
-                    remove_previous_best(self.model_name)
+                    if "all" not in self.mode:
+                        remove_previous_best(self.model_name)
                     save_model(self.model_name)
                 # All epochs
                 elif mode == "all":

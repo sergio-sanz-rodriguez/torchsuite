@@ -35,9 +35,10 @@ from sklearn.model_selection import StratifiedKFold
 from torchvision import datasets, transforms
 from sklearn.metrics import f1_score, accuracy_score, roc_curve, auc
 from IPython.core.display import display, HTML
-sys.path.append(os.path.abspath("../engines"))
-from common import Logger
+sys.path.append(os.path.abspath(".."))
+from engines.common import Logger
 
+# Instantiate logger
 logger = Logger()
 
 # Walk through an image classification directory and find out how many files (images)

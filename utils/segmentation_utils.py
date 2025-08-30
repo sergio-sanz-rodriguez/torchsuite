@@ -6,8 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict
 # Import custom libraries
-sys.path.append(os.path.abspath("../engines"))
-from common import Logger
+sys.path.append(os.path.abspath(".."))
+from engines.common import Logger
 
 # Instantiate logger
 logger = Logger()

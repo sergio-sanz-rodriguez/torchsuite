@@ -26,9 +26,9 @@ import torchvision.transforms.functional as F
 from torchvision.transforms import v2 as T
 
 # Import custom libraries
-sys.path.append(os.path.abspath("../engines"))
+sys.path.append(os.path.abspath(".."))
 from .classification_utils import set_seeds
-from common import Logger
+from engines.common import Logger
 
 # Instantiate logger
 logger = Logger()

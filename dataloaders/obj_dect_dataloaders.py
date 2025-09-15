@@ -14,6 +14,8 @@ from torchvision import datasets, transforms
 from torchvision.transforms import v2
 from torchvision.ops.boxes import masks_to_boxes
 from torchvision.transforms.v2 import functional as F
+from pycocotools.coco import COCO
+#import torchvision.tv_tensors as tv_tensors
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -188,6 +190,94 @@ class ProcessDataset(torch.utils.data.Dataset):
 
         return len(self.imgs)
 
+
+class ProcessDatasetCOCO(torch.utils.data.Dataset):
+
+    """
+    Dataset class for images annotated in COCO format.
+    Bounding boxes are read directly from the COCO JSON file.
+
+    Args:
+        root (str): Root directory containing the image and label folders.
+        image_path (str): Subdirectory within root where images are stored.
+        label_path (str): Subdirectory within root where label files are stored.
+        transforms (callable, optional): A function/transform to apply to both image and target.
+        num_classes (int): Number of classes (default is 1 for binary detection).
+    """
+
+    def __init__(self, root, image_path, coco_json, transforms=None, num_classes=1, pin_memory=False):
+        self.root = root
+        self.image_path = image_path
+        self.transforms = transforms
+        self.num_classes = num_classes
+        self.pin_memory = pin_memory
+
+        # Load COCO annotations
+        self.coco = COCO(coco_json)
+        self.img_ids = self.coco.getImgIds()
+    
+    def __len__(self):
+        return len(self.img_ids)
+
+    @staticmethod
+    def open_image(path):
+        try:
+            return Image.open(path).convert("RGB")
+        except (OSError, IOError):
+            return None
+
+    def __getitem__(self, idx):
+
+        img_id = self.img_ids[idx]
+        img_info = self.coco.loadImgs(img_id)[0]
+        img_path = os.path.join(self.root, self.image_path, img_info['file_name'])
+        img = self.open_image(img_path)
+        if img is None:
+            return None
+        img = F.to_tensor(img)
+        canvas_size = F.get_size(img)
+
+        # Load annotations for this image
+        ann_ids = self.coco.getAnnIds(imgIds=img_id)
+        anns = self.coco.loadAnns(ann_ids)
+
+        if len(anns) == 0:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros((0,), dtype=torch.int64)
+            area = torch.zeros((0,), dtype=torch.float32)
+            iscrowd = torch.zeros((0,), dtype=torch.int64)
+        else:
+            boxes = torch.tensor([ann['bbox'] for ann in anns], dtype=torch.float32)
+            # COCO bbox format is [x, y, width, height] -> convert to [x1, y1, x2, y2]
+            boxes[:, 2] = boxes[:, 0] + boxes[:, 2]
+            boxes[:, 3] = boxes[:, 1] + boxes[:, 3]
+
+            labels = torch.tensor([ann['category_id'] for ann in anns], dtype=torch.int64)
+            labels = torch.clamp(labels, max=self.num_classes)
+            area = torch.tensor([ann['area'] for ann in anns], dtype=torch.float32)
+            iscrowd = torch.tensor([ann.get('iscrowd', 0) for ann in anns], dtype=torch.int64)
+
+        target = {
+            "boxes": tv_tensors.BoundingBoxes(boxes, format="XYXY", canvas_size=canvas_size),
+            "labels": labels,
+            "image_id": torch.tensor([img_id]),
+            "area": area,
+            "iscrowd": iscrowd
+        }
+
+        if self.transforms:
+            img_t, target_t = self.transforms(tv_tensors.Image(img), target)
+            img, target = img_t, target_t
+
+        # Pin memory if needed
+        if self.pin_memory:
+            target["boxes"] = target["boxes"].clone()
+            target["labels"] = target["labels"].clone()
+            target["area"] = target["area"].clone()
+            target["iscrowd"] = target["iscrowd"].clone()
+            img = img.clone()
+
+        return tv_tensors.Image(img), target
 
 # Implement a class that processes the database
 class ProcessDatasetYOLO(torch.utils.data.Dataset):

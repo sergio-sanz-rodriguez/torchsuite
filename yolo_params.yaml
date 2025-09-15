@@ -1,0 +1,6 @@
+train:  D:/Repos/coco_dataset/People Detection.v10-rf-detr-nano.yolov8/train/images # Path to training files, example: [train/images, moretraining/images]
+val:    D:/Repos/coco_dataset/People Detection.v10-rf-detr-nano.yolov8/valid/images   # Path to val files, example: [val/images, moreval/images]
+test:   D:/Repos/coco_dataset/People Detection.v10-rf-detr-nano.yolov8/test/images # Path to the testImages folder, example: ../../testImages
+nc: 1
+names: ['human']
+run:  .\run

@@ -2067,9 +2067,7 @@ class ClassificationEngine(Common):
         # Return list of prediction dictionaries
         return pred_list, classification_report_dict
 
-
-# Training and prediction engine class
-class DistillationEngine(Common):
+class DistillationEngineV2(ClassificationEngine):
 
     """
     A class to handle training, evaluation, and predictions for a PyTorch model.
@@ -2098,60 +2096,14 @@ class DistillationEngine(Common):
         device: str="cuda" if torch.cuda.is_available() else "cpu"
         ):
 
-        super().__init__()
+        super().__init__(
+            model=student,
+            color_map=color_map,
+            log_verbose=log_verbose,
+            device=device
+        )
 
-        # Initialize self variables
-        self.device = device
-        self.model = student
         self.model_tch = teacher
-        self.model_acc = None
-        self.model_f1 = None
-        self.model_loss = None
-        self.model_fpr = None
-        self.model_pauc = None
-        self.model_epoch = None
-        self.save_best_model = False
-        self.keep_best_models_in_memory = False
-        self.mode = None
-        self.optimizer = None
-        self.loss_fn = None
-        self.scheduler = None
-        self.model_name = None
-        self.model_name_loss = None
-        self.model_name_acc = None
-        self.model_name_f1 = None
-        self.model_name_fpr = None
-        self.model_name_pauc = None
-        self.squeeze_dim = False
-        self.log_verbose = log_verbose
-     
-        # Initialize colors
-        default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
-        
-        # If the user provides a color_map, update the default with it
-        if color_map is None:
-            color_map = default_color_map # Use defaults if no user input
-        else:
-            color_map = {**default_color_map, **color_map} # Merge user input with defaults
-
-        self.color_train = Colors.get_console_color(color_map['train'])
-        self.color_test =  Colors.get_console_color(color_map['test'])
-        self.color_other = Colors.get_console_color(color_map['other'])
-        self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
-        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
-        self.linewidth = Colors.get_linewidth()
-
-        # Initialize result logs
-        self.results = {}
-
-        # Check if model is provided
-        if self.model is None:
-            self.error(f"Instantiate the engine by passing a PyTorch model to handle.")
-        else:
-            self.model.to(self.device)
-
-
-
 
 
 # Training and prediction engine class

@@ -5,16 +5,13 @@ Contains classes for training and testing a PyTorch model for classification tas
 import os
 import glob
 import torch
-import torchvision
 import torchaudio
 import random
 import time
-import numpy as np
 import pandas as pd
 import copy
 import warnings
 import re
-from datetime import datetime
 from typing import Tuple, Dict, Any, List, Union, Optional, Callable
 from tqdm.auto import tqdm 
 from IPython.display import clear_output
@@ -26,7 +23,7 @@ try:
     from torch.amp import GradScaler, autocast
 except ImportError:
     from torch.cuda.amp import GradScaler, autocast
-from sklearn.metrics import precision_recall_curve, classification_report, roc_curve, auc
+from sklearn.metrics import classification_report
 from contextlib import nullcontext
 from sklearn.preprocessing import LabelEncoder
 from .common import Common, Colors
@@ -45,14 +42,14 @@ class ClassificationEngine(Common):
     of a PyTorch model, including saving the best model based on specific criteria.
 
     Args:
-        - model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
-        - color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+        model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
+        color_map (dict, optional): Specifies the colors for the training and evaluation curves:
           'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
           'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
           'light_magenta', 'light_cyan'.
           Example: {'train': 'blue', 'test': 'orange', 'other': 'black'}
-        - log_verbose (bool, optional): if True, activate logger messages.
-        - device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
+        log_verbose (bool, optional): if True, activate logger messages.
+        device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
     def __init__(
@@ -102,6 +99,7 @@ class ClassificationEngine(Common):
         self.color_other = Colors.get_console_color(color_map['other'])
         self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
         self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
+        self.linewidth = Colors.get_linewidth()
 
         # Initialize result logs
         self.results = {}
@@ -207,19 +205,25 @@ class ClassificationEngine(Common):
         self.info(f"Batch size: {batch_size}")
         self.info(f"Accumulation steps: {accumulation_steps}")
         self.info(f"Effective batch size: {batch_size * accumulation_steps}")
+        self.info(f"Augmentation strategy: last {self.augmentation_strategy}")
+        if self.augmentation_strategy == "off_last":
+            self.info(f"Augmentation off epochs: last {self.augmentation_off_epochs}")
+        if self.augmentation_strategy == "random":
+            self.info(f"Augmentation probability: {self.augmentation_random_prob}")
         self.info(f"Learning rate: {self.optimizer.param_groups[0]['lr']}")
         self.info(f"Recall threshold - fpr: {recall_threshold}")
         self.info(f"Recall threshold - pauc: {recall_threshold_pauc}")
-        self.info(f"Apply validation: {self.apply_validation}")
-        self.info(f"Stabilization epochs: {self.stabilization_epochs}")
+        self.info(f"Apply validation: {self.apply_validation}")        
         self.info(f"Plot curves: {plot_curves}")
         self.info(f"Automatic Mixed Precision (AMP): {amp}")
         self.info(f"Enable clipping: {enable_clipping}")
         self.info(f"Debug mode: {debug_mode}")        
         self.info(f"Save model: {self.save_best_model}")
         self.info(f"Target directory: {self.target_dir}")        
+        
         if self.save_best_model:
-          # Extract base name and extension from the model name
+
+            # Extract base name and extension from the model name
             base_name, extension = os.path.splitext(self.model_name)
             
             # Print base name and extension
@@ -237,6 +241,7 @@ class ClassificationEngine(Common):
                 
                 # Print the final model save path for each mode
                 self.info(f"Save best model - {mode}: {base_name + model_name_with_mode}")
+
         if self.keep_best_models_in_memory:
             self.warning(f"Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
         else:
@@ -245,7 +250,9 @@ class ClassificationEngine(Common):
     # Function to initialize the result logs
     def init_results(self):
 
-        """Creates a empty results dictionary"""
+        """
+        Creates a empty results dictionary
+        """
 
         self.results = {
             "epoch": [],
@@ -290,11 +297,11 @@ class ClassificationEngine(Common):
         Displays the training and validation results both numerically and visually.
 
         Functionality:
-        - Outputs key metrics such as training and validation loss, accuracy, and fpr at recall in numerical form.
-        - Generates plots that visualize the training process, such as:
-        - Loss curves (training vs validation loss over epochs).
-        - Accuracy curves (training vs validation accuracy over epochs).
-        - FPR at recall curves
+            Outputs key metrics such as training and validation loss, accuracy, and fpr at recall in numerical form.
+            Generates plots that visualize the training process, such as:
+                - Loss curves (training vs validation loss over epochs).
+                - Accuracy curves (training vs validation accuracy over epochs).
+                - FPR at recall curves
         """
 
         # Retrieve the learning rate
@@ -347,15 +354,16 @@ class ClassificationEngine(Common):
         # Plots training and test loss, accuracy, and fpr-at-recall curves.
         if plot_curves:
         
-            n_plots = 5
+            n_plots = 5            
             plt.figure(figsize=(25, 6))
-            range_epochs = range(1, len(self.results["train_loss"])+1)
+            curr_epoch = len(self.results["train_loss"])
+            range_epochs = range(1, curr_epoch+1)            
 
             # Plot loss
             plt.subplot(1, n_plots, 1)
-            plt.plot(range_epochs, self.results["train_loss"], label="train_loss", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_loss"], label="train_loss", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_loss"], label="test_loss", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_loss"], label="test_loss", color=self.color_test_plt, linewidth=self.linewidth)                
             plt.title("Loss")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -363,9 +371,9 @@ class ClassificationEngine(Common):
 
             # Plot accuracy
             plt.subplot(1, n_plots, 2)
-            plt.plot(range_epochs, self.results["train_acc"], label="train_accuracy", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_acc"], label="train_accuracy", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_acc"], label="test_accuracy", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_acc"], label="test_accuracy", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title("Accuracy")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -373,9 +381,9 @@ class ClassificationEngine(Common):
 
             # Plot f1-score
             plt.subplot(1, n_plots, 3)
-            plt.plot(range_epochs, self.results["train_f1"], label="train_f1", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_f1"], label="train_f1", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_f1"], label="test_f1", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_f1"], label="test_f1", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title("F1-Score")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -383,9 +391,9 @@ class ClassificationEngine(Common):
                     
             # Plot FPR at recall
             plt.subplot(1, n_plots, 4)
-            plt.plot(range_epochs, self.results["train_fpr"], label="train_fpr_at_recall", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_fpr"], label="train_fpr_at_recall", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_fpr"], label="test_fpr_at_recall", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_fpr"], label="test_fpr_at_recall", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title(f"FPR at {recall_threshold * 100}% recall")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -393,23 +401,27 @@ class ClassificationEngine(Common):
 
             # Plot pAUC at recall
             plt.subplot(1, n_plots, 5)
-            plt.plot(range_epochs, self.results["train_pauc"], label="train_pauc_at_recall", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_pauc"], label="train_pauc_at_recall", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_pauc"], label="test_pauc_at_recall", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_pauc"], label="test_pauc_at_recall", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title(f"pAUC above {recall_threshold_pauc * 100}% recall")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
             plt.legend()
-                    
+
+            # Display plots
             plt.show()
 
+    # Fuction that initializes training process and validates training parameters
     def init_train(
         self,
         target_dir: str=None,
         model_name: str=None,
         dataloaders: dict[str, torch.utils.data.DataLoader] = None,
         apply_validation: bool=True,
-        stabilization_epochs : int=0,
+        augmentation_strategy: str="always",
+        augmentation_off_epochs: int=5,
+        augmentation_random_prob: float=0.5,
         save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
         keep_best_models_in_memory: bool=False,
         optimizer: torch.optim.Optimizer=None,
@@ -433,7 +445,13 @@ class ClassificationEngine(Common):
             model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
             dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).            
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
-            stabilization_epochs (int, optional): Wheter to disable augmentation in the lat N epochs to stabilize training. Default is 0
+            augmentation_strategy (str, optional): Determines how data augmentation is applied during training.
+                - "always": augmentation is applied every epoch.
+                - "off_last": augmentation is disabled during the last `augmentation_off_epochs` epochs.
+                - "random": augmentation is applied randomly according to `augmentation_random_prob`.
+                Default is "always".
+            augmentation_off_epochs (int, optional): Number of final epochs in which augmentation is disabled if `augmentation_strategy` is set to "off_last_n". Default is 5.
+            augmentation_random_prob (float, optional): Probability (0.0-1.0) of applying augmentation in each batch if `augmentation_strategy` is set to "random". Default is 0.5.
             optimizer (torch.optim.Optimizer, optional): The optimizer to minimize the loss function.
             loss_fn (torch.nn.Module, optional): The loss function to minimize during training.
             scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler for the optimizer.
@@ -467,6 +485,8 @@ class ClassificationEngine(Common):
         This method sets up the environment for training, ensuring all necessary resources and parameters are prepared.
         """
 
+        self.info(f"Checking arguments...")
+
         # Validate keep_best_models_in_memory
         if not isinstance(keep_best_models_in_memory, (bool)):
             self.error(f"'keep_best_models_in_memory' must be True or False.")
@@ -495,12 +515,27 @@ class ClassificationEngine(Common):
         if not isinstance(epochs, int) or epochs < 1:
             self.error(f"'epochs' must be an integer greater than or equal to 1.")
         
-        # Validate apply_validation
-        if not isinstance(stabilization_epochs, (int)):
-            self.error(f"'stabilization_epochs' must be a positive integer.")
-        else:
-            self.stabilization_epochs = min(stabilization_epochs, epochs)    
+        # Validate epochs
+        if epochs is None or epochs < 0:
+            self.error("epochs must be a positive number > 0.")
+        self.epochs = epochs
 
+        # Validate augmentation_strategy
+        valid_aug_strategies = {"always", "off_last", "off_first", "random"}
+        if augmentation_strategy not in valid_aug_strategies:
+            self.error(f"'augmentation_strategy' must be any of these strings: {valid_aug_strategies}.")
+        self.augmentation_strategy = augmentation_strategy
+
+        # Validate augmentation_off_epochs
+        if not isinstance(augmentation_off_epochs, (int)):
+            self.error(f"'augmentation_off_epochs' must be a positive integer.")
+        self.augmentation_off_epochs = min(augmentation_off_epochs, epochs)
+
+        # Validate augmentation_random_prob
+        if not isinstance(augmentation_random_prob, (int, float)) or not (0.0 <= float(augmentation_random_prob) <= 1.0):
+            self.error(f"'augmentation_random_prob' must be a float between 0.0 and 1.0.")
+        self.augmentation_random_prob = augmentation_random_prob
+        
         # Ensure save_best_model is correctly handled
         if save_best_model is None:
             self.save_best_model = False
@@ -523,23 +558,22 @@ class ClassificationEngine(Common):
 
         # Validate dataloaders
         if dataloaders is None:
-            self.error("dataloaders dictionary must be provided")
-
+            self.error("dataloaders dictionary must be provided.")
+        self.dataloaders = dataloaders
+        
         # 'train' is always required
         if "train" not in dataloaders or not isinstance(dataloaders["train"], torch.utils.data.DataLoader):
-            self.error("dataloaders dictionary must contain key 'train' with a DataLoader instance")
+            self.error("dataloaders dictionary must contain key 'train' with a DataLoader instance.")
         
         # 'test' is required only if apply_validation is True        
         if apply_validation:
             if "test" not in dataloaders or not isinstance(dataloaders["test"], torch.utils.data.DataLoader):
-                self.error("dataloaders dictionary must contain key 'test' with a DataLoader instance when apply_validation=True")
+                self.error("dataloaders dictionary must contain key 'test' with a DataLoader instance when apply_validation=True.")
         
-        # 'train_last_epochs' is required only if stabilization_epochs > 0        
-        if isinstance(stabilization_epochs, int) and stabilization_epochs > 0:
-            if "train_last_epochs" not in dataloaders or not isinstance(dataloaders["train_last_epochs"], torch.utils.data.DataLoader):
-                self.error("dataloaders dictionary must contain key 'train_last_epochs' with a DataLoader instance when stabilization_epochs>0")
-
-        self.dataloaders = dataloaders            
+        # 'train_aug_off' is required for the off_epochs and random augmentation strategies
+        if augmentation_strategy != "always":
+            if "train_aug_off" not in dataloaders or not isinstance(dataloaders["train_aug_off"], torch.utils.data.DataLoader):
+                self.error(f"dataloaders dictionary must contain key 'train_aug_off' for the selected augmentation strategy: {augmentation_strategy}.")
 
         # Get batch size from dataloaders
         if hasattr(dataloaders['train'], 'batch_size'):
@@ -582,17 +616,24 @@ class ClassificationEngine(Common):
             debug_mode=debug_mode
             )
 
+        self.info(f"Checking dataloaders...")
+
         # Set the model in train mode
         self.model.train()
+
+        # Initialize num_classes
+        self.num_classes = 0
 
         # Attempt a forward pass to check if the shape of X is compatible
         for batch, (X, y) in enumerate(dataloaders['train']):
             
             try:
-                # This is where the model will "complain" if the shape is incorrect
-                check = self.get_predictions(self.model(X.to(self.device)))                                
+
+                # Here is where the model will "complain" if the shape is incorrect
+                y_pred = self.get_predictions(self.model(X.to(self.device)))                
 
             except Exception as e:
+
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
                 if match:
@@ -607,8 +648,26 @@ class ClassificationEngine(Common):
                     pass  # No change needed
                 else:
                     self.error(f"Unexpected input shape after exception handling: {X.shape}")
-            break
-    
+            
+            try:
+
+                # If y_pred was successfully computed, get the number of classes
+                if 'y_pred' in locals():
+                    self.num_classes = y_pred.shape[1]                
+                
+                # Otherwise, throw an exception
+                else:
+                    self.error("y_pred is not defined due to a failure in the forward pass.")
+            
+            except Exception as e:
+
+                # Throw an exception if the shape of the output tensor is unexpected
+                self.error(f"Unexpected shape in of the prediction output: {y_pred.shape}.")
+
+            break  
+        
+        self.info("Making an in-memory copy of the model...")
+
         # Initialize the best model and model_epoch list based on the specified mode.
         if self.save_best_model:
             if "loss" in self.mode:
@@ -642,12 +701,16 @@ class ClassificationEngine(Common):
                     for k in range(epochs):
                         self.model_epoch.append(copy.deepcopy(self.model))
                         self.model_epoch[k].to(self.device)
+
             self.best_test_loss = float("inf") 
             self.best_test_acc = 0.0
             self.best_test_f1 = 0.0
             self.best_test_fpr = float("inf")
             self.best_test_pauc = 0.0
+        
+        self.info(f"Verification complete! Training beggings.")
     
+    # Display progress bar
     def progress_bar(
         self,
         dataloader: torch.utils.data.DataLoader,
@@ -687,29 +750,55 @@ class ClassificationEngine(Common):
 
         return progress
 
+    # Function that switchs training dataloaders based on selected stategy
     def switch_dataloaders(self, epoch):
 
         """
         Selects the appropriate training dataloader for the current epoch.
 
         Uses the standard dataloader for most epochs, and switches to the
-        no-augmentation dataloader for the last `stabilization_epochs` to stabilize training.
+        no-augmentation dataloader during the last `augmentation_off_epochs`
+        to stabilize training (if specified).
 
         Args:
-            epoch (int): Current epoch number.
+            epoch (int): Current epoch number (zero-indexed).
 
         Returns:
-            torch.utils.data.DataLoader: Dataloader to use for this epoch.
+            torch.utils.data.DataLoader: The dataloader to use for this epoch.
         """
 
-        if self.stabilization_epochs > 0 and epoch >= (self.epochs - self.stabilization_epochs):
-            train_dataloader = self.dataloaders['train_last_epochs']
-            self.info(f"Epoch {epoch+1}/{self.epochs}: Switching to no-augmentation dataloader for stabilization.")
-        else:
-            train_dataloader = self.dataloaders['train']
+        # Strategy 1: Always use augmentation
+        if self.augmentation_strategy == "always":
+            return self.dataloaders['train']
         
-        return train_dataloader
+        # Strategy 2: Disable augmentation for the last N epochs
+        elif self.augmentation_strategy == "off_last":
+            if self.augmentation_off_epochs > 0 and epoch >= (self.epochs - self.augmentation_off_epochs):
+                if epoch == (self.epochs - self.augmentation_off_epochs):
+                    self.info(f"Epoch {epoch+1}/{self.epochs}: Using no-augmentation dataloader for stabilization.")
+                return self.dataloaders['train_aug_off']
+            else:
+                return self.dataloaders['train']
+        
+        # Strategy 3: Disable augmentation for the first N epochs
+        elif self.augmentation_strategy == "off_first":
+            if self.augmentation_off_epochs > 0 and epoch < self.augmentation_off_epochs:
+                self.info(f"Epoch {epoch+1}/{self.epochs}: Using no-augmentation dataloader for stabilization.")
+                return self.dataloaders['train_aug_off']
+            else:
+                return self.dataloaders['train']
+        
+        # Strategy 4: Randomly toggle augmentation per epoch
+        elif self.augmentation_strategy == "random":
+            use_aug = random.random() < self.augmentation_random_prob
+            if not use_aug:                
+                self.info(f"Epoch {epoch+1}/{self.epochs}: Using no-augmentation dataloader for stabilization.")
+                return self.dataloaders['train_aug_off']                
+            else:
+                self.info(f"Epoch {epoch+1}/{self.epochs}: Using augmentation dataloader for stabilization.")
+                return self.dataloaders['train']
 
+    # ToDo: to be removed
     def train_step(
         self,
         dataloader: torch.utils.data.DataLoader,
@@ -901,12 +990,10 @@ class ClassificationEngine(Common):
     # This train step function includes gradient accumulation (experimental)
     def train_step_v2(
         self,
-        dataloader: torch.utils.data.DataLoader, 
-        num_classes: int=2,
+        dataloader: torch.utils.data.DataLoader,         
         recall_threshold: float=0.99,
         recall_threshold_pauc: float=0.0,
         epoch_number: int = 1,
-        epoch_switch: int = float('inf'),
         amp: bool=True,
         enable_clipping=False,
         accumulation_steps: int = 1,
@@ -917,7 +1004,6 @@ class ClassificationEngine(Common):
 
         Args:
             dataloader: A DataLoader instance for the model to be trained on.
-            num_classes: Number of classes.
             recall_threshold: The recall threshold at which to calculate the FPR (between 0 and 1)
             recall_threshold_pauc: The recall threshold for pAUC computation (between 0 and 1)
             epoch_number: Epoch number.
@@ -945,10 +1031,6 @@ class ClassificationEngine(Common):
         all_preds = []
         all_labels = []
 
-        # Check if augmentation must be removed or not
-        if epoch_number >= epoch_switch:
-            dataloader.dataset.set_augmentation(False)
-
         # Loop through data loader data batches
         self.optimizer.zero_grad()  # Clear gradients before starting
         for batch, (X, y) in self.progress_bar(
@@ -965,6 +1047,7 @@ class ClassificationEngine(Common):
             # Optimize training with amp if available
             if amp:
                 with autocast(device_type='cuda', dtype=torch.float16):
+
                     # Forward pass
                     y_pred = self.get_predictions(self.model(X))
                     
@@ -1064,7 +1147,7 @@ class ClassificationEngine(Common):
         all_labels = torch.cat(all_labels)
         all_preds = torch.cat(all_preds)
         try:
-            train_f1 = self.calculate_f1_score(all_labels, all_preds.argmax(dim=1), num_classes)
+            train_f1 = self.calculate_f1_score(all_labels, all_preds.argmax(dim=1), self.num_classes)
         except Exception as e:
             self.warning(f"Innacurate calculation of F1-score: {e}")
         try:    
@@ -1073,7 +1156,7 @@ class ClassificationEngine(Common):
             self.warning(f"Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
-            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, self.num_classes)
         except Exception as e:
             self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
@@ -1086,7 +1169,6 @@ class ClassificationEngine(Common):
     def test_step(
         self,
         dataloader: torch.utils.data.DataLoader,
-        num_classes: int=2,
         recall_threshold: float = 0.95,
         recall_threshold_pauc: float = 0.95,
         epoch_number: int = 1,
@@ -1114,9 +1196,9 @@ class ClassificationEngine(Common):
         if self.apply_validation:
 
             # Put model in eval mode
+            # self.model.to(self.device) # Already done in __init__
             self.model.eval() 
-            #self.model.to(self.device) # Already done in __init__
-
+            
             # Setup test loss and test accuracy values
             len_dataloader = len(dataloader)
             test_loss, test_acc, test_f1 = 0, 0, 0
@@ -1131,6 +1213,7 @@ class ClassificationEngine(Common):
                         X = X.squeeze(1) if self.squeeze_dim else X
                         test_pred = self.get_predictions(self.model(X.to(self.device)))
                         break
+        
             except RuntimeError:
                 inference_context = torch.no_grad()
                 #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
@@ -1198,7 +1281,7 @@ class ClassificationEngine(Common):
             all_labels = torch.cat(all_labels)
             all_preds = torch.cat(all_preds)
             try:
-                test_f1 = self.calculate_f1_score(all_labels, all_preds.argmax(dim=1), num_classes)
+                test_f1 = self.calculate_f1_score(all_labels, all_preds.argmax(dim=1), self.num_classes)
             except Exception as e:
                 self.warning(f"Innacurate calculation of F1-score: {e}")
             try:    
@@ -1207,7 +1290,7 @@ class ClassificationEngine(Common):
                 self.warning(f"Innacurate calculation of final FPR at recall: {e}")
                 test_fpr = 1.0
             try:    
-                test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
+                test_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, self.num_classes)
             except Exception as e:
                 self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
                 test_pauc = 0.0
@@ -1231,10 +1314,10 @@ class ClassificationEngine(Common):
         """
         Performs a scheduler step after the optimizer step.
 
-        Parameters:
-        - scheduler (torch.optim.lr_scheduler): The learning rate scheduler.
-        - test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
-        - test_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
+        Args:
+            scheduler (torch.optim.lr_scheduler): The learning rate scheduler.
+            test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
+            test_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
         """
             
         if self.scheduler:
@@ -1266,20 +1349,20 @@ class ClassificationEngine(Common):
         """
         Updates and saves the best model and model_epoch list based on the specified mode(s), as well as the last-epoch model.
 
-        Parameters:
-        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).
-        - test_acc (float, optional): Test accuracy for the current epoch (used in "acc" mode).
-        - test_f1 (float, optional): Test F1_score for the current epoch (used in "f1" mode).
-        - test_fpr (float, optional): Test false positive rate at the specified recall (used in "fpr" mode).
-        - test_pauc (float, optional): Test pAUC at the specified recall (used in "pauc" mode).
-        - epoch (int, optional): Current epoch index, used for naming models when saving all epochs in "all" mode.
+        Args:
+            test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).
+            est_acc (float, optional): Test accuracy for the current epoch (used in "acc" mode).
+            test_f1 (float, optional): Test F1_score for the current epoch (used in "f1" mode).
+            test_fpr (float, optional): Test false positive rate at the specified recall (used in "fpr" mode).
+            test_pauc (float, optional): Test pAUC at the specified recall (used in "pauc" mode).
+            epoch (int, optional): Current epoch index, used for naming models when saving all epochs in "all" mode.
 
         Functionality:
-        - Saves the last-epoch model.
-        - Saves the logs (self.results).
-        - Saves the best-performing model during training based on the specified evaluation mode.
-        - If mode is "all", saves the model for every epoch.
-        - Updates `self.model_<loss, acc, fpr, pauc, epoch>` accordingly.
+            Saves the last-epoch model.
+            Saves the logs (self.results).
+            Saves the best-performing model during training based on the specified evaluation mode.
+            If mode is "all", saves the model for every epoch.
+            Updates `self.model_<loss, acc, fpr, pauc, epoch>` accordingly.
 
         Returns:
             A dataframe of training and testing metrics for each epoch.
@@ -1291,17 +1374,24 @@ class ClassificationEngine(Common):
         if epoch is None:
             self.error(f"'epoch' must be provided when mode includes 'all' or 'last'.")
 
-        # Save model according criteria
 
-        # Helper functions
+        # Some helper functions
         def remove_previous_best(model_name):
-            """Removes previously saved best model files."""
+
+            """
+            Removes previously saved best model files.
+            """
+
             file_to_remove = glob.glob(os.path.join(self.target_dir, model_name.replace(".", "_epoch*.")))
             for f in file_to_remove:
                 os.remove(f)
 
         def save_model(model_name):
-            """Helper function to save the model."""
+
+            """
+            Helper function to save the model.
+            """
+
             self.save(model=self.model, target_dir=self.target_dir, model_name=model_name.replace(".", f"_epoch{epoch+1}."))
 
         if self.save_best_model:            
@@ -1375,7 +1465,6 @@ class ClassificationEngine(Common):
 
         return df_results
 
-    
     def finish_train(
         self,
         train_time: float=None,
@@ -1399,9 +1488,10 @@ class ClassificationEngine(Common):
         save_best_model: Union[str, List[str]] = "last",
         keep_best_models_in_memory: bool=False,
         dataloaders: dict[str, torch.utils.data.DataLoader] = None,
-        apply_validation: bool=True,
-        stabilization_epochs: int=0,
-        num_classes: int=2, 
+        apply_validation: bool=True,        
+        augmentation_strategy: str="always",
+        augmentation_off_epochs: int=5,
+        augmentation_random_prob: float=0.5,
         optimizer: torch.optim.Optimizer=None,
         loss_fn: torch.nn.Module=None,
         scheduler: torch.optim.lr_scheduler=None,
@@ -1442,10 +1532,17 @@ class ClassificationEngine(Common):
                 - "all" (save models for all epochs),
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
             keep_best_models_in_memory (bool, optional): If True, the best models are kept in memory for future inference. The model state from the last epoch will always be kept in memory.
-            dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).            
+            dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).
+                - 'train': training dataloader
+                - 'train_
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
-            stabilization_epochs (int, optional): Wheter to disable augmentation in the lat N epochs to stabilize training. Default is 0
-            num_classes (int, optional): Number of output classes for the model (default is 2).
+            augmentation_strategy (str, optional): Determines how data augmentation is applied during training.
+                - "always": augmentation is applied every epoch.
+                - "off_last": augmentation is disabled during the last `augmentation_off_epochs` epochs.
+                - "random": augmentation is applied randomly according to `augmentation_random_prob`.
+                Default is "always".
+            augmentation_off_epochs (int, optional): Number of final epochs in which augmentation is disabled if `augmentation_strategy` is set to "off_last". Default is 5.
+            augmentation_random_prob (float, optional): Probability (0.0-1.0) of applying augmentation in each batch if `augmentation_strategy` is set to "random". Default is 0.5.            
             optimizer (torch.optim.Optimizer, optional): Optimizer to use during training.
             loss_fn (torch.nn.Module, optional): Loss function used for training.
             scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler to adjust learning rate during training.
@@ -1502,11 +1599,13 @@ class ClassificationEngine(Common):
         self.init_train(
             target_dir=target_dir,
             model_name=model_name,
-            dataloader=dataloaders,
+            dataloaders=dataloaders,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,
             apply_validation=apply_validation,
-            estabilization_epochs=stabilization_epochs,
+            augmentation_strategy=augmentation_strategy,
+            augmentation_off_epochs=augmentation_off_epochs,
+            augmentation_random_prob=augmentation_random_prob,
             optimizer=optimizer,
             loss_fn=loss_fn,
             scheduler=scheduler,
@@ -1523,7 +1622,7 @@ class ClassificationEngine(Common):
         # Loop through training and testing steps for a number of epochs
         for epoch in range(epochs):
 
-            # Determine which dataloader to use
+            # Switch dataloaders according to 'augmentationi_strategy'
             train_dataloader = self.switch_dataloaders(epoch)
             test_dataloader = self.dataloaders['test'] if 'test' in self.dataloaders else None
 
@@ -1531,7 +1630,6 @@ class ClassificationEngine(Common):
             train_epoch_start_time = time.time()
             train_loss, train_acc, train_f1, train_fpr, train_pauc = self.train_step_v2(
                 dataloader=train_dataloader,
-                num_classes=num_classes,
                 recall_threshold=recall_threshold,
                 recall_threshold_pauc=recall_threshold_pauc,
                 epoch_number=epoch,
@@ -1546,7 +1644,6 @@ class ClassificationEngine(Common):
             test_epoch_start_time = time.time()
             test_loss, test_acc, test_f1, test_fpr, test_pauc = self.test_step(
                 dataloader=test_dataloader,
-                num_classes=num_classes,
                 recall_threshold=recall_threshold,
                 recall_threshold_pauc=recall_threshold_pauc,
                 epoch_number=epoch,
@@ -1969,7 +2066,7 @@ class ClassificationEngine(Common):
 
         # Return list of prediction dictionaries
         return pred_list, classification_report_dict
-    
+
 
 # Training and prediction engine class
 class DistillationEngine(Common):
@@ -1981,15 +2078,15 @@ class DistillationEngine(Common):
     of a PyTorch model, including saving the best model based on specific criteria.
 
     Args:
-        - student (torch.nn.Module, optional): The PyTorch model for the student to handle. Must be instantiated.
-        - teacher (torch.nn.Module, optional): The PyTorch model for the teacher to handle. Must be instantiated.
-        - color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+        student (torch.nn.Module, optional): The PyTorch model for the student to handle. Must be instantiated.
+        teacher (torch.nn.Module, optional): The PyTorch model for the teacher to handle. Must be instantiated.
+        color_map (dict, optional): Specifies the colors for the training and evaluation curves:
           'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
           'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
           'light_magenta', 'light_cyan'.
           Example: {'train': 'blue', 'test': 'orange', 'other': 'black'}
-        - log_verbose (bool, optional): if True, activate logger messages.
-        - device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
+        log_verbose (bool, optional): if True, activate logger messages.
+        device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
     """
 
     def __init__(
@@ -2042,6 +2139,93 @@ class DistillationEngine(Common):
         self.color_other = Colors.get_console_color(color_map['other'])
         self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
         self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
+        self.linewidth = Colors.get_linewidth()
+
+        # Initialize result logs
+        self.results = {}
+
+        # Check if model is provided
+        if self.model is None:
+            self.error(f"Instantiate the engine by passing a PyTorch model to handle.")
+        else:
+            self.model.to(self.device)
+
+
+
+
+
+# Training and prediction engine class
+class DistillationEngine(Common):
+
+    """
+    A class to handle training, evaluation, and predictions for a PyTorch model.
+
+    This class provides functionality to manage the training and evaluation lifecycle
+    of a PyTorch model, including saving the best model based on specific criteria.
+
+    Args:
+        student (torch.nn.Module, optional): The PyTorch model for the student to handle. Must be instantiated.
+        teacher (torch.nn.Module, optional): The PyTorch model for the teacher to handle. Must be instantiated.
+        color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+          'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
+          'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
+          'light_magenta', 'light_cyan'.
+          Example: {'train': 'blue', 'test': 'orange', 'other': 'black'}
+        log_verbose (bool, optional): if True, activate logger messages.
+        device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
+    """
+
+    def __init__(
+        self,
+        student: torch.nn.Module=None,
+        teacher: torch.nn.Module=None,
+        color_map: dict=None,
+        log_verbose: bool=True,
+        device: str="cuda" if torch.cuda.is_available() else "cpu"
+        ):
+
+        super().__init__()
+
+        # Initialize self variables
+        self.device = device
+        self.model = student
+        self.model_tch = teacher
+        self.model_acc = None
+        self.model_f1 = None
+        self.model_loss = None
+        self.model_fpr = None
+        self.model_pauc = None
+        self.model_epoch = None
+        self.save_best_model = False
+        self.keep_best_models_in_memory = False
+        self.mode = None
+        self.optimizer = None
+        self.loss_fn = None
+        self.scheduler = None
+        self.model_name = None
+        self.model_name_loss = None
+        self.model_name_acc = None
+        self.model_name_f1 = None
+        self.model_name_fpr = None
+        self.model_name_pauc = None
+        self.squeeze_dim = False
+        self.log_verbose = log_verbose
+     
+        # Initialize colors
+        default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
+        
+        # If the user provides a color_map, update the default with it
+        if color_map is None:
+            color_map = default_color_map # Use defaults if no user input
+        else:
+            color_map = {**default_color_map, **color_map} # Merge user input with defaults
+
+        self.color_train = Colors.get_console_color(color_map['train'])
+        self.color_test =  Colors.get_console_color(color_map['test'])
+        self.color_other = Colors.get_console_color(color_map['other'])
+        self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
+        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
+        self.linewidth = Colors.get_linewidth()
 
         # Initialize result logs
         self.results = {}
@@ -2290,9 +2474,9 @@ class DistillationEngine(Common):
 
             # Plot loss
             plt.subplot(1, n_plots, 1)
-            plt.plot(range_epochs, self.results["train_loss"], label="train_loss", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_loss"], label="train_loss", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_loss"], label="test_loss", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_loss"], label="test_loss", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title("Loss")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -2300,9 +2484,9 @@ class DistillationEngine(Common):
 
             # Plot accuracy
             plt.subplot(1, n_plots, 2)
-            plt.plot(range_epochs, self.results["train_acc"], label="train_accuracy", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_acc"], label="train_accuracy", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_acc"], label="test_accuracy", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_acc"], label="test_accuracy", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title("Accuracy")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -2310,9 +2494,9 @@ class DistillationEngine(Common):
 
             # Plot F1-score
             plt.subplot(1, n_plots, 3)
-            plt.plot(range_epochs, self.results["train_f1"], label="train_f1", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_f1"], label="train_f1", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_f1"], label="test_f1", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_f1"], label="test_f1", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title("F1-Score")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -2320,9 +2504,9 @@ class DistillationEngine(Common):
                     
             # Plot FPR at recall
             plt.subplot(1, n_plots, 4)
-            plt.plot(range_epochs, self.results["train_fpr"], label="train_fpr_at_recall", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_fpr"], label="train_fpr_at_recall", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_fpr"], label="test_fpr_at_recall", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_fpr"], label="test_fpr_at_recall", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title(f"FPR at {recall_threshold * 100}% recall")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
@@ -2330,14 +2514,15 @@ class DistillationEngine(Common):
 
             # Plot pAUC at recall
             plt.subplot(1, n_plots, 5)
-            plt.plot(range_epochs, self.results["train_pauc"], label="train_pauc_at_recall", color=self.color_train_plt)
+            plt.plot(range_epochs, self.results["train_pauc"], label="train_pauc_at_recall", color=self.color_train_plt, linewidth=self.linewidth)
             if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_pauc"], label="test_pauc_at_recall", color=self.color_test_plt)
+                plt.plot(range_epochs, self.results["test_pauc"], label="test_pauc_at_recall", color=self.color_test_plt, linewidth=self.linewidth)
             plt.title(f"pAUC above {recall_threshold_pauc * 100}% recall")
             plt.xlabel("Epochs")
             plt.grid(visible=True, which="both", axis="both")
             plt.legend()
-                    
+            
+            # Display plots
             plt.show()
 
     def init_train(
@@ -2765,6 +2950,7 @@ class DistillationEngine(Common):
             self.error(f"Innacurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
+            train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, recall_threshold_pauc, num_classes)
         except Exception as e:
             self.error(f"Innacurate calculation of final pAUC at recall: {e}")

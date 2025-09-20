@@ -54,6 +54,9 @@ class Colors:
         'light_magenta': '#EE82EE',
         'light_cyan': '#E0FFFF'
     	}
+    
+    # Linewidth
+    LINEWIDTH = 2
 
     @staticmethod
     def get_console_color(color_name):
@@ -64,6 +67,11 @@ class Colors:
     def get_matplotlib_color(color_name):
         # Return Matplotlib-compatible hex color
         return Colors.MATPLOTLIB_COLORS.get(color_name.lower(), '#000000')  # Default to black
+    
+    @staticmethod
+    def get_linewidth():
+        # Return linewidth
+        return Colors.LINEWIDTH
 
 # Logger class
 class Logger:

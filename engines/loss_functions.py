@@ -364,7 +364,10 @@ class DistillationLoss(nn.Module):
 
     Attributes:
         alpha (float): Weight for the hard loss (CrossEntropyLoss). Defaults to 0.5.
-        temperature (float): Temperature for softening the logits. Defaults to 3.0.
+        temperature (float): Temperature for softening the logits.
+            - temperature = 1: regular softmmax, no softening
+            - temperature > 1: softer distribution, more signal on similarities, more useful for learning            
+            Recommended values for temperature: 2 to 5. Defaults to 3.0.
         kl_div (nn.KLDivLoss): The Kullback-Leibler divergence loss function.
         ce_loss (nn.CrossEntropyLoss): The Cross Entropy loss function.
 
@@ -380,13 +383,16 @@ class DistillationLoss(nn.Module):
 
         Args:
             alpha (float): Controls the weighting between soft and hard losses. Defaults to 0.5.
-            temperature (float): Smooths the teacher’s probability distribution, making it easier for the student to learn from. Defaults to 3.0.
+            temperature (float): Smooths the teacher’s probability distribution, making it easier for the student to learn from.
+                - temperature = 1: regular softmmax, no softening
+                - temperature > 1: softer distribution, more signal on similarities, more useful for learning
+                Typical values for temperature: 2 to 5. Defaults to 3.0.
             label_smoothing: Controlls the confidence of the ground truth labels, helping to prevent overfitting. Defaults to 0.1.
         """
 
         super().__init__()
         self.alpha = alpha
-        self.temperature = temperature
+        self.temperature = max(temperature, 1.0) # Avoid temperature < 1
         self.kl_div = nn.KLDivLoss(reduction="batchmean")
         self.ce_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     

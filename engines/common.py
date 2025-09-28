@@ -96,7 +96,10 @@ class Logger:
 # Common utility class
 class Common(Logger):
 
-    """A class containing utility functions for classification tasks."""
+    """
+    A class containing utility functions for classification tasks.
+    """
+
     def __init__(self, log_verbose: bool=True):
         super().__init__(log_verbose=log_verbose)
 
@@ -128,7 +131,8 @@ class Common(Logger):
     
     def calculate_f1_score(self, y_true, y_pred, num_classes, average="macro"):
 
-        """Calculates the F1 score for multi-class classification.
+        """
+        Calculates the F1 score for multi-class classification.
 
         Args:
             y_true (torch.Tensor): Ground truth labels (shape: [batch_size]).
@@ -401,7 +405,7 @@ class Common(Logger):
     def get_predictions(self, output):
         if isinstance(output, torch.Tensor):
             return output.contiguous()
-        elif hasattr(output, "logits"):            
+        elif hasattr(output, "logits"):
             return output.logits.contiguous()
         else:
             self.error(f"Unexpected model output type: {type(output)}")

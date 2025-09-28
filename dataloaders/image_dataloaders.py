@@ -38,7 +38,51 @@ class DualTransformDataset(datasets.ImageFolder):
         else:
             img = self.transform_noaug(image)
         return img, label
+
+
+class DistillationDataset(Dataset):
+    def __init__(self, image_folder_dataset, transform_student, transform_teacher):
+        self.image_folder = image_folder_dataset
+        self.transform_student = transform_student
+        self.transform_teacher = transform_teacher
+
+    def __len__(self):
+        return len(self.image_folder)
+
+    def __getitem__(self, idx):
+        
+        # Load image and label from the dataset
+        img, label = self.image_folder[idx]
+
+        # Convert Tensor back to PIL Image if necessary (depends on dataset output)
+        if isinstance(img, torch.Tensor):
+            img = transforms.ToPILImage()(img)
+
+        # Generate a per-sample seed so that both transforms see the same randomness.
+        seed = torch.randint(0, 2**32, (1,)).item()
+
+        # Save current RNG states so we can restore them later
+        # This prevents altering the global RNG state of the worker
+        state_py = random.getstate()
+        state_torch = torch.get_rng_state()
+
+        # Apply the student transform with the given seed
+        random.seed(seed)
+        torch.manual_seed(seed)
+        img_student = self.transform_student(img)
+
+        # Restore RNG state before doing the teacher transform
+        random.setstate(state_py)
+        torch.set_rng_state(state_torch)
+
+        # Apply the teacher transform with the same seed
+        random.seed(seed)
+        torch.manual_seed(seed)
+        img_teacher = self.transform_teacher(img)
+
+        return img_student, img_teacher, label
     
+
 def create_dataloaders(
         train_dir: str, 
         test_dir: str, 
@@ -76,9 +120,9 @@ def create_dataloaders(
                                 num_workers=4)
     """
     # Use ImageFolder to create dataset(s)
-    #train_data = datasets.ImageFolder(train_dir, transform=train_transform)
+    train_data = datasets.ImageFolder(root=train_dir, transform=train_transform)
     # Create custom dataset
-    train_data = DualTransformDataset(root=train_dir, transform_aug=train_transform, transform_noaug=test_transform, use_aug=True)
+    #train_data = DualTransformDataset(root=train_dir, transform_aug=train_transform, transform_noaug=test_transform, use_aug=True)
     test_data = datasets.ImageFolder(root=test_dir, transform=test_transform)
 
     # Get class names
@@ -121,6 +165,94 @@ def create_dataloaders(
     )
 
     return train_dataloader, test_dataloader, class_names
+
+def create_distillation_dataloaders(
+        train_dir: str, 
+        test_dir: str, 
+        transform_student_train, 
+        transform_teacher_train,
+        transform_student_test,
+        transform_teacher_test,
+        batch_size: int, 
+        num_train_samples: int = None, 
+        num_test_samples: int = None,
+        num_workers: int = NUM_WORKERS
+    ):
+    """
+    Creates DataLoaders for knowledge distillation using DistillationDataset.
+
+    Args:
+        train_dir: Path to training directory.
+        test_dir: Path to testing directory.
+        transform_student_train: Transform for student inputs.
+        transform_teacher_train: Transform for teacher inputs.
+        transform_student_test: Transform for student test set.
+        transform_teacher_test: Transform for student test set.
+        batch_size: Batch size for DataLoaders.
+        num_train_samples: Optionally limit number of training samples.
+        num_test_samples: Optionally limit number of test samples.
+        num_workers: Number of DataLoader workers.
+
+    Returns:
+        train_dataloader, test_dataloader, class_names
+    """
+
+    # Base datasets
+    base_train_dataset = datasets.ImageFolder(root=train_dir)
+    base_test_dataset = datasets.ImageFolder(root=test_dir)
+
+    # Optional sampling (train)
+    if num_train_samples is not None:
+        indices = (random.choices if num_train_samples > len(base_train_dataset)
+                   else random.sample)(range(len(base_train_dataset)), k=num_train_samples)
+        base_train_dataset = Subset(base_train_dataset, indices)
+
+    # Optional sampling (test)
+    if num_test_samples is not None:
+        indices = (random.choices if num_test_samples > len(base_test_dataset)
+                   else random.sample)(range(len(base_test_dataset)), k=num_test_samples)
+        base_test_dataset = Subset(base_test_dataset, indices)
+
+    # Distillation-aware training dataset
+    train_dataset = DistillationDataset(
+        image_folder_dataset=base_train_dataset,
+        transform_student=transform_student_train,
+        transform_teacher=transform_teacher_train
+    )
+
+    # Distillation-aware testing dataset
+    test_dataset = DistillationDataset(
+        image_folder_dataset=base_test_dataset,
+        transform_student=transform_student_test,
+        transform_teacher=transform_teacher_test
+    )
+
+    # Extract class names
+    class_names = (
+        train_dataset.image_folder.classes
+        if isinstance(train_dataset.image_folder, datasets.ImageFolder)
+        else train_dataset.image_folder.dataset.classes
+    )
+
+    # DataLoaders
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+
+    return train_dataloader, test_dataloader, class_names
+
 
 def resample_data(data, labels, samples_0=None, samples_1=None):
     """
@@ -451,7 +583,7 @@ def create_dataloaders_vit(
 
 
 def create_dataloaders_swin(
-    swin_model: str = "swin_t",
+    swin_model: str = "swin_v2_t_256",
     train_dir: str = "./train",
     test_dir: str = "./test",
     batch_size: int = 64,

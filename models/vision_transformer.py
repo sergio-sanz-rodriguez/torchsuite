@@ -18,6 +18,24 @@ class HyperspectralToRGB(nn.Module):
         return self.conv1(x) 
 
 class SpatialConcatenation(nn.Module):
+
+    """
+    SpatialConcatenation performs a spatial reshaping of input feature maps
+    to generate a 3-channel image-like tensor of a desired spatial dimension.
+
+    The process involves:
+      1. Reducing the number of input channels using a 1x1 convolution.
+      2. Rearranging channels into spatial blocks to create a larger image.
+      3. Optionally resizing the output spatially to match a target resolution.
+
+    Args:
+        in_channels (int): Number of input channels.
+        spatial_dim (int): Target spatial size (height and width) of the output.
+        row_blocks (int): Number of vertical (row) blocks used for spatial concatenation.
+        column_blocks (int): Number of horizontal (column) blocks used for spatial concatenation.
+        device (torch.device): Device to run the layer on.
+    """
+    
     def __init__(
         self,
         in_channels: int=125,
@@ -57,8 +75,6 @@ class SpatialConcatenation(nn.Module):
         #    self.adaptive_pool = nn.Identity()
 
         self.pool = nn.MaxPool2d(2, 2)
-
-
 
     def forward(self, x):
                 
@@ -183,29 +199,29 @@ class SpectralViT(nn.Module):
         model_map = {
             # ViT-Base / -Large / -Huge
             "vitbase16":    (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.DEFAULT,                  768),
-            "vitbase16_2":  (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1,  768),
+            "vitbase16_2":  (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1,   768),
             "vitbase32":    (torchvision.models.vit_b_32,    torchvision.models.ViT_B_32_Weights.DEFAULT,                  768),
             "vitlarge16":   (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.DEFAULT,                 1024),
-            "vitlarge16_2": (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1, 1024),
+            "vitlarge16_2": (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1,  1024),
             "vitlarge32":   (torchvision.models.vit_l_32,    torchvision.models.ViT_L_32_Weights.DEFAULT,                 1024),
             "vithuge14":    (torchvision.models.vit_h_14,    torchvision.models.ViT_H_14_Weights.DEFAULT,                 1280),
 
             # Swin-T / -S / -B
-            "swin_t":       (torchvision.models.swin_t,      torchvision.models.Swin_T_Weights.DEFAULT,                   768),
-            "swin_s":       (torchvision.models.swin_s,      torchvision.models.Swin_S_Weights.DEFAULT,                   768),
-            "swin_b":       (torchvision.models.swin_b,      torchvision.models.Swin_B_Weights.DEFAULT,                  1024),
+            "swin_t":       (torchvision.models.swin_t,      torchvision.models.Swin_T_Weights.DEFAULT,                    768),
+            "swin_s":       (torchvision.models.swin_s,      torchvision.models.Swin_S_Weights.DEFAULT,                    768),
+            "swin_b":       (torchvision.models.swin_b,      torchvision.models.Swin_B_Weights.DEFAULT,                   1024),
 
             # Swin-V2 T / S / B
-            "swin_v2_t":    (torchvision.models.swin_v2_t,   torchvision.models.Swin_V2_T_Weights.DEFAULT,                768),
-            "swin_v2_s":    (torchvision.models.swin_v2_s,   torchvision.models.Swin_V2_S_Weights.DEFAULT,                768),
-            "swin_v2_b":    (torchvision.models.swin_v2_b,   torchvision.models.Swin_V2_B_Weights.DEFAULT,               1024),
+            "swin_v2_t":    (torchvision.models.swin_v2_t,   torchvision.models.Swin_V2_T_Weights.DEFAULT,                 768),
+            "swin_v2_s":    (torchvision.models.swin_v2_s,   torchvision.models.Swin_V2_S_Weights.DEFAULT,                 768),
+            "swin_v2_b":    (torchvision.models.swin_v2_b,   torchvision.models.Swin_V2_B_Weights.DEFAULT,                1024),
 
             # EfficientNet
-            "efficientnet_b0": (torchvision.models.efficientnet_b0, torchvision.models.EfficientNet_B0_Weights.DEFAULT, 1280),
-            "efficientnet_b1": (torchvision.models.efficientnet_b1, torchvision.models.EfficientNet_B1_Weights.DEFAULT, 1280),
-            "efficientnet_b2": (torchvision.models.efficientnet_b2, torchvision.models.EfficientNet_B2_Weights.DEFAULT, 1408),
-            "efficientnet_b3": (torchvision.models.efficientnet_b3, torchvision.models.EfficientNet_B3_Weights.DEFAULT, 1536),
-            "efficientnet_b4": (torchvision.models.efficientnet_b4, torchvision.models.EfficientNet_B4_Weights.DEFAULT, 1792),
+            "efficientnet_b0": (torchvision.models.efficientnet_b0, torchvision.models.EfficientNet_B0_Weights.DEFAULT,   1280),
+            "efficientnet_b1": (torchvision.models.efficientnet_b1, torchvision.models.EfficientNet_B1_Weights.DEFAULT,   1280),
+            "efficientnet_b2": (torchvision.models.efficientnet_b2, torchvision.models.EfficientNet_B2_Weights.DEFAULT,   1408),
+            "efficientnet_b3": (torchvision.models.efficientnet_b3, torchvision.models.EfficientNet_B3_Weights.DEFAULT,   1536),
+            "efficientnet_b4": (torchvision.models.efficientnet_b4, torchvision.models.EfficientNet_B4_Weights.DEFAULT,   1792),
 
             # ResNet v1
             "resnet18":     (torchvision.models.resnet18,    torchvision.models.ResNet18_Weights.IMAGENET1K_V1,                 512),
@@ -287,6 +303,129 @@ class SpectralViT(nn.Module):
 
         return x
 
+
+def create_model(
+    model: str = "vitbase16",
+    num_classes: int = 1,
+    dropout: float = 0.0,
+    freeze: bool = False,
+    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    seed: int = 42
+):
+    
+    """
+    Creates and configures a pretrained image classification model from torchvision,
+    with support for various architectures (ViT, Swin, ResNet, EfficientNet, MobileNet, ConvNeXt, etc.).
+
+    This function:
+      - Loads the requested model with pretrained weights.
+      - Replaces its classification head for a new task (num_classes output).
+      - Optionally freezes the pretrained layers.
+      - Sets random seeds for reproducibility.
+      - Moves the model to the specified device.
+
+    Args:
+        model (str): Model identifier string (e.g., "vitbase16", "swin_t", "resnet50").
+        num_classes (int): Number of output classes for the classification head.
+        dropout (float): Dropout probability for the new head (if applicable).
+        freeze (bool): Whether to freeze all pretrained weights.
+        device (torch.device): Device to load the model onto.
+        seed (int): Random seed for reproducibility.
+
+    Returns:
+        torch.nn.Module: Configured and ready-to-train PyTorch model.
+    """
+
+    # Map of model names to their constructor, pretrained weights, and hidden dimension of the last feature layer.
+    model_map = {
+
+        # Vision Transformers (ViT)
+        "vitbase16":    (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.DEFAULT,                  768),
+        "vitbase16_2":  (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1,   768),
+        "vitbase32":    (torchvision.models.vit_b_32,    torchvision.models.ViT_B_32_Weights.DEFAULT,                  768),
+        "vitlarge16":   (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.DEFAULT,                 1024),
+        "vitlarge16_2": (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1,  1024),
+        "vitlarge32":   (torchvision.models.vit_l_32,    torchvision.models.ViT_L_32_Weights.DEFAULT,                 1024),
+        "vithuge14":    (torchvision.models.vit_h_14,    torchvision.models.ViT_H_14_Weights.DEFAULT,                 1280),
+
+        # Swin Transformers
+        "swin_t":       (torchvision.models.swin_t,      torchvision.models.Swin_T_Weights.DEFAULT,                    768),
+        "swin_s":       (torchvision.models.swin_s,      torchvision.models.Swin_S_Weights.DEFAULT,                    768),
+        "swin_b":       (torchvision.models.swin_b,      torchvision.models.Swin_B_Weights.DEFAULT,                   1024),
+
+        # Swin V2
+        "swin_v2_t":    (torchvision.models.swin_v2_t,   torchvision.models.Swin_V2_T_Weights.DEFAULT,                 768),
+        "swin_v2_s":    (torchvision.models.swin_v2_s,   torchvision.models.Swin_V2_S_Weights.DEFAULT,                 768),
+        "swin_v2_b":    (torchvision.models.swin_v2_b,   torchvision.models.Swin_V2_B_Weights.DEFAULT,                1024),
+
+        # EfficientNet family
+        "efficientnet_b0": (torchvision.models.efficientnet_b0, torchvision.models.EfficientNet_B0_Weights.DEFAULT,   1280),
+        "efficientnet_b1": (torchvision.models.efficientnet_b1, torchvision.models.EfficientNet_B1_Weights.DEFAULT,   1280),
+        "efficientnet_b2": (torchvision.models.efficientnet_b2, torchvision.models.EfficientNet_B2_Weights.DEFAULT,   1408),
+        "efficientnet_b3": (torchvision.models.efficientnet_b3, torchvision.models.EfficientNet_B3_Weights.DEFAULT,   1536),
+        "efficientnet_b4": (torchvision.models.efficientnet_b4, torchvision.models.EfficientNet_B4_Weights.DEFAULT,   1792),
+
+        # ResNet v1
+        "resnet18":     (torchvision.models.resnet18,    torchvision.models.ResNet18_Weights.IMAGENET1K_V1,            512),
+        "resnet34":     (torchvision.models.resnet34,    torchvision.models.ResNet34_Weights.IMAGENET1K_V1,            512),
+        "resnet50":     (torchvision.models.resnet50,    torchvision.models.ResNet50_Weights.IMAGENET1K_V1,           2048),
+        "resnet101":    (torchvision.models.resnet101,   torchvision.models.ResNet101_Weights.IMAGENET1K_V1,          2048),
+        "resnet152":    (torchvision.models.resnet152,   torchvision.models.ResNet152_Weights.IMAGENET1K_V1,          2048),
+
+        # ResNet v2 (newer weights)
+        "resnet50_v2":  (torchvision.models.resnet50,    torchvision.models.ResNet50_Weights.IMAGENET1K_V2,           2048),
+        "resnet101_v2": (torchvision.models.resnet101,   torchvision.models.ResNet101_Weights.IMAGENET1K_V2,          2048),
+        "resnet152_v2": (torchvision.models.resnet152,   torchvision.models.ResNet152_Weights.IMAGENET1K_V2,          2048),
+
+        # MobileNet
+        "mobilenet_v2":        (torchvision.models.mobilenet_v2,        torchvision.models.MobileNet_V2_Weights.DEFAULT,        1280),
+        "mobilenet_v3_small":  (torchvision.models.mobilenet_v3_small,  torchvision.models.MobileNet_V3_Small_Weights.DEFAULT,  1024),
+        "mobilenet_v3_large":  (torchvision.models.mobilenet_v3_large,  torchvision.models.MobileNet_V3_Large_Weights.DEFAULT,  1280),
+
+        #  ConvNeXt
+        "convnext_t":   (torchvision.models.convnext_tiny,  torchvision.models.ConvNeXt_Tiny_Weights.DEFAULT,          768),
+        "convnext_s":   (torchvision.models.convnext_small, torchvision.models.ConvNeXt_Small_Weights.DEFAULT,         768),
+        "convnext_b":   (torchvision.models.convnext_base,  torchvision.models.ConvNeXt_Base_Weights.DEFAULT,         1024),
+        "convnext_l":   (torchvision.models.convnext_large, torchvision.models.ConvNeXt_Large_Weights.DEFAULT,        1536),
+    }
+    
+    # Check for supported model name
+    if model not in model_map:
+        raise ValueError(f"Unsupported ViT model name: {model}")
+
+    # Retrieve constructor, pretrained weights, and hidden dimension
+    vit_fn, weights_enum, hidden_dim = model_map[model]
+
+    # Instantiate model with pretrained weights and user-specified dropout
+    model = vit_fn(weights=weights_enum, dropout=dropout).to(device)
+
+    # Optionally freeze all model parameters (for feature extraction mode)
+    if freeze:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    # Set the seed for general torch operations
+    torch.manual_seed(seed)
+
+    # Set the seed for CUDA torch operations (ones that happen on the GPU)
+    torch.cuda.manual_seed(seed)
+
+        # Replace head / classifier / fc
+    if hasattr(model, "heads"):  # ViT models
+        model.heads = nn.Linear(hidden_dim, num_classes).to(device)
+    elif hasattr(model, "head"):  # ViT models
+        model.head = nn.Linear(hidden_dim, num_classes).to(device)
+    elif hasattr(model, "classifier"):  # EfficientNet, MobileNet, ConvNeXt
+        if isinstance(model.classifier, nn.Sequential):  # MobileNet, EfficientNet
+            model.classifier[-1] = nn.Linear(hidden_dim, num_classes).to(device)
+        else:
+            model.classifier = nn.Linear(hidden_dim, num_classes).to(device)
+    elif hasattr(model, "fc"):  # ResNet
+        model.fc = nn.Linear(hidden_dim, num_classes).to(device)
+    else:
+        raise ValueError(f"Cannot replace classifier head for model type: {type(model)}")
+
+    return model
 
 
 # Implementation of a vision transformer following the paper "AN IMAGE IS WORTH 16X16 WORDS: TRANSFORMERS FOR IMAGE RECOGNITION AT SCALE"

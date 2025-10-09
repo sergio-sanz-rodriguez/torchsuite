@@ -154,7 +154,7 @@ class ClassificationEngine(Common):
                 'acc':  ['acc', 'accuracy', 'Accuracy'],
                 'f1':   ['f1', 'f1', 'F1-Score'],
                 'fpr':  ['fpr', 'fpr_at_recall', f"FPR at {self.recall_threshold * 100}% recall"],
-                'pauc': ['pauc', 'pauc', 'pauc_at_recall', f"pAUC above {self.recall_threshold_pauc * 100}% recall"]
+                'pauc': ['pauc', 'pauc_at_recall', f"pAUC above {self.recall_threshold_pauc * 100}% recall"]
             }
 
     # Function to set the settings and line width for visualization
@@ -2038,11 +2038,11 @@ class ClassificationEngine(Common):
 
         if is_teacher and self.use_distillation:
             self.model_teacher.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
+            return self.model_teacher
         else:
             state_dict = torch.load(model_path, weights_only=True, map_location=self.device)
             self.model.load_state_dict(state_dict)
-        
-        return self
+            return self.model
 
     # Trains and tests a Pytorch model
     def train(

@@ -514,16 +514,15 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
     Args:
         augmentation (bool): Whether to apply augmentation to the audio.
         mean_std_norm (bool): Whether to normalize the spectrogram using mean and std.
-        fft_analysis_method (str): The type of FFT analysis to perform ("none", "time_freq", or "freq_band"):
-            - "none": One spectrogram fo the whole signal.
+        fft_analysis_method (str): The type of FFT analysis to perform ("single", "time_freq", or "freq_band"):
+            - "single": One spectrogram fo the whole signal. The spectrogram is replicated across the three image channels.
             - "time_freq": Three spectrograms with different time-frequency-resolution trade-offs.
             - "freq_band": Three spectrograms analyzing different (low, mid, high) frequency bands.
-            - "all": Creates an image with three channels, one channel for each fft analysis method
         fft_analysis_concat (str): Only applicable to "time_freq" and "freq_band", specifies how the spectrograms should be concatenated:
-            - "freq": Concatenation along the frequency axis (default for "freq_band").
-            - "time": Concatenation along the time axis.
-            - "channel": One spectrogram per image channel (RGB-like) (default for "time_freq")
-            - "default": "freq" for method "freq_band", "channel" for method "time_freq"
+            - "freq": Concatenation along the frequency axis (default for "freq_band"); equivalent to a vertical stack.
+            - "time": Concatenation along the time axis; equivalent to a horizontal stack.
+            - "channel": One spectrogram per image channel (RGB-like) (default for "time_freq").
+            - "default": "freq" for method "freq_band", "channel" for method "time_freq".
         sample_rate (int): The original sample rate of the audio.
         new_sample_rate (int): The resampled audio sample rate.
         target_length (int): The target length of the waveform after padding.
@@ -563,7 +562,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
             augmentation (bool): Whether to apply augmentation to the audio.
             mean_std_norm (bool): Whether to normalize the spectrogram using mean and std.
             fft_analysis_method (str): The type of FFT analysis to perform ("none", "time_freq", or "freq_band"):
-                - "none": One spectrogram fo the whole signal.
+                - "single": One spectrogram fo the whole signal.
                 - "time_freq": Three spectrograms with different time-frequency-resolution trade-offs.
                 - "freq_band": Three spectrograms analyzing different (low, mid, high) frequency bands.
                 - "all": Creates an image with three channels, one channel for each fft analysis method

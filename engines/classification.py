@@ -112,6 +112,7 @@ class ClassificationEngine(Common):
         self.model_name_pauc = None
         self.squeeze_dim = False
         self.checkpoint_path_prefix = "ckpt"
+        self.valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
         
         # Check if model is provided
         if self.model is None:
@@ -538,9 +539,8 @@ class ClassificationEngine(Common):
             model (torch.nn.Module): The model selected for inference.
         """
         
-        valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
-        if not (model_state in valid_modes or isinstance(model_state, int)):
-            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
+        if not (model_state in self.valid_modes or isinstance(model_state, int)):
+            self.error(f"Invalid model value: {model_state}. Must be one of {self.valid_modes} or an integer.")
 
         if model_state == "last":
             model = self.model
@@ -824,14 +824,13 @@ class ClassificationEngine(Common):
         else:
             self.error(f"'save_best_model' must be None, a string, or a list of strings.")
 
-        # Validate mode only if save_best_model is True
-        valid_modes = {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
+        # Validate mode only if save_best_model is True        
         if self.save_best_model:
             if not isinstance(mode, list):
                 self.error(f"'mode' must be a string or a list of strings.")
             for m in mode:
-                if m not in valid_modes:
-                    self.error(f"Invalid mode value: '{m}'. Must be one of {valid_modes}")
+                if m not in self.valid_modes:
+                    self.error(f"Invalid mode value: '{m}'. Must be one of {self.valid_modes}")
 
         # Assign the validated mode list
         self.mode = mode

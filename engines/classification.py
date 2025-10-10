@@ -393,6 +393,18 @@ class ClassificationEngine(Common):
         """
         display(HTML(style))
 
+    # Utility function to squeeze dimension 1
+    def _squeeze(self, X):
+
+        """
+        Squeezes dimension 1, mainly thought for audio signals where this dimension is not needed
+        """
+
+        if self.squeeze_dim:
+            X = X.squeeze(1)
+        return X
+    
+
     # Utility function for _progress_bar
     def _is_notebook(self):
 
@@ -936,8 +948,8 @@ class ClassificationEngine(Common):
             data = self.dataloaders['train'].dataset[0]
             #data = next(iter(self.dataloaders['train']))
 
-            if isinstance(data, (tuple, list)) and len(data) == 2:
-                X, y = data
+            if isinstance(data, (tuple, list)) and len(data) == 2:    
+                X = data[0].unsqueeze(0).to(self.device) # Add batch dimension                
             else:
                 self.error('The training dataset should contain two elements: image, label')
 
@@ -945,46 +957,56 @@ class ClassificationEngine(Common):
 
                 # Here is where the model will "complain" if the shape is incorrect
                 with torch.no_grad():
-                    # We just try the first signal of the batch, but we need to add batch dimension anyway
-                    y_pred = self.get_predictions(self.model(X.unsqueeze(0).to(self.device)))
 
-            except Exception as e:
+                    # We just try the first signal of the batch
+                    y_pred = self.get_predictions(self.model(X))
+
+            except RuntimeError as e:
 
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
-                if match:
-                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
-                else:
-                    self.warning(f"Attempting to reshape X.")
+                #if match:
+                #    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                #else:
+                #    self.warning(f"Attempting to reshape X.")
 
                 # Check the current shape of X and attempt a fix
                 if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]                    
-                    X = X.squeeze(1)                    
                     self.squeeze_dim = True
+                    X = self._squeeze(X)                    
+                    
                 elif X.ndimension() == 2:  # [batch_size, time_steps]                    
                     pass  # No change needed
                 else:
                     self.error(f"Unexpected input shape after exception handling: {X.shape}")
 
                 with torch.no_grad():
-                    y_pred = self.get_predictions(self.model(X.to(self.device)))
-
-            # Get the number of classes
-            try:
-
-                # If y_pred was successfully computed, get the number of classes
-                if 'y_pred' in locals():
-                    self.num_classes = y_pred.shape[1]
-                    self.info(f"Detected number of classes: {self.num_classes}.")                        
-                
-                # Otherwise, throw an exception
-                else:
-                    self.error("y_pred is not defined due to a failure in the forward pass.")
+                    y_pred = self.get_predictions(self.model(X))
             
             except Exception as e:
 
-                # Throw an exception if the shape of the output tensor is unexpected
-                self.error(f"Unexpected shape in of the prediction output: {y_pred.shape}.")
+                # Catch any unexpected errors (not shape-related)
+                self.error(f"Unexpected error during input shape compatibility checking: {str(e)}")
+            
+            finally:
+                
+                # Always attempt to detect the number of classes
+                try:
+
+                    # If y_pred was successfully computed, get the number of classes
+                    if 'y_pred' in locals():
+                        self.num_classes = y_pred.shape[1]
+                        self.info(f"Detected number of classes: {self.num_classes}.")                        
+                    
+                    # Otherwise, throw an exception
+                    else:
+                        self.error("y_pred is not defined due to a failure in the forward pass.")
+                
+                except Exception as e:
+
+                    # Throw an exception if the shape of the output tensor is unexpected
+                    shape_info = getattr(y_pred, 'shape', 'undefined')
+                    self.error(f"Unexpected shape in of the prediction output: {shape_info}.")
         
         # Distillation
         else:
@@ -995,19 +1017,19 @@ class ClassificationEngine(Common):
             # Load the first image of the dataset for verification
             data = self.dataloaders['train'].dataset[0]
 
-            if isinstance(data, (tuple, list)) and len(data) == 3:
-                X, X_tch, y = data
+            if isinstance(data, (tuple, list)) and len(data) == 3:                
+                X = data[0].unsqueeze(0).to(self.device) # Add batch dimension
+                X_tch = data[1].unsqueeze(0).to(self.device) # Add batch dimension
             else:
                 self.error('The training dataset should contain three elements: image_student, image_teacher, label')
             
             try:
 
                 # Here is where the model will "complain" if the shape is incorrect
-                # Add batch dimension to X and X_tch
-                y_pred_std = self.get_predictions(self.model(X.unsqueeze(0).to(self.device)))   
-                y_pred_tch = self.get_predictions(self.model_teacher(X_tch.unsqueeze(0).to(self.device)))                
+                y_pred_std = self.get_predictions(self.model(X))   
+                y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
 
-            except Exception as e:
+            except RuntimeError as e:
 
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
@@ -1018,8 +1040,9 @@ class ClassificationEngine(Common):
 
                 # Check the current shape of X and attempt a fix
                 if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
-                    X = X.squeeze(1)                    
                     self.squeeze_dim = True
+                    X = self._squeeze(X)
+
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
@@ -1027,35 +1050,43 @@ class ClassificationEngine(Common):
                     
                 # Check the current shape of X and attempt a fix
                 if X_tch.ndimension() == 3 and X_tch.shape[1] == 1:  # [batch_size, 1, time_steps]
-                    X_tch = X_tch.squeeze(1)                    
+                    X_tch = self._squeeze(X_tch)                    
                 elif X_tch.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
                     self.error(f"Unexpected input shape after exception handling: {X_tch.shape}")
                 
                 with torch.no_grad():
-                    y_pred_std = self.get_predictions(self.model(X.to(self.device)))
-                    y_pred_tch = self.get_predictions(self.model(X_tch.to(self.device)))                    
-            
-            try:
+                    y_pred_std = self.get_predictions(self.model(X))
+                    y_pred_tch = self.get_predictions(self.model(X_tch))  
 
-                # If y_pred was successfully computed, get the number of classes
-                if 'y_pred_std' in locals() or 'y_pred_tch' in locals():
-                    self.num_classes = y_pred_std.shape[1]
-                    num_classes_tch = y_pred_tch.shape[1]
-                    self.info(f"Detected number of classes: {self.num_classes}.")
-
-                    if self.num_classes != num_classes_tch:
-                        self.error("The number of classes in the teacher and student models are different.")
-                
-                # Otherwise, throw an exception
-                else:
-                    self.error("Either the predictions by student ('y_pred_std') or by teacher ('y_pred_tch') are not defined due to a failure in the forward pass.")
-            
             except Exception as e:
 
-                # Throw an exception if the shape of the output tensor is unexpected
-                self.error(f"Unexpected shape in of the prediction output: {y_pred_std.shape}.")
+                # Catch any unexpected errors (not shape-related)
+                self.error(f"Unexpected error during input shape compatibility checking: {str(e)}")                  
+            
+            finally:
+
+                # Always attempt to detect the number of classes
+                try:
+
+                    # If y_pred was successfully computed, get the number of classes
+                    if 'y_pred_std' in locals() or 'y_pred_tch' in locals():
+                        self.num_classes = y_pred_std.shape[1]
+                        num_classes_tch = y_pred_tch.shape[1]
+                        self.info(f"Detected number of classes: {self.num_classes}.")
+
+                        if self.num_classes != num_classes_tch:
+                            self.error("The number of classes in the teacher and student models are different.")
+                    
+                    # Otherwise, throw an exception
+                    else:
+                        self.error("Either the predictions by student ('y_pred_std') or by teacher ('y_pred_tch') are not defined due to a failure in the forward pass.")
+                
+                except Exception as e:
+
+                    # Throw an exception if the shape of the output tensor is unexpected
+                    self.error(f"Unexpected shape in of the prediction output: {y_pred_std.shape}.")
 
         #self.info("Making an in-memory copy of the model...")
 
@@ -1159,9 +1190,8 @@ class ClassificationEngine(Common):
                 ):
                 
                 # Send data to target device
-                X, y = X.to(self.device), y.to(self.device)            
-                X = X.squeeze(1) if self.squeeze_dim else X
-                
+                X, y = self._squeeze(X.to(self.device)), y.to(self.device)                
+  
                 # Optimize training with amp if available
                 if self.amp:
                     with autocast(device_type='cuda', dtype=torch.float16):
@@ -1268,9 +1298,7 @@ class ClassificationEngine(Common):
                 stage="train"):
                 
                 # Send data to target device
-                X, X_tch, y = X.to(self.device), X_tch.to(self.device), y.to(self.device)
-                X = X.squeeze(1) if self.squeeze_dim else X
-                X_tch = X_tch.squeeze(1) if self.squeeze_dim else X_tch
+                X, X_tch, y = self._squeeze(X.to(self.device)), self._squeeze(X_tch.to(self.device)), y.to(self.device)
 
                 # Optimize training with amp if available
                 if self.amp:
@@ -1383,17 +1411,17 @@ class ClassificationEngine(Common):
         try:
             train_f1 = self.calculate_f1_score(all_labels, all_preds.argmax(dim=1), self.num_classes)
         except Exception as e:
-            self.warning(f"Innacurate calculation of F1-score: {e}")
+            self.warning(f"Inaccurate calculation of F1-score: {e}")
             train_f1 = 0.0
         try:    
             train_fpr = self.calculate_fpr_at_recall(all_labels, all_preds, self.recall_threshold)            
         except Exception as e:
-            self.warning(f"Innacurate calculation of final FPR at recall: {e}")
+            self.warning(f"Inaccurate calculation of final FPR at recall: {e}")
             train_fpr = 1.0
         try:    
             train_pauc = self.calculate_pauc_at_recall(all_labels, all_preds, self.recall_threshold_pauc, self.num_classes)
         except Exception as e:
-            self.warning(f"Innacurate calculation of final pAUC at recall: {e}")
+            self.warning(f"Inaccurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
         
         del all_preds, all_labels
@@ -1466,8 +1494,7 @@ class ClassificationEngine(Common):
                     data = dataloader.dataset[0]
                     X = data[0].unsqueeze(0)
                     # Remove dimension 1 for audio signals: [1, time]
-                    if self.squeeze_dim:
-                        X = X.squeeze(1)
+                    X = self._squeeze(X)
                     y_pred = self.get_predictions(self.model(X.to(self.device)))
                     
             except RuntimeError:
@@ -1488,8 +1515,7 @@ class ClassificationEngine(Common):
                         stage='test'):
 
                         # Send data to target device
-                        X, y = X.to(self.device), y.to(self.device)                    
-                        X = X.squeeze(1) if self.squeeze_dim else X
+                        X, y = self._squeeze(X.to(self.device)), y.to(self.device)                        
                         
                         if torch.isnan(X).any() or torch.isinf(X).any():
                             self.warning(f"NaN or Inf detected in test input!")
@@ -1543,9 +1569,7 @@ class ClassificationEngine(Common):
                         stage="test"):
 
                         # Send data to target device                    
-                        X, X_tch, y = X.to(self.device), X_tch.to(self.device), y.to(self.device)
-                        X = X.squeeze(1) if self.squeeze_dim else X
-                        X_tch = X_tch.squeeze(1) if self.squeeze_dim else X_tch
+                        X, X_tch, y = self._squeeze(X.to(self.device)), self._squeeze(X_tch.to(self.device)), y.to(self.device)                        
 
                         if torch.isnan(X).any() or torch.isinf(X).any() or torch.isnan(X_tch).any() or torch.isinf(X_tch).any():
                             self.warning(f"NaN or Inf detected in test input!")
@@ -2298,9 +2322,7 @@ class ClassificationEngine(Common):
 
                 # Send data and targets to target device
                 X = data[0]
-                X = X.to(self.device)
-                if self.squeeze_dim:
-                    X = X.squeeze(1)
+                X = self._squeeze(X.to(self.device))                
                 
                 # Perform forward pass
                 y_logit = self.get_predictions(model(X))                
@@ -2433,9 +2455,12 @@ class ClassificationEngine(Common):
             
             # Attempt a forward pass to check if the shape of transformed_image is compatible
             try:
+
                 # Here is where the model will "complain" if the shape is incorrect
                 check = model(signal)
-            except Exception as e:
+
+            except RuntimeError as e:
+
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
                 if match:
@@ -2450,6 +2475,11 @@ class ClassificationEngine(Common):
                     pass  # No change needed
                 else:
                     self.error(f"Unexpected input shape after exception handling: {signal.shape}")
+            
+            except Exception as e:                
+
+                # Catch any unexpected errors (not shape-related)
+                self.error(f"Unexpected error during input shape compatibility checking: {str(e)}")
             
             # Get prediction forms: logits, probabilities, predicted label, predicted class
             with inference_context:

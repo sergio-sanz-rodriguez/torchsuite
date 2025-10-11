@@ -12,49 +12,35 @@ Functions:
 
 import torch
 import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 import numpy as np
-from torch import nn
+import IPython.display as ipd
 import os
-import zipfile
-from pathlib import Path
-import requests
 import torchvision
-from typing import List, Dict, Tuple
 import random
+from torch import nn
+from pathlib import Path
 from PIL import Image
+from typing import List, Dict, Tuple
 from torchvision.transforms import v2
+from torchvision import datasets, transforms
 from tqdm.auto import tqdm
 from tkinter import Tk
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 from sklearn.metrics import f1_score, accuracy_score, roc_curve, auc
+from sklearn.model_selection import StratifiedKFold
 from IPython.core.display import display, HTML
-import IPython.display as ipd
 
-
-# Walk through an image classification directory and find out how many files (images)
-# are in each subdirectory.
-def walk_through_dir(dir_path):
-    """
-    Walks through dir_path returning its contents.
-    Args:
-    dir_path (str): target directory
-
-    Returns:
-    A print out of:
-      number of subdiretories in dir_path
-      number of images (files) in each subdirectory
-      name of each subdirectory
-    """
-    for dirpath, dirnames, filenames in os.walk(dir_path):
-        print(f"There are {len(dirnames)} directories and {len(filenames)} images in '{dirpath}'.")
 
 def plot_decision_boundary(model: torch.nn.Module, X: torch.Tensor, y: torch.Tensor):
-    """Plots decision boundaries of model predicting on X in comparison to y.
+    
+    """
+    Plots decision boundaries of model predicting on X in comparison to y.
 
     Source - https://madewithml.com/courses/foundations/neural-networks/ (with modifications)
     """
+
     # Put everything to CPU (works better with NumPy + Matplotlib)
     model.to("cpu")
     X, y = X.to("cpu"), y.to("cpu")
@@ -88,47 +74,9 @@ def plot_decision_boundary(model: torch.nn.Module, X: torch.Tensor, y: torch.Ten
 NUM_WORKERS = os.cpu_count()
 
 
-# Plot linear data or training and test and predictions (optional)
-def plot_predictions(
-    train_data, train_labels, test_data, test_labels, predictions=None
-):
-    """
-  Plots linear training data and test data and compares predictions.
-  """
-    plt.figure(figsize=(10, 7))
-
-    # Plot training data in blue
-    plt.scatter(train_data, train_labels, c="b", s=4, label="Training data")
-
-    # Plot test data in green
-    plt.scatter(test_data, test_labels, c="g", s=4, label="Testing data")
-
-    if predictions is not None:
-        # Plot the predictions in red (predictions were made on the test data)
-        plt.scatter(test_data, predictions, c="r", s=4, label="Predictions")
-
-    # Show the legend
-    plt.legend(prop={"size": 14})
-
-
-def print_train_time(start, end, device=None):
-    """Prints difference between start and end time.
-
-    Args:
-        start (float): Start time of computation (preferred in timeit format). 
-        end (float): End time of computation.
-        device ([type], optional): Device that compute is running on. Defaults to None.
-
-    Returns:
-        float: time between start and end in seconds (higher is longer).
-    """
-    total_time = end - start
-    print(f"\nTrain time on {device}: {total_time:.3f} seconds")
-    return total_time
-
-
 # Plot loss curves of a model
 def plot_loss_curves(results):
+    
     """Plots training curves of a results dictionary.
 
     Args:
@@ -138,6 +86,7 @@ def plot_loss_curves(results):
              "test_loss": [...],
              "test_acc": [...]}
     """
+
     loss = results["train_loss"]
     test_loss = results["test_loss"]
 
@@ -168,7 +117,6 @@ def plot_loss_curves(results):
 # Pred and plot image function from notebook 04
 # See creation: https://www.learnpytorch.io/04_pytorch_custom_datasets/#113-putting-custom-image-prediction-together-building-a-function
 
-
 def pred_and_plot_image(
     model: torch.nn.Module,
     image_path: str,
@@ -176,6 +124,7 @@ def pred_and_plot_image(
     transform=None,
     device: torch.device = "cuda" if torch.cuda.is_available() else "cpu",
 ):
+    
     """Makes a prediction on a target image with a trained model and plots the image.
 
     Args:
@@ -196,20 +145,20 @@ def pred_and_plot_image(
                             device=device)
     """
 
-    # 1. Load in image and convert the tensor values to float32
+    # Load in image and convert the tensor values to float32
     target_image = torchvision.io.read_image(str(image_path)).type(torch.float32)
 
-    # 2. Divide the image pixel values by 255 to get them between [0, 1]
+    # Divide the image pixel values by 255 to get them between [0, 1]
     target_image = target_image / 255.0
 
-    # 3. Transform if necessary
+    # Transform if necessary
     if transform:
         target_image = transform(target_image)
 
-    # 4. Make sure the model is on the target device
+    # Make sure the model is on the target device
     model.to(device)
 
-    # 5. Turn on model evaluation mode and inference mode
+    # Turn on model evaluation mode and inference mode
     model.eval()
     with torch.inference_mode():
         # Add an extra dimension to the image
@@ -218,13 +167,13 @@ def pred_and_plot_image(
         # Make a prediction on image with an extra dimension and send it to the target device
         target_image_pred = model(target_image.to(device))
 
-    # 6. Convert logits -> prediction probabilities (using torch.softmax() for multi-class classification)
+    # Convert logits -> prediction probabilities (using torch.softmax() for multi-class classification)
     target_image_pred_probs = torch.softmax(target_image_pred, dim=1)
 
-    # 7. Convert prediction probabilities -> prediction labels
+    # Convert prediction probabilities -> prediction labels
     target_image_pred_label = torch.argmax(target_image_pred_probs, dim=1)
 
-    # 8. Plot the image alongside the prediction and prediction probability
+    # Plot the image alongside the prediction and prediction probability
     plt.imshow(
         target_image.squeeze().permute(1, 2, 0)
     )  # make sure it's the right size for matplotlib
@@ -236,7 +185,7 @@ def pred_and_plot_image(
     plt.axis(False)
 
 
-# 1. Take in a trained model, class names, image path, image size, a transform and target device
+# Take in a trained model, class names, image path, image size, a transform and target device
 def pred_and_plot_image_imagenet(model: torch.nn.Module,
                                  image_path: str, 
                                  class_names: List[str],
@@ -254,13 +203,13 @@ def pred_and_plot_image_imagenet(model: torch.nn.Module,
         device (torch.device, optional): Target device to perform prediction on. Defaults to device.
     """
 
-    # 0. Make sure the model is on the target device
+    # Make sure the model is on the target device
     model.to(device) 
     
-    # 2. Open image
+    # Open image
     img = Image.open(image_path)
 
-    # 3. Create transformation for image (if one doesn't exist)
+    # Create transformation for image (if one doesn't exist)
     if transform is not None:
         image_transform = transform
     else:
@@ -273,90 +222,32 @@ def pred_and_plot_image_imagenet(model: torch.nn.Module,
 
     ### Predict on image ### 
 
-    # 4. Make sure the model is on the target device
+    # Make sure the model is on the target device
     model.to(device)
 
-    # 5. Turn on model evaluation mode and inference mode
+    # Turn on model evaluation mode and inference mode
     model.eval()
     with torch.inference_mode():
-      # 6. Transform and add an extra dimension to image (model requires samples in [batch_size, color_channels, height, width])
+      # Transform and add an extra dimension to image (model requires samples in [batch_size, color_channels, height, width])
       transformed_image = image_transform(img).unsqueeze(dim=0)
 
-      # 7. Make a prediction on image with an extra dimension and send it to the target device
+      # Make a prediction on image with an extra dimension and send it to the target device
       target_image_pred = model(transformed_image.to(device))
 
-    # 8. Convert logits -> prediction probabilities (using torch.softmax() for multi-class classification)
+    # Convert logits -> prediction probabilities (using torch.softmax() for multi-class classification)
     target_image_pred_probs = torch.softmax(target_image_pred, dim=1)
 
-    # 9. Convert prediction probabilities -> prediction labels
+    # Convert prediction probabilities -> prediction labels
     target_image_pred_label = torch.argmax(target_image_pred_probs, dim=1)
 
-    # 10. Plot image with predicted label and probability 
+    # Plot image with predicted label and probability 
     plt.figure()
     plt.imshow(img)
     plt.title(f"Pred: {class_names[target_image_pred_label]} | Prob: {target_image_pred_probs.max():.3f}")
     plt.axis(False)
 
 
-
-def set_seeds(seed: int=42):
-    """Sets random sets for torch operations.
-
-    Args:
-        seed (int, optional): Random seed to set. Defaults to 42.
-    """
-    # Set the seed for general torch operations
-    torch.manual_seed(seed)
-    # Set the seed for CUDA torch operations (ones that happen on the GPU)
-    torch.cuda.manual_seed(seed)
-
-def download_data(source: str, 
-                  destination: str,
-                  remove_source: bool = True) -> Path:
-    """Downloads a zipped dataset from source and unzips to destination.
-
-    Args:
-        source (str): A link to a zipped file containing data.
-        destination (str): A target directory to unzip data to.
-        remove_source (bool): Whether to remove the source after downloading and extracting.
-    
-    Returns:
-        pathlib.Path to downloaded data.
-    
-    Example usage:
-        download_data(source="https://github.com/mrdbourke/pytorch-deep-learning/raw/main/data/pizza_steak_sushi.zip",
-                      destination="pizza_steak_sushi")
-    """
-    # Setup path to data folder
-    data_path = Path("data/")
-    image_path = data_path / destination
-
-    # If the image folder doesn't exist, download it and prepare it... 
-    if image_path.is_dir():
-        print(f"[INFO] {image_path} directory exists, skipping download.")
-    else:
-        print(f"[INFO] Did not find {image_path} directory, creating one...")
-        image_path.mkdir(parents=True, exist_ok=True)
-        
-        # Download pizza, steak, sushi data
-        target_file = Path(source).name
-        with open(data_path / target_file, "wb") as f:
-            request = requests.get(source)
-            print(f"[INFO] Downloading {target_file} from {source}...")
-            f.write(request.content)
-
-        # Unzip pizza, steak, sushi data
-        with zipfile.ZipFile(data_path / target_file, "r") as zip_ref:
-            print(f"[INFO] Unzipping {target_file} data...") 
-            zip_ref.extractall(image_path)
-
-        # Remove .zip file
-        if remove_source:
-            os.remove(data_path / target_file)
-    
-    return image_path
-
-def display_random_images(dataset: torch.utils.data.dataset.Dataset, # or torchvision.datasets.ImageFolder?
+def display_random_images_classification(dataset: torch.utils.data.dataset.Dataset, # or torchvision.datasets.ImageFolder?
                           classes: List[str] = None,
                           n: int = 10,
                           display_shape: bool = True,
@@ -365,7 +256,7 @@ def display_random_images(dataset: torch.utils.data.dataset.Dataset, # or torchv
                           seed: int = None):
     
    
-    """Displays a number of random images from a given dataset.
+    """Displays a number of random images from a given dataset for classification.
 
     Args:
         dataset (torch.utils.data.dataset.Dataset): Dataset to select random images from.
@@ -386,29 +277,30 @@ def display_random_images(dataset: torch.utils.data.dataset.Dataset, # or torchv
                       seed=None)
     """
 
-    # 1. Setup the range to select images
+    # Setup the range to select images
     n = min(n, len(dataset))
-    # 2. Adjust display if n too high
+    
+    # Adjust display if n too high
     if n > rows*cols:
         n = rows*cols
         #display_shape = False
         print(f"For display purposes, n shouldn't be larger than {rows*cols}, setting to {n} and removing shape display.")
     
-    # 3. Set random seed
+    # Set random seed
     if seed:
         random.seed(seed)
 
-    # 4. Get random sample indexes
+    # Get random sample indexes
     random_samples_idx = random.sample(range(len(dataset)), k=n)
 
-    # 5. Setup plot
+    # Setup plot
     plt.figure(figsize=(cols*4, rows*4))
 
-    # 6. Loop through samples and display random samples 
+    # Loop through samples and display random samples 
     for i, targ_sample in enumerate(random_samples_idx):
         targ_image, targ_label = dataset[targ_sample][0], dataset[targ_sample][1]
 
-        # 7. Adjust image tensor shape for plotting: [color_channels, height, width] -> [color_channels, height, width]
+        # Adjust image tensor shape for plotting: [color_channels, height, width] -> [color_channels, height, width]
         targ_image_adjust = targ_image.permute(1, 2, 0)
 
         # Plot adjusted samples
@@ -422,80 +314,15 @@ def display_random_images(dataset: torch.utils.data.dataset.Dataset, # or torchv
         plt.title(title)
 
 
-def save_model(model: torch.nn.Module,
-               target_dir: str,
-               model_name: str):
-    """Saves a PyTorch model to a target directory.
-
-    Args:
-    model: A target PyTorch model to save.
-    target_dir: A directory for saving the model to.
-    model_name: A filename for the saved model. Should include
-      either ".pth" or ".pt" as the file extension.
-
-    Example usage:
-    save_model(model=model_0,
-               target_dir="models",
-               model_name="05_going_modular_tingvgg_model.pth")
-    """
-    # Create target directory
-    target_dir_path = Path(target_dir)
-    target_dir_path.mkdir(parents=True,
-                        exist_ok=True)
-
-    # Create model save path
-    assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
-    model_save_path = target_dir_path / model_name
-
-    # Save the model state_dict()
-    print(f"[INFO] Saving model to: {model_save_path}")
-    torch.save(obj=model.state_dict(), f=model_save_path)
-    
-
-def load_model(model: torch.nn.Module,
-               model_weights_dir: str,
-               model_weights_name: str):
-               #hidden_units: int):
-
-    """Loads a PyTorch model from a target directory.
-
-    Args:
-    model: A target PyTorch model to load.
-    model_weights_dir: A directory where the model is located.
-    model_weights_name: The name of the model to load.
-      Should include either ".pth" or ".pt" as the file extension.
-
-    Example usage:
-    model = load_model(model=model,
-                       model_weights_dir="models",
-                       model_weights_name="05_going_modular_tingvgg_model.pth")
-
-    Returns:
-    The loaded PyTorch model.
-    """
-    # Create the model directory path
-    model_dir_path = Path(model_weights_dir)
-
-    # Create the model path
-    assert model_weights_name.endswith(".pth") or model_weights_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
-    model_path = model_dir_path / model_weights_name
-
-    # Load the model
-    print(f"[INFO] Loading model from: {model_path}")
-    
-    model.load_state_dict(torch.load(model_path, weights_only=True))
-    
-    return model
-
-
 def get_most_wrong_examples(model: torch.nn.Module,
-                            test_dataloader: torch.utils.data.DataLoader,
+                            test_dataloader: DataLoader,
                             num_samples:int=5,
                             plot_images:bool=True,
                             n_cols:int=5,
                             title_font_size:int=20,
                             device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
                             ):
+    
     '''
     Returns the most wrong examples from a trained model
     Args:
@@ -582,29 +409,10 @@ def get_most_wrong_examples(model: torch.nn.Module,
 
     return df_top_wrong
 
-def zip_folder(folder_path, output_zip, exclusions):
-
-    """Zips the contents of a folder, excluding specified files or folders.
-    folder_to_zip = "demos/foodvision_mini"  # Change this to your folder path
-    output_zip_file = "demos/foodvision_mini.zip"
-    exclusions = ["__pycache__", "ipynb_checkpoints", ".pyc", ".ipynb"]
-    """
-
-    with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(folder_path):
-            # Skip excluded directories
-            dirs[:] = [d for d in dirs if all(excl not in os.path.join(root, d) for excl in exclusions)]
-            for file in files:
-                file_path = os.path.join(root, file)
-                # Skip excluded files
-                if any(excl in file_path for excl in exclusions):
-                    continue
-                arcname = os.path.relpath(file_path, start=folder_path)
-                zipf.write(file_path, arcname=arcname)
-
 
 # Calculate accuracy (a classification metric)
 def accuracy_fn(y_true, y_pred):
+
     """Calculates accuracy between truth labels and predictions.
 
     Args:
@@ -614,23 +422,25 @@ def accuracy_fn(y_true, y_pred):
     Returns:
         [torch.float]: Accuracy value between y_true and y_pred, e.g. 78.45
     """
+
     correct = torch.eq(y_true, y_pred).sum().item()
     acc = (correct / len(y_pred)) * 100
     return acc
 
 
 def find_roc_threshold_tpr(y, y_pred, value_target):
+    
     """
     This function calculates the threshold and false positive rate corresponding to a true positive rate of value_target (from 0 to 1).
-       
-    y                     # Real labels
-    y_pred                # Predicted labels
-    value_target          # False positive rate value
+    
+    Args:
+        y                     # Real labels
+        y_pred                # Predicted labels
+        value_target          # False positive rate value
     
     Returns:
-    
-    threshold             # Threshold value
-    true_positive_rate   # True positive rate value
+        threshold             # Threshold value
+        true_positive_rate   # True positive rate value
     """
 
     fpr, tpr, thr = roc_curve(y, y_pred)
@@ -644,17 +454,18 @@ def find_roc_threshold_tpr(y, y_pred, value_target):
 
 
 def find_roc_threshold_fpr(y, y_pred, value_target):
+
     """
     This function calculates the threshold and true positive rate corresponding to a fixed false positive rate (FPR).
 
-    Parameters:
-    y              # Real labels
-    y_pred         # Predicted probabilities
-    value_target   # Desired false positive rate (FPR) value (between 0 and 1)
+    Args:
+        y              # Real labels
+        y_pred         # Predicted probabilities
+        value_target   # Desired false positive rate (FPR) value (between 0 and 1)
     
     Returns:
-    threshold       # Threshold value
-    true_positive_rate  # Corresponding true positive rate (TPR)
+        threshold       # Threshold value
+        true_positive_rate  # Corresponding true positive rate (TPR)
     """
     
     fpr, tpr, thr = roc_curve(y, y_pred)
@@ -668,16 +479,18 @@ def find_roc_threshold_fpr(y, y_pred, value_target):
     return threshold, true_pos_rate
 
 def find_roc_threshold_f1(pred_prob, y):
+
     """
     This function calculates the threshold in the ROC curve that maximizes the F1 score.
-    model                    # Trained model
-    pred_prob                # Prediction probabilities
-    y                        # Target dataset
+
+    Args:
+        model                    # Trained model
+        pred_prob                # Prediction probabilities
+        y                        # Target dataset
     
     Returns:
-    
-    best_threshold           # Threshold value
-    best_f1_score            # F1 score value
+        best_threshold           # Threshold value
+        best_f1_score            # F1 score value
     """
     
     # Get predicted probabilities for the positive class
@@ -701,20 +514,23 @@ def find_roc_threshold_f1(pred_prob, y):
     return best_threshold, best_f1_score
 
 def find_roc_threshold_accuracy(pred_prob, y):
+
     """
     This function calculates the threshold in the ROC curve that maximizes the accuracy score.
-    model                    # Trained model
-    pred_prob                # Prediction probabilities
-    y                        # Target dataset
+    
+    Args:
+        model                    # Trained model
+        pred_prob                # Prediction probabilities
+        y                        # Target dataset
     
     Returns:
-    
-    best_threshold           # Threshold value
-    best_acc_score           # Accuracy score value
+        best_threshold           # Threshold value
+        best_acc_score           # Accuracy score value
     """
     
     best_threshold = 0.5
     best_acc_score = 0.0
+
     # Compute the ROC curve (FPR, TPR, thresholds)
     fpr, tpr, thresholds = roc_curve(y, pred_prob)
 
@@ -734,9 +550,11 @@ def partial_auc_score(y_actual, y_pred, tpr_threshold=0.80):
     
     """
     This function calculates the partial AUC score
-    y_true: true labels
-    y_scores: predictions
-    tpr_threshold: true positive rate (recall) threshold above which the auc score will be computed
+
+    Args:
+        y_true: true labels
+        y_scores: predictions
+        tpr_threshold: true positive rate (recall) threshold above which the auc score will be computed
     """
   
     max_fpr = 1 - tpr_threshold
@@ -770,10 +588,12 @@ def cross_val_partial_auc_score(X, y, model, n_splits):
 
     """
     This fuction calculates the average partial AUC score across all validation folds.
-    X: input vector
-    y: label
-    model: machine learning model to train and cross-validate
-    n_splits: number of k folds
+
+    Args:
+        X: input vector
+        y: label
+        model: machine learning model to train and cross-validate
+        n_splits: number of k folds
     """
 
      # Setup cross-validation

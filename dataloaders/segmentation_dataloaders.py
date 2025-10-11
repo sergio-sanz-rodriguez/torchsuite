@@ -6,12 +6,12 @@ import os
 import sys
 import torch
 import random
-import numpy as np
-import torchvision
+#import numpy as np
+#import torchvision
 import torchvision.transforms as T
 import torchvision.transforms.functional as Ftv
 from PIL import Image
-from torchvision import tv_tensors
+#from torchvision import tv_tensors
 from torchvision.io import read_image
 from torchvision.transforms.v2 import functional as F
 

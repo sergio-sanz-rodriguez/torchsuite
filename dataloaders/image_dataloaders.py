@@ -11,9 +11,9 @@ import numpy as np
 from torch.utils.data import DataLoader, Subset, Dataset
 from torchvision import datasets, transforms
 from torchvision.transforms import v2
-from collections import defaultdict
-from typing import List, Tuple, Optional, Union
+from typing import List, Optional, Union
 from PIL import Image
+from pathlib import Path
 
 NUM_WORKERS = os.cpu_count()
 
@@ -39,51 +39,8 @@ class DualTransformDataset(datasets.ImageFolder):
             img = self.transform_noaug(image)
         return img, label
 
-
-class DistillationDataset(Dataset):
-    def __init__(self, image_folder_dataset, transform_student, transform_teacher):
-        self.image_folder = image_folder_dataset
-        self.transform_student = transform_student
-        self.transform_teacher = transform_teacher
-
-    def __len__(self):
-        return len(self.image_folder)
-
-    def __getitem__(self, idx):
-        
-        # Load image and label from the dataset
-        img, label = self.image_folder[idx]
-
-        # Convert Tensor back to PIL Image if necessary (depends on dataset output)
-        if isinstance(img, torch.Tensor):
-            img = transforms.ToPILImage()(img)
-
-        # Generate a per-sample seed so that both transforms see the same randomness.
-        seed = torch.randint(0, 2**32, (1,)).item()
-
-        # Save current RNG states so we can restore them later
-        # This prevents altering the global RNG state of the worker
-        state_py = random.getstate()
-        state_torch = torch.get_rng_state()
-
-        # Apply the student transform with the given seed
-        random.seed(seed)
-        torch.manual_seed(seed)
-        img_student = self.transform_student(img)
-
-        # Restore RNG state before doing the teacher transform
-        random.setstate(state_py)
-        torch.set_rng_state(state_torch)
-
-        # Apply the teacher transform with the same seed
-        random.seed(seed)
-        torch.manual_seed(seed)
-        img_teacher = self.transform_teacher(img)
-
-        return img_student, img_teacher, label
-    
-
-def create_dataloaders(
+  
+def create_classification_dataloaders(
         train_dir: str, 
         test_dir: str, 
         train_transform: transforms.Compose, 
@@ -93,7 +50,7 @@ def create_dataloaders(
         num_test_samples: int = None,
         num_workers: int=NUM_WORKERS
     ):
-    """Creates training and testing DataLoaders.
+    """Creates training and testing DataLoaders for classification.
 
     Takes in a training directory and testing directory path and turns
     them into PyTorch Datasets and then into PyTorch DataLoaders.
@@ -166,6 +123,48 @@ def create_dataloaders(
 
     return train_dataloader, test_dataloader, class_names
 
+class DistillationDataset(Dataset):
+    def __init__(self, image_folder, transform_student, transform_teacher):
+        self.image_folder = image_folder
+        self.transform_student = transform_student
+        self.transform_teacher = transform_teacher
+
+    def __len__(self):
+        return len(self.image_folder)
+
+    def __getitem__(self, idx):
+        
+        # Load image and label from the dataset
+        img, label = self.image_folder[idx]
+
+        # Convert Tensor back to PIL Image if necessary (depends on dataset output)
+        if isinstance(img, torch.Tensor):
+            img = transforms.ToPILImage()(img)
+
+        # Generate a per-sample seed so that both transforms see the same randomness.
+        seed = torch.randint(0, 2**32, (1,)).item()
+
+        # Save current RNG states so we can restore them later
+        # This prevents altering the global RNG state of the worker
+        state_py = random.getstate()
+        state_torch = torch.get_rng_state()
+
+        # Apply the student transform with the given seed
+        random.seed(seed)
+        torch.manual_seed(seed)
+        img_student = self.transform_student(img)
+
+        # Restore RNG state before doing the teacher transform
+        random.setstate(state_py)
+        torch.set_rng_state(state_torch)
+
+        # Apply the teacher transform with the same seed
+        random.seed(seed)
+        torch.manual_seed(seed)
+        img_teacher = self.transform_teacher(img)
+
+        return img_student, img_teacher, label
+    
 def create_distillation_dataloaders(
         train_dir: str, 
         test_dir: str, 
@@ -215,14 +214,14 @@ def create_distillation_dataloaders(
 
     # Distillation-aware training dataset
     train_dataset = DistillationDataset(
-        image_folder_dataset=base_train_dataset,
+        image_folder=base_train_dataset,
         transform_student=transform_student_train,
         transform_teacher=transform_teacher_train
     )
 
     # Distillation-aware testing dataset
     test_dataset = DistillationDataset(
-        image_folder_dataset=base_test_dataset,
+        image_folder=base_test_dataset,
         transform_student=transform_student_test,
         transform_teacher=transform_teacher_test
     )
@@ -234,7 +233,7 @@ def create_distillation_dataloaders(
         else train_dataset.image_folder.dataset.classes
     )
 
-    # DataLoaders
+    # Create dataloaders
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -254,6 +253,176 @@ def create_distillation_dataloaders(
     return train_dataloader, test_dataloader, class_names
 
 
+class RegressionDataset(Dataset):
+
+    """
+    PyTorch regression dataset for loading images and their associated scores.
+
+    Args:
+        data (pd.DataFrame): DataFrame with at least two columns:
+            - 'image_path': path or filename of the image (with or without extension)
+            - 'score': float value to predict.
+        image_folder (str | Path, optional): Root directory where image files are stored.
+            Used if 'image_path' entries are relative paths.
+        transform (callable, optional): Transform applied to each image (e.g., resizing, normalization).
+            Should accept and return a PIL image or tensor.
+
+    Returns:
+        tuple:
+            img (torch.Tensor): Image tensor of shape (C, H, W)
+            score (torch.Tensor): Regression target as a float tensor
+    """
+
+    def __init__(self, data, image_folder=None, transform=None):
+        self.data = data.reset_index(drop=True)
+        self.image_folder = Path(image_folder) if image_folder else None
+        self.transform = transform
+
+    def __len__(self):
+
+        """
+        Returns the total number of samples in the dataset.
+        """
+
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        
+        """
+        Retrieve image tensor and corresponding score.
+        """
+
+        # Handle tensor indices by converting to list
+        if torch.is_tensor(idx):
+            idx = idx.item()
+
+        # Build image file path
+        image_path = Path(self.data.loc[idx, 'image_path'])
+        if not image_path.is_absolute() and not image_path.exists():
+            if self.image_folder:
+                image_path = self.image_folder / image_path
+            else:
+                raise FileNotFoundError(
+                    f"Image '{image_path}' not found and no image_folder was provided."
+                )
+
+        if not image_path.exists():
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+
+        # Open image and convert to RGB mode
+        img = Image.open(image_path).convert('RGB')
+
+         # Apply transformation pipeline if provided (expects PIL Image input)
+        if self.transform:
+            img = self.transform(img)
+        else:
+            # Basic normalization and tensor conversion
+            img = np.array(img, dtype=np.float32) / 255.0
+            img = np.transpose(img, (2, 0, 1))
+            img = torch.from_numpy(img)
+
+        # Retrieve score from the DataFrame and convert to float
+        score = torch.tensor(float(self.data.loc[idx, 'score']), dtype=torch.float32)
+
+        return img, score
+
+
+def create_regression_dataloaders(
+        train_data,
+        test_data,
+        train_image_folder=None,
+        test_image_folder=None,
+        train_transform=None,
+        test_transform=None,
+        batch_size: int = 32,
+        num_workers: int = 4
+):
+    """
+    Creates PyTorch DataLoaders for regression datasets.
+
+    Args:
+        train_data (pd.DataFrame | str | Path): DataFrame or path to CSV for training.
+        test_data (pd.DataFrame | str | Path): DataFrame or path to CSV for validation/testing.
+        train_image_folder (str | Path, optional): Directory containing training images.
+        test_image_folder (str | Path, optional): Directory containing test images.
+        train_transform (callable, optional): Transform pipeline for training images.
+        test_transform (callable, optional): Transform pipeline for test images.
+        batch_size (int): Batch size for both loaders.
+        num_workers (int): Number of worker threads for data loading.
+
+    Returns:
+        tuple: (train_dataloader, test_dataloader)
+    """
+    
+    # Helper function
+    def _load_regression_data(data_input):
+
+        """
+        Load and validate a regression dataset from CSV or DataFrame.
+        """
+
+        # Case 1: Already a DataFrame
+        if isinstance(data_input, pd.DataFrame):
+            df = data_input.copy()
+        
+         # Case 2: Path to CSV
+        elif isinstance(data_input, (str, Path)):
+            data_input = Path(data_input)
+            if not data_input.exists():
+                raise FileNotFoundError(f"File not found: {data_input}")
+            if data_input.suffix.lower() != ".csv":
+                raise ValueError(f"Expected CSV file, got: {data_input.suffix}")
+            df = pd.read_csv(data_input)
+        else:
+            raise TypeError("Input must be a DataFrame or a path to a CSV file.")
+
+        # Validate column count
+        if df.shape[1] != 2:
+            raise ValueError("The dataset must have two columns: column 1 with image_paths, column 2 with scores.")
+
+        # Rename columns
+        cols = list(df.columns)
+        df = df.rename(columns={cols[0]: "image_path", cols[1]: "score"})
+
+        # Drop missing or invalid entries
+        df = df.dropna(subset=["image_path", "score"])
+        df = df[df["image_path"].astype(str).str.strip() != ""]
+
+        if not pd.api.types.is_string_dtype(df["image_path"]):
+            raise TypeError("All 'image_path' entries must be strings.")
+        if not pd.api.types.is_numeric_dtype(df["score"]):
+            raise TypeError("All 'score' entries must be numeric.")
+
+        return df[["image_path", "score"]]
+
+    # Load and validate datasets
+    train_df = _load_regression_data(train_data)
+    test_df = _load_regression_data(test_data)
+
+    # Create dataset objects
+    train_dataset = RegressionDataset(train_df, image_folder=train_image_folder, transform=train_transform)
+    test_dataset = RegressionDataset(test_df, image_folder=test_image_folder, transform=test_transform)
+
+    # Create dataloaders
+    train_dataloader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+
+    test_dataloader = DataLoader(
+        dataset=test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+
+    return train_dataloader, test_dataloader
+
+    
 def resample_data(data, labels, samples_0=None, samples_1=None):
     """
     Resamples the dataset by specifying the number of samples for class 0 and class 1.
@@ -296,7 +465,7 @@ def resample_data(data, labels, samples_0=None, samples_1=None):
     return torch.utils.data.Subset(data, sampled_indices)
 
 
-def create_dataloaders_with_resampling(
+def create_classification_dataloaders_with_resampling(
     train_dir: str,
     test_dir: str,
     train_transform: transforms.Compose,
@@ -375,7 +544,7 @@ def create_dataloaders_with_resampling(
     return train_dataloader, test_dataloader, class_names
 
 
-class CustomImageDataset(Dataset):
+class CustomImageDatasetList(Dataset):
     
     """
     Custom dataset for loading images from a list of paths.
@@ -410,7 +579,7 @@ class CustomImageDataset(Dataset):
         return image, label
     
 
-def create_dataloaders_list(
+def create_classification_dataloaders_list(
     train_image_paths: List[str],
     train_labels: Union[List[int], List[str]],
     val_image_paths: List[str],
@@ -443,9 +612,9 @@ def create_dataloaders_list(
                or (combined_dataloader, class_names) if combine_train_test=True.
     """
     # Create datasets
-    train_data = CustomImageDataset(train_image_paths, train_labels, transform=train_transform)
-    val_data = CustomImageDataset(val_image_paths, val_labels, transform=val_transform)
-    test_data = CustomImageDataset(test_image_paths, test_labels, transform=test_transform)
+    train_data = CustomImageDatasetList(train_image_paths, train_labels, transform=train_transform)
+    val_data = CustomImageDatasetList(val_image_paths, val_labels, transform=val_transform)
+    test_data = CustomImageDatasetList(test_image_paths, test_labels, transform=test_transform)
 
     # Get class names
     class_names = list(set(train_labels))  # Unique class labels
@@ -476,9 +645,8 @@ def create_dataloaders_list(
     return train_dataloader, val_dataloader, test_dataloader, class_names
 
 
-
-def create_dataloaders_vit(
-        vit_model: str = "vit_b_16_224",
+def create_classification_dataloaders_vit(
+        model: str = "vit_b_16_224",
         train_dir: str = "./",
         test_dir: str = "./",
         batch_size: int = 64,
@@ -495,7 +663,7 @@ def create_dataloaders_vit(
     using v2.TrivialAugmentWide().
 
     Args:
-        vit_model (str): The ViT model variant to use. Default is "vit_b_16_224".
+        model (str): The ViT model variant to use. Default is "vit_b_16_224".
             Options:
             - 'vit_b_16_224': ViT-Base/16-224
             - 'vit_b_16_384': ViT-Base/16-384
@@ -510,7 +678,7 @@ def create_dataloaders_vit(
         batch_size (int): Batch size for the data loaders. Default is 64.
         num_train_samples (int, optional): Number of samples to include in the training dataset (None for all samples).
         num_test_samples (int, optional): Number of samples to include in the test dataset (None for all samples).
-        aug (bool): Whether to apply data augmentation. Default is True.
+        aug (bool): Whether to apply data augmentation to the training dataset. Default is True.
         num_workers (int): Number of workers for data loading. Default is os.cpu_count().
 
     Returns:
@@ -533,11 +701,11 @@ def create_dataloaders_vit(
     }
 
     # Validate model selection
-    if vit_model not in vit_model_sizes:
-        raise ValueError(f"[ERROR] Invalid ViT model '{vit_model}'. Available options: {list(vit_model_sizes.keys())}")
+    if model not in vit_model_sizes:
+        raise ValueError(f"[ERROR] Invalid ViT model '{model}'. Available options: {list(vit_model_sizes.keys())}")
 
     # Get image sizes for the selected ViT model
-    IMG_SIZE_RESIZE, IMG_SIZE_CROP = vit_model_sizes[vit_model]
+    IMG_SIZE_RESIZE, IMG_SIZE_CROP = vit_model_sizes[model]
 
     # Define training transformations
     if aug:
@@ -568,7 +736,7 @@ def create_dataloaders_vit(
     ])
 
     # Create data loaders
-    train_dataloader, test_dataloader, class_names = create_dataloaders(
+    train_dataloader, test_dataloader, class_names = create_classification_dataloaders(
         train_dir=train_dir,
         test_dir=test_dir,
         train_transform=train_transforms,
@@ -582,8 +750,8 @@ def create_dataloaders_vit(
     return train_dataloader, test_dataloader, class_names
 
 
-def create_dataloaders_swin(
-    swin_model: str = "swin_v2_t_256",
+def create_classification_dataloaders_swin(
+    model: str = "swin_v2_t",
     train_dir: str = "./train",
     test_dir: str = "./test",
     batch_size: int = 64,
@@ -599,7 +767,7 @@ def create_dataloaders_swin(
     v2.TrivialAugmentWide().
 
     Args:
-        swin_model (str): The specific Swin Transformer model to use. Default is "swin_t".
+        model (str): The specific Swin Transformer model to use. Default is "swin_t".
             Options include:
             - "swin_t_224": Swin-Tiny
             - "swin_s_224": Swin-Small
@@ -612,7 +780,7 @@ def create_dataloaders_swin(
         batch_size (int): Batch size for the data loaders. Default is 64.
         num_train_samples (int, optional): Number of samples to include in the training dataset (None for all samples).
         num_test_samples (int, optional): Number of samples to include in the testing dataset (None for all samples).
-        aug (bool): Whether to apply data augmentation. Default is True.
+        aug (bool): Whether to apply data augmentation to the training dataset. Default is True.
         num_workers (int): Number of subprocesses to use for data loading. Default is the number of CPU cores.
 
     Returns:
@@ -624,20 +792,20 @@ def create_dataloaders_swin(
 
     # Define input size and normalization parameters based on the model
     swin_model_sizes = {
-        'swin_t_224': (232, 224),
-        'swin_s_224': (246, 224),
-        'swin_b_224': (238, 224),
+        'swin_t_224':    (232, 224),
+        'swin_s_224':    (246, 224),
+        'swin_b_224':    (238, 224),
         'swin_v2_t_256': (260, 256),
         'swin_v2_s_256': (260, 256),
         'swin_v2_b_256': (272, 256)
     }
 
     # Validate model selection
-    if swin_model not in swin_model_sizes:
-        raise ValueError(f"[ERROR] Invalid ViT model '{swin_model}'. Available options: {list(swin_model_sizes.keys())}")
+    if model not in swin_model_sizes:
+        raise ValueError(f"[ERROR] Invalid ViT model '{model}'. Available options: {list(swin_model_sizes.keys())}")
 
     # Get image sizes for the selected ViT model
-    IMG_SIZE_RESIZE, IMG_SIZE_CROP = swin_model_sizes[swin_model]
+    IMG_SIZE_RESIZE, IMG_SIZE_CROP = swin_model_sizes[model]
 
     # Define training transformations
     if aug:
@@ -668,7 +836,7 @@ def create_dataloaders_swin(
     ])
 
     # Create data loaders
-    train_dataloader, test_dataloader, class_names = create_dataloaders(
+    train_dataloader, test_dataloader, class_names = create_classification_dataloaders(
         train_dir=train_dir,
         test_dir=test_dir,
         train_transform=train_transforms,

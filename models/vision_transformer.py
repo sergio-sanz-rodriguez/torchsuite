@@ -141,7 +141,7 @@ class HyperspectralConv3D(nn.Module):
 class SpectralViT(nn.Module):
     def __init__(
         self,
-        model: str='vitbase16',
+        model: str='vit_b_16_224',
         embedding_alg: str='spatial_concat',     
         spatial_dim: int=384,
         block_size_spatial_emb: int=6, 

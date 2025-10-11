@@ -31,7 +31,7 @@ def replace_classifier(model, hidden_dim, num_classes, device):
 
 
 def build_pretrained_classifier(
-    model: str = "vitbase16",
+    model: str = "vit_b_16_224",
     num_classes: int = 1,
     dropout: float = None,
     freeze: bool = False,
@@ -57,18 +57,20 @@ def build_pretrained_classifier(
             
             Supported vision models include:
 
-            - "vitbase16":    ViT-Base with 16x16 patches, input size 224x224
-            - "vitbase16_2":  ViT-Base with 16x16 patches, input size 384x384
-            - "vitbase32":    ViT-Base with 32x32 patches, input size 224x224
-            - "vitlarge16":   ViT-Large with 16x16 patches, input size 224x224
-            - "vitlarge16_2": ViT-Large with 16x16 patches, input size 384x384
-            - "vithuge14":    ViT-Huge with 14x14 patches, input size 224x224
-            - "swin_t":       Swin Transformer Tiny, input size 224x224
-            - "swin_s":       Swin Transformer Small, input size 224x224
-            - "swin_b":       Swin Transformer Base, input size 224x224
-            - "swin_v2_t":    Swin V2 Transformer Tiny
-            - "swin_v2_s":    Swin V2 Transformer Small
-            - "swin_v2_b":    Swin V2 Transformer Base
+            - "vit_b_16_224":  ViT-Base with 16x16 patches, input size 224x224
+            - "vit_b_16_384":  ViT-Base with 16x16 patches, input size 384x384
+            - "vit_b_32_224":  ViT-Base with 32x32 patches, input size 224x224
+            - "vit_l_16_224":  ViT-Large with 16x16 patches, input size 224x224
+            - "vit_l_16_384":  ViT-Large with 16x16 patches, input size 384x384
+            - "vit_l_32_224":  ViT-Large with 32x32 patches, input size 224x224
+            - "vit_h_14_224":  ViT-Huge with 14x14 patches, input size 224x224
+            - "vit_h_14_518":  ViT-Huge with 14x14 patches, input size 518x518
+            - "swin_t_224":    Swin Transformer Tiny, input size 224x224
+            - "swin_s_224":    Swin Transformer Small, input size 224x224
+            - "swin_b_224":    Swin Transformer Base, input size 224x224
+            - "swin_v2_t_256": Swin V2 Transformer Tiny, input size 256x256
+            - "swin_v2_s_256": Swin V2 Transformer Small, input size 256x256
+            - "swin_v2_b_256": Swin V2 Transformer Base, input size 256x256
             - "efficientnet_b0" to "efficientnet_b4": EfficientNet variants B0-B4
             - "resnet18", "resnet34", "resnet50", "resnet101", "resnet152": ResNet family
             - "resnet50_v2", "resnet101_v2", "resnet152_v2": ResNet v2 family
@@ -86,17 +88,19 @@ def build_pretrained_classifier(
         torch.nn.Module: Configured and ready-to-train PyTorch model.
     """
         
+        
     # Map of model names to their constructor, pretrained weights, and hidden dimension of the last feature layer.
     model_map = {
 
         # Vision Transformers (ViT)
-        "vitbase16":    (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.DEFAULT,                  768),
-        "vitbase16_2":  (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1,   768),
-        "vitbase32":    (torchvision.models.vit_b_32,    torchvision.models.ViT_B_32_Weights.DEFAULT,                  768),
-        "vitlarge16":   (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.DEFAULT,                 1024),
-        "vitlarge16_2": (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1,  1024),
-        "vitlarge32":   (torchvision.models.vit_l_32,    torchvision.models.ViT_L_32_Weights.DEFAULT,                 1024),
-        "vithuge14":    (torchvision.models.vit_h_14,    torchvision.models.ViT_H_14_Weights.DEFAULT,                 1280),
+        "vit_b_16_224": (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.DEFAULT,                    768),
+        "vit_b_16_384": (torchvision.models.vit_b_16,    torchvision.models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1,     768),
+        "vit_b_32_224": (torchvision.models.vit_b_32,    torchvision.models.ViT_B_32_Weights.DEFAULT,                    768),
+        "vit_l_16_224": (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.DEFAULT,                   1024),
+        "vit_l_16_384": (torchvision.models.vit_l_16,    torchvision.models.ViT_L_16_Weights.IMAGENET1K_SWAG_E2E_V1,    1024),
+        "vit_l_32_224": (torchvision.models.vit_l_32,    torchvision.models.ViT_L_32_Weights.DEFAULT,                   1024),
+        "vit_h_14_224": (torchvision.models.vit_h_14,    torchvision.models.ViT_H_14_Weights.IMAGENET1K_SWAG_LINEAR_V1, 1280),
+        "vit_h_14_518": (torchvision.models.vit_h_14,    torchvision.models.ViT_H_14_Weights.DEFAULT,                   1280),
 
         # Swin Transformers
         "swin_t":       (torchvision.models.swin_t,      torchvision.models.Swin_T_Weights.DEFAULT,                    768),

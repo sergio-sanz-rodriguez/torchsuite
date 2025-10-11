@@ -2031,17 +2031,19 @@ class ClassificationEngine(Common):
         self,
         target_dir: str,
         model_name: str,
-        is_teacher: bool = False
+        is_teacher: bool = False,
+        export: bool = False
         ):
         
         """
         Loads a PyTorch model from a target directory and optionally returns it.
 
         Args:
-            target_dir: A directory where the model is located.
-            model_name: The name of the model to load. Should include.
-            is_teacher: Whether the model to load is teacher (if use_distillation is True) or not.
+            target_dir (str): A directory where the model is located.
+            model_name (str): The name of the model to load. Should include.
+            is_teacher (bool, optional): Whether the model to load is teacher (if use_distillation is True) or not.
             ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
+            export (bool, optional): If True, returns the loaded model instead of just loading it. Default is False.
 
         Returns:
             The loaded PyTorch model.
@@ -2061,11 +2063,15 @@ class ClassificationEngine(Common):
 
         if is_teacher and self.use_distillation:
             self.model_teacher.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
-            return self.model_teacher
+            if export:
+                return self.model_teacher
         else:
             state_dict = torch.load(model_path, weights_only=True, map_location=self.device)
             self.model.load_state_dict(state_dict)
-            return self.model
+            if export:
+                return self.model
+        
+        return self
 
     # Trains and tests a Pytorch model
     def train(

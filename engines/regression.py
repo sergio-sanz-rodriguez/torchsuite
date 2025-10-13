@@ -9,6 +9,7 @@ import torchaudio
 import random
 import time
 import pandas as pd
+import numpy as np
 import copy
 import warnings
 import re
@@ -25,8 +26,9 @@ from typing import Tuple, Dict, Any, List, Union, Optional, Callable
 from IPython.display import clear_output, display, HTML
 from timeit import default_timer as timer
 from contextlib import nullcontext
-from sklearn.metrics import classification_report
+from sklearn.metrics import r2_score
 from sklearn.preprocessing import LabelEncoder
+from scipy.stats import pearsonr, spearmanr
 try:
     from torch.amp import GradScaler, autocast
 except ImportError:
@@ -98,6 +100,8 @@ class RegressionEngine(Common):
         self._set_colormap(color_map, theme)        
         self.model_loss = None
         self.model_r2 = None
+        self.model_plcc = None
+        self.model_srocc = None
         self.model_epoch = None
         self.save_best_model = False
         self.keep_best_models_in_memory = False
@@ -105,9 +109,11 @@ class RegressionEngine(Common):
         self.model_name = None
         self.model_name_loss = None        
         self.model_name_r2 = None
+        self.model_name_plcc = None
+        self.model_name_srocc = None
         self.squeeze_dim = False
         self.checkpoint_path_prefix = "ckpt"
-        self.valid_modes = {"loss", "r2" "last", "all"}
+        self.valid_modes = {"loss", "r2", "plcc", "srocc", "last", "all"}
         
         # Check if model is provided
         if self.model is None:
@@ -131,11 +137,15 @@ class RegressionEngine(Common):
             "epoch": [],
             "train_loss": [],            
             "train_r2": [],
+            "train_plcc": [],
+            "train_srocc": [],
             "train_pred": [],
             "train_y": [],
             "train_time [s]": [],
             "test_loss": [],            
             "test_r2": [],
+            "test_plcc": [],
+            "test_srocc": [],
             "test_pred": [],
             "test_y": [],
             "test_time [s]": [],
@@ -146,6 +156,8 @@ class RegressionEngine(Common):
             self.metric_labels = {
                 'loss': ['loss', 'loss', 'Loss'],
                 'r2':   ['r2', 'r2', 'R2'],
+                'plcc': ['plcc', 'plcc', 'Pearson Linear Correlation Coeff. (PLCC)'],
+                'srocc': ['srocc', 'srocc', 'Spearman''s Rank Correlation Coeff. (SROCC)'],
                 'kde_train':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],
                 'kde_test':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],                
             }
@@ -196,7 +208,9 @@ class RegressionEngine(Common):
         self.color_test =  Colors.get_console_color(color_map['test'])
         self.color_other = Colors.get_console_color(color_map['other'])        
         self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
-        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
+        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])     
+        self.color_other_plt = Colors.get_matplotlib_color(color_map['other'] if theme=='light' else 'dark_gray')
+                    
 
         # Set the default line width for plots
         self.linewidth = Colors.get_linewidth()
@@ -293,7 +307,9 @@ class RegressionEngine(Common):
                 f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
                 f"{self.color_train}Train: {self.color_other}| "
                 f"{self.color_train}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
-                f"{self.color_train}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "                
+                f"{self.color_train}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "
+                f"{self.color_train}plcc: {self.results[f'{split}_plcc'][-1]:.4f} {self.color_other}| "
+                f"{self.color_train}srocc: {self.results[f'{split}_srocc'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}time: {self.sec_to_min_sec(self.results[f'{split}_time [s]'][-1])} {self.color_other}| "            
                 f"{self.color_train}lr: {self.results['lr'][-1]:.10f}"
             )
@@ -302,7 +318,9 @@ class RegressionEngine(Common):
                 f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
                 f"{self.color_test}Train: {self.color_other}| "
                 f"{self.color_test}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
-                f"{self.color_test}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "                
+                f"{self.color_test}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "
+                f"{self.color_test}plcc: {self.results[f'{split}_plcc'][-1]:.4f} {self.color_other}| "
+                f"{self.color_test}srocc: {self.results[f'{split}_srocc'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}time: {self.sec_to_min_sec(self.results[f'{split}_time [s]'][-1])} {self.color_other}| "            
                 f"{self.color_test}lr: {self.results['lr'][-1]:.10f}"
             )
@@ -310,7 +328,7 @@ class RegressionEngine(Common):
     # Visualization helper function to plot the results
     def _plot(self, ax, range_epochs, metric):
 
-        if metric in ['loss', 'r2']:
+        if metric in ['loss', 'r2', 'plcc', 'srocc']:
             idx_train = f"train_{self.metric_labels[metric][0]}"
             idx_test = f"test_{self.metric_labels[metric][0]}"
             label_train = f"train_{self.metric_labels[metric][1]}"
@@ -321,17 +339,24 @@ class RegressionEngine(Common):
                 ax.plot(range_epochs, self.results[idx_test], label=label_test, color=self.color_test_plt, linewidth=self.linewidth)
             ax.set_title(title, color=self.figure_color_map['text'])
             ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
-        else:
+        elif metric in ['kde_train', 'kde_test']:
             step = metric.split('_')[1]
+            idx_y = f"{step}_y"
+            idx_pred = f"{step}_pred"
             label_y = f"{step}_{self.metric_labels[metric][0]}"           
-            label_pred = f"{step}_{self.metric_labels[metric][1]}"            
+            label_pred = f"{step}_{self.metric_labels[metric][1]}"          
             title = self.metric_labels[metric][2]
-            sns.kdeplot(self.results[label_y], label=label_y, color=self.color_train_plt, linewidth=self.linewidth)
-            sns.kdeplot(self.results[label_pred], label=label_pred, color=self.color_train_plt, linewidth=self.linewidth)
+            color_plt = self.color_train_plt if step == "train" else self.color_test_plt
+            sns.kdeplot(self.results[idx_y], label=label_y, color=self.color_other_plt, linewidth=self.linewidth, fill=True)
+            sns.kdeplot(self.results[idx_pred], label=label_pred, color=color_plt, linewidth=self.linewidth, fill=True)            
             ax.set_title(title, color=self.figure_color_map['text'])
             ax.set_xlabel('Score', color=self.figure_color_map['text'])
             ax.set_ylabel('Density', color=self.figure_color_map['text'])
-            
+        else:            
+            ax.plot(range_epochs, self.results["lr"], label="lr", color=self.color_train_plt, linewidth=self.linewidth)
+            ax.set_title("Learning Rate", color=self.figure_color_map['text'])
+            ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
+
         ax.tick_params(axis='x', colors=self.figure_color_map['text'])
         ax.tick_params(axis='y', colors=self.figure_color_map['text'])            
         ax.grid(visible=True, which="both", axis="both", color=self.figure_color_map['grid'], alpha=0.8)
@@ -525,8 +550,10 @@ class RegressionEngine(Common):
         Args:
             model_state (str): Specifies which model to load:
                 - 'last' : last trained model
-                - 'loss' : model with lowest validation loss
-                - 'r2'  : model with highest validation accuracy                
+                - 'loss' : model with the lowest test loss
+                - 'r2'  : model with the highest test R2
+                - 'plcc': model with the highest test PLCC
+                - 'srocc': model with the highest test SROCC
                 - int    : specific epoch number (1-based)
         
         Returns:
@@ -550,6 +577,18 @@ class RegressionEngine(Common):
                 model = self.model
             else:
                 model = self.model_r2
+        elif model_state == "plcc":
+            if self.model_plcc is None:
+                self.info(f"Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_plcc
+        elif model_state == "srocc":
+            if self.model_srocc is None:
+                self.info(f"Model not found, using last-epoch model for prediction.")
+                model = self.model
+            else:
+                model = self.model_srocc
         elif isinstance(model_state, int):
             if self.model_epoch is None:
                 self.info(f"Model epoch {model_state} not found, using default model for prediction.")
@@ -575,11 +614,11 @@ class RegressionEngine(Common):
         Displays the training and validation results both numerically and visually.
 
         Functionality:
-            Outputs key metrics such as training and validation loss, accuracy, and fpr at recall in numerical form.
+            Outputs key metrics such as training and validation loss, R2, and distributions
             Generates plots that visualize the training process, such as:
                 - Loss curves (training vs validation loss over epochs).
-                - Accuracy curves (training vs validation accuracy over epochs).
-                - FPR at recall curves
+                - R2 curves (training vs validation R2 over epochs).
+                - Output distributions
         """
         
         # Clear output
@@ -590,29 +629,46 @@ class RegressionEngine(Common):
         if self.apply_validation:
             print(self._format_epoch_results("test"))
         
-        # Plot training and test loss, accuracy, and fpr-at-recall curves.
+        # Plot training and test loss, R2, and distribution curves.
         if self.plot_curves:
         
-            n_plots = 5            
+            n_cols = 4
             plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
             curr_epoch = len(self.results["train_loss"])
             range_epochs = range(1, curr_epoch+1)            
 
             # Plot loss
-            ax = plt.subplot(1, n_plots, 1)
+            ax = plt.subplot(1, n_cols, 1)
             self._plot(ax, range_epochs, 'loss')
 
             # Plot R2
-            ax = plt.subplot(1, n_plots, 2)
+            ax = plt.subplot(1, n_cols, 2)
             self._plot(ax, range_epochs, 'r2')
                     
-            # Plot FPR at recall
-            ax = plt.subplot(1, n_plots, 3)
+            # Plot PLCC
+            ax = plt.subplot(1, n_cols, 3)
+            #self._plot(ax, range_epochs, 'kde_train')
+            self._plot(ax, range_epochs, 'plcc')
+
+            # Plot SROCC
+            ax = plt.subplot(1, n_cols, 4)            
+            self._plot(ax, range_epochs, 'srocc')
+
+            n_cols = 3
+            plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
+                        
+
+            # Plot prediction score distribution: train
+            ax = plt.subplot(1, n_cols, 1)
             self._plot(ax, range_epochs, 'kde_train')
 
-            # Plot pAUC at recall
-            ax = plt.subplot(1, n_plots, 4)
+            # Plot prediction score distribution: test
+            ax = plt.subplot(1, n_cols, 2)
             self._plot(ax, range_epochs, 'kde_test')
+
+            # Plot LR
+            ax = plt.subplot(1, n_cols, 3)
+            self._plot(ax, range_epochs, 'lr')
 
             # Display plots
             plt.show()
@@ -668,10 +724,9 @@ class RegressionEngine(Common):
             debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
             save_best_model (Union[str, List[str]]): Criterion mode for saving the model: 
                 - "loss": saves the epoch with the lowest validation loss
-                - "acc": saves the epoch with the highest validation accuracy
-                - "f1": saves the epoch with the highest valiation f1-score
-                - "fpr": saves the eopch with the lowsest false positive rate at recall
-                - "pauc": saves the epoch with the highest partial area under the curve at recall
+                - "r2": saves the epoch with the highest validation R2
+                - "plcc": saves the epoch with the highest validation PLCC
+                - "srocc": saves the epoch with the highest validation SROCC
                 - "last": saves last epoch
                 - "all": saves models for all epochs
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
@@ -951,7 +1006,7 @@ class RegressionEngine(Common):
                     # If y_pred was successfully computed, get the number of classes
                     if 'y_pred' in locals():
                         self.num_classes = y_pred.shape[1]
-                        self.info(f"Detected number of classes: {self.num_classes}.")                        
+                        self.info(f"Detected number of scores: {self.num_classes}.")                        
                     
                     # Otherwise, throw an exception
                     else:
@@ -1029,10 +1084,10 @@ class RegressionEngine(Common):
                     if 'y_pred_std' in locals() or 'y_pred_tch' in locals():
                         self.num_classes = y_pred_std.shape[1]
                         num_classes_tch = y_pred_tch.shape[1]
-                        self.info(f"Detected number of classes: {self.num_classes}.")
+                        self.info(f"Detected number of score: {self.num_classes}.")
 
                         if self.num_classes != num_classes_tch:
-                            self.error("The number of classes in the teacher and student models are different.")
+                            self.error("The number of scores in the teacher and student models are different.")
                     
                     # Otherwise, throw an exception
                     else:
@@ -1057,6 +1112,16 @@ class RegressionEngine(Common):
                     self.model_r2 = copy.deepcopy(self.model)                            
                     self.model_r2.to(self.device)
                 self.model_name_r2 = self.model_name.replace(".", f"_r2.")
+            if "plcc" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_plcc = copy.deepcopy(self.model)
+                    self.model_plcc.to(self.device)
+                self.model_name_plcc = self.model_name.replace(".", f"_plcc.")
+            if "srocc" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_srocc = copy.deepcopy(self.model)
+                    self.model_srocc.to(self.device)
+                self.model_name_srocc = self.model_name.replace(".", f"_srocc.")
             if "all" in self.mode:
                 if self.keep_best_models_in_memory:
                     self.model_epoch = []
@@ -1085,10 +1150,6 @@ class RegressionEngine(Common):
 
         Args:
             epoch: Epoch number.
-
-        Returns:
-            A tuple of training loss, training accuracy, f1, fpr at recall, and pauc metrics.
-            In the form (train_loss, train_accuracy, train_f1, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.88001, 0.01123, 0.15561).
         """
 
         # Measure time
@@ -1107,9 +1168,9 @@ class RegressionEngine(Common):
         # Initialize the GradScaler for Automatic Mixed Precision (AMP)
         scaler = GradScaler() if self.amp else None
 
-        # Setup train loss and train accuracy values
+        # Setup train loss and train r2 values
         len_dataloader = len(dataloader)
-        train_loss, train_r2, = 0, 0
+        train_loss, train_r2, train_plcc, train_srocc, = 0, 0, 0, 0
         all_y_pred = []
         all_y = []
 
@@ -1218,7 +1279,7 @@ class RegressionEngine(Common):
                 # Accumulate metrics
                 train_loss += loss.item() * self.accumulation_steps  # Scale back to original loss
                 y_pred = y_pred.float().view(-1) # Convert to float for stability                
-                train_r2 += self.calculate_r2(y, y_pred).item()
+                #train_r2 += self.calculate_r2(y, y_pred).item()
                 
                 all_y_pred.append(y_pred.detach().cpu())
                 all_y.append(y.detach().cpu())
@@ -1329,26 +1390,29 @@ class RegressionEngine(Common):
                 # Accumulate metrics
                 train_loss += loss.item() * self.accumulation_steps  # Scale back to original loss
                 y_pred = y_pred.float().view(-1) # Convert to float for stability                
-                train_r2 += self.calculate_r2(y, y_pred).item()
+                #train_r2 += self.calculate_r2(y, y_pred).item()
                 
                 all_y_pred.append(y_pred.detach().cpu())
                 all_y.append(y.detach().cpu())
 
-        # Adjust metrics to get average loss and accuracy per batch
-        train_loss = train_loss / len_dataloader
-        train_r2 = train_r2 / len_dataloader
-
-        # Final calculation of metrics
+        # Collect outputs
         all_y_pred = torch.cat(all_y_pred).numpy()
         all_y = torch.cat(all_y).numpy()
-        
-        del all_y_pred, all_y
+
+        # Adjust metrics to get average loss and R2 per batch
+        train_loss = train_loss / len_dataloader
+        #train_r2 = train_r2 / len_dataloader
+        train_r2 = r2_score(all_y, all_y_pred)
+        train_plcc = pearsonr(all_y, all_y_pred)[0]
+        train_srocc = spearmanr(all_y, all_y_pred)[0]
+
+        # Compute elapsed time 
+        elapsed_time = time.time() - start_time
+
+        # Remove variables
         self.clear_cuda_memory(['X', 'y', 'y_pred', 'loss'], locals())
         if self.use_distillation:
             self.clear_cuda_memory(['X_tch', 'y_pred_tch'], locals())
-        
-        # Compute elapsed time 
-        elapsed_time = time.time() - start_time
 
         # Retrieve the learning rate
         if self.scheduler is None or isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
@@ -1360,10 +1424,12 @@ class RegressionEngine(Common):
         self.results["epoch"].append(epoch+1)
         self.results["train_loss"].append(train_loss)
         self.results["train_r2"].append(train_r2)
-        self.results["train_pred"].append(all_y_pred)
-        self.results["train_y"].append(all_y)        
+        self.results["train_plcc"].append(train_plcc)
+        self.results["train_srocc"].append(train_srocc)
         self.results["train_time [s]"].append(elapsed_time)
         self.results["lr"].append(lr)
+        self.results["train_pred"] = all_y_pred
+        self.results["train_y"] = all_y
 
     # Validation/test step for a single epoch
     def _test_step(
@@ -1376,9 +1442,6 @@ class RegressionEngine(Common):
 
         Args:
             epoch: Epoch number.
-
-        Returns:
-            A tuple of test loss, test accuracy, FPR-at-recall, and pAUC-at-recall metrics.
         """
 
         # Execute the test step is apply_validation is enabled
@@ -1397,9 +1460,9 @@ class RegressionEngine(Common):
             if self.use_distillation:            
                 self.model_teacher.eval()
             
-            # Setup test loss and test accuracy values
+            # Setup test loss and test R2 values
             len_dataloader = len(dataloader)
-            test_loss, test_acc, test_f1 = 0, 0, 0
+            test_loss, test_r2, test_plcc, test_srocc = 0, 0, 0, 0
             all_y_pred = []
             all_y = []
 
@@ -1468,7 +1531,7 @@ class RegressionEngine(Common):
 
                         # Calculate and accumulate R2
                         y_pred = y_pred.float().view(-1)                        
-                        test_r2 += self.calculate_r2(y, y_pred).item()
+                        #test_r2 += self.calculate_r2(y, y_pred).item()
                         
                         all_y_pred.append(y_pred.detach().cpu())
                         all_y.append(y.detach().cpu())
@@ -1521,20 +1584,23 @@ class RegressionEngine(Common):
 
                         # Calculate and accumulate R2
                         y_pred = y_pred.float().view(-1)                        
-                        test_r2 += self.calculate_r2(y, y_pred).item()
+                        #test_r2 += self.calculate_r2(y, y_pred).item()
                         
                         all_y_pred.append(y_pred.detach().cpu())
                         all_y.append(y.detach().cpu())
 
-            # Adjust metrics to get average loss and accuracy per batch 
-            test_loss = test_loss / len_dataloader
-            test_acc = test_acc / len_dataloader
-
+            # Collect outputs
             all_y_pred = torch.cat(all_y_pred).numpy()
             all_y = torch.cat(all_y).numpy()
 
+            # Adjust metrics to get average loss and R2 per batch 
+            test_loss = test_loss / len_dataloader
+            #test_r2 = test_rplot2 / len_dataloader
+            test_r2 = r2_score(all_y, all_y_pred)
+            test_plcc = pearsonr(all_y, all_y_pred)[0]
+            test_srocc = spearmanr(all_y, all_y_pred)[0]
+
             # Remove variables
-            del all_preds, all_labels
             self.clear_cuda_memory(['X', 'y', 'y_pred', 'loss'], locals())
             if self.use_distillation:
                 self.clear_cuda_memory(['X_tch', 'y_pred_tch'], locals())
@@ -1550,21 +1616,23 @@ class RegressionEngine(Common):
         # Scheduler step after the optimizer
         self._scheduler_step(
             test_loss=test_loss,
-            test_acc=test_acc
+            test_r2=test_r2
             )
         
         # Update results dictionary
         self.results["test_loss"].append(test_loss)
         self.results["test_r2"].append(test_r2)
-        self.results["test_pred"].append(all_y_pred)
-        self.results["test_y"].append(all_y)        
+        self.results["test_plcc"].append(test_plcc)
+        self.results["test_srocc"].append(test_srocc)
         self.results["test_time [s]"].append(elapsed_time)
+        self.results["test_pred"] = all_y_pred
+        self.results["test_y"] = all_y
     
     # Scheduler step after the optimizer
     def _scheduler_step(
         self,
         test_loss: float=None,
-        test_acc: float=None,
+        test_r2: float=None,
         ):
 
         """
@@ -1572,7 +1640,7 @@ class RegressionEngine(Common):
 
         Args:            
             test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
-            test_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
+            test_r2 (float, optional): Test R2 value, required for ReduceLROnPlateau with 'max' mode.
         """
             
         if self.scheduler:        
@@ -1580,11 +1648,11 @@ class RegressionEngine(Common):
                 # Check whether scheduler is configured for "min" or "max"
                 if self.scheduler.mode == "min" and test_loss is not None:
                     self.scheduler.step(test_loss)  # Minimize test_loss
-                elif self.scheduler.mode == "max" and test_acc is not None:
-                    self.scheduler.step(test_acc)  # Maximize test_accuracy
+                elif self.scheduler.mode == "max" and test_r2 is not None:
+                    self.scheduler.step(test_r2)  # Maximize test_r2
                 else:
                     self.error(
-                        f"The scheduler requires either `test_loss` or `test_acc` "
+                        f"The scheduler requires either `test_loss` or `test_r2` "
                         "depending on its mode ('min' or 'max')."
                         )
             else:
@@ -1617,9 +1685,13 @@ class RegressionEngine(Common):
         if self.apply_validation:
             test_loss = self.results["test_loss"][-1]
             test_r2 = self.results["test_r2"][-1]
+            test_plcc = self.results["test_plcc"][-1]
+            test_srocc = self.results["test_srocc"][-1]
         else:
             test_loss = self.results["train_loss"][-1]
-            test_r2 = self.results["train_r2"][-1]            
+            test_r2 = self.results["train_r2"][-1]
+            test_plcc = self.results["train_plcc"][-1]
+            test_srocc = self.results["train_srocc"][-1]
 
         # Some helper functions
         def remove_previous_best(model_name):
@@ -1663,6 +1735,26 @@ class RegressionEngine(Common):
                         if self.keep_best_models_in_memory:
                             self.model_r2.load_state_dict(self.model.state_dict())
                         save_model(self.model_name_r2)
+                # PLCC criterion
+                elif mode == "plcc":
+                    if test_plcc is None:
+                        self.error(f"'test_plcc' must be provided when mode is 'plcc'.")
+                    if test_plcc > self.best_test_plcc:
+                        remove_previous_best(self.model_name_plcc)
+                        self.best_test_plcc = test_plcc
+                        if self.keep_best_models_in_memory:
+                            self.model_plcc.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_plcc)
+                # SROCC criterion
+                elif mode == "srocc":
+                    if test_srocc is None:
+                        self.error(f"'test_srocc' must be provided when mode is 'srocc'.")
+                    if test_srocc > self.best_test_srocc:
+                        remove_previous_best(self.model_name_srocc)
+                        self.best_test_srocc = test_srocc
+                        if self.keep_best_models_in_memory:
+                            self.model_srocc.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_srocc)
                 # Last-epoch criterion
                 elif mode == "last":
                     remove_previous_best(self.model_name)
@@ -1677,7 +1769,9 @@ class RegressionEngine(Common):
         # Save results to CSV
         name, _ = self.model_name.rsplit('.', 1)
         csv_file_name = f"{name}.csv"
-        df_results = pd.DataFrame(self.results)
+        exclude_keys = ["train_pred", "train_y", "test_pred", "test_y"]
+        filtered_results = {k: v for k, v in self.results.items() if k not in exclude_keys}
+        df_results = pd.DataFrame(filtered_results)
         df_results.to_csv(os.path.join(self.target_dir, csv_file_name), index=False)
 
         return df_results
@@ -1957,7 +2051,7 @@ class RegressionEngine(Common):
 
         During training, the model is evaluated after each epoch based on the provided dataloaders.
         The model can be saved at different stages (e.g., at the end of each epoch or when the model 
-        achieves the best performance according to a specified metric such as loss, accuracy, or FPR).
+        achieves the best performance according to a specified metric such as loss, R2).
 
         Args:
             target_dir (str, optional): Directory to save the trained model.
@@ -1968,7 +2062,9 @@ class RegressionEngine(Common):
             save_best_model (Union[str, List[str]], optional): Criterion(s) for saving the model.
                 Options include:
                 - "loss" (validation loss),
-                - "r2" (validation R2),                
+                - "r2" (validation R2),
+                - "plcc" (validation PLCC),
+                - "srocc" (validation SROCC),
                 - "last" (save model at the last epoch),
                 - "all" (save models for all epochs),
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
@@ -1996,9 +2092,13 @@ class RegressionEngine(Common):
             The dataframe will have the following columns:
             - epoch: List of epoch numbers.
             - train_loss: List of training loss values for each epoch.
-            - train_r2: List of training R2 values for each epoch.            
+            - train_r2: List of training R2 values for each epoch.
+            - train_plcc: List of training PLCC values for each epoch.
+            - train_srocc: List of training SROCC values for each epoch.            
             - test_loss: List of test loss values for each epoch.
-            - test_r2: List of test r2 values for each epoch.            
+            - test_r2: List of test r2 values for each epoch.
+            - test_plcc: List of testing PLCC values for each epoch.
+            - test_srocc: List of testing SROCC values for each epoch. 
             - train_time: List of training time for each epoch.
             - test_time: List of testing time for each epoch.
             - lr: List of learning rate values for each epoch.
@@ -2012,8 +2112,12 @@ class RegressionEngine(Common):
             epoch: [1, 2],
             train_loss: [2.0616, 1.0537],
             train_r2: [0.3945, 0.3945],            
+            train_plcc: [0.8444, 0.9352],
+            train_srocc: [0.7525, 0.9012],
             test_loss: [1.2641, 1.5706],
-            test_r2: [0.3400, 0.2973],            
+            test_r2: [0.3400, 0.2973],
+            test_plcc: [0.8523, 0.73452],
+            test_srocc: [0.8312, 0.7851],            
             train_time: [1.1234, 1.5678],
             test_time: [0.4567, 0.7890],
             lr: [0.001, 0.0005],

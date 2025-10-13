@@ -2,39 +2,66 @@ import torch
 import torchvision
 from torch import nn
 
-def replace_classifier(model, hidden_dim, num_classes, device):
+def replace_head(model, feature_dim ,mlp_hidden_dim, output_dim, dropout, device):
 
     """
-    Replace the classification head of the model with a new linear layer
-    matching the number of output classes.
+    Replace the classification/regression head of the model with a new linear layer or MLP
+    matching the number of outputs.
 
     Args:
         model (torch.nn.Module): The pretrained model.
-        hidden_dim (int): Number of input features to the classification head.
-        num_classes (int): Number of output classes.
+        feature_dim (int): Number of input features to the classification head.
+        mlp_hidden_dim (int): If specified, adds a hidden layer with GELU and dropout.
+        output_dim (int): Number of output classes.
+        dropout (float): Dropout rate for regularization.
         device (torch.device): Device to move the new head to.
     """
 
+    # Check dropout
+    if dropout is not None:
+        if not (0.0 <= dropout <= 1.0):
+            raise ValueError("dropout must be None or a float between 0 and 1")
+    else:
+        dropout = 0.0
+
+    # Define head
+    if mlp_hidden_dim:
+        head = nn.Sequential(
+            nn.Linear(feature_dim, mlp_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(p=dropout), 
+            nn.Linear(mlp_hidden_dim, output_dim)
+        ).to(device)
+    else:
+        if dropout > 0:
+            head = nn.Sequential(
+                nn.Dropout(p=dropout),
+                nn.Linear(feature_dim, output_dim)
+            ).to(device)
+        else:
+            head = nn.Linear(feature_dim, output_dim).to(device)            
+
     if hasattr(model, "heads"):  # Vision Transformer (ViT) models
-        model.heads = nn.Linear(hidden_dim, num_classes).to(device)
+        model.heads = head
     elif hasattr(model, "head"):  # Some ViT variants
-        model.head = nn.Linear(hidden_dim, num_classes).to(device)
+        model.head = head
     elif hasattr(model, "classifier"):  # EfficientNet, MobileNet, ConvNeXt
         if isinstance(model.classifier, nn.Sequential):
-            model.classifier[-1] = nn.Linear(hidden_dim, num_classes).to(device)
+            model.classifier[-1] = head
         else:
-            model.classifier = nn.Linear(hidden_dim, num_classes).to(device)
+            model.classifier = head
     elif hasattr(model, "fc"):  # ResNet models
-        model.fc = nn.Linear(hidden_dim, num_classes).to(device)
+        model.fc = head
     else:
         raise ValueError(f"Cannot replace classifier head for model type: {type(model)}")
 
 
-def build_pretrained_classifier(
+def build_pretrained_model(
     model: str = "vit_b_16_224",
-    num_classes: int = 1,
+    mlp_hidden_dim: int = None,
+    output_dim: int = 1,
     dropout: float = None,
-    freeze: bool = False,
+    freeze_backbone: bool = False,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     seed: int = 42
 ) -> nn.Module:
@@ -45,7 +72,7 @@ def build_pretrained_classifier(
 
     This function:
       - Loads the requested model with pretrained weights.
-      - Replaces its classification head for a new task (num_classes output).
+      - Replaces its classification head for a new task (output_dim output).
       - Optionally freezes the pretrained layers.
       - Sets random seeds for reproducibility.
       - Moves the model to the specified device.
@@ -77,10 +104,11 @@ def build_pretrained_classifier(
             - "mobilenet_v2", "mobilenet_v3_small", "mobilenet_v3_large": MobileNet variants
             - "convnext_t", "convnext_s", "convnext_b", "convnext_l": ConvNeXt variants
 
-        num_classes (int): Number of output classes for the classification head.
+        mlp_hidden_dim (int): If specified, adds a hidden layer with GELU and dropout.
+        output_dim (int): Number of output classes (classification) / scores (regression) for the head.
         dropout (float): Dropout probability for the new head (if applicable).
             - If none (default) the default dropout probability is used.
-        freeze (bool): Whether to freeze all pretrained weights.
+        freeze_backbone (bool): Whether to freeze all pretrained weights.
         device (torch.device): Device to load the model onto.
         seed (int): Random seed for reproducibility.
 
@@ -148,21 +176,21 @@ def build_pretrained_classifier(
         raise ValueError(f"Unsupported model name: {model}")
 
     # Retrieve the constructor function, pretrained weights, and hidden dim for the model
-    fn, weights_enum, hidden_dim = model_map[model]
+    fn, weights_enum, feature_dim = model_map[model]
 
     # Prepare kwargs for model constructor — only add dropout if specified (including 0.0)        
     kwargs = {}
-    if dropout is not None:
-        if not (0.0 <= dropout <= 1.0):
-            raise ValueError("dropout must be None or a float between 0 and 1")
-        kwargs['dropout'] = dropout
+    #if dropout is not None:
+    #    if not (0.0 <= dropout <= 1.0):
+    #        raise ValueError("dropout must be None or a float between 0 and 1")
+    #    kwargs['dropout'] = dropout
 
     # Instantiate the model with pretrained weights and optional dropout
     model = fn(weights=weights_enum, **kwargs).to(device)
 
     # Freeze or unfreeze model parameters according to 'freeze' flag
     for param in model.parameters():
-        param.requires_grad = not freeze
+        param.requires_grad = not freeze_backbone
 
     # Set seeds for reproducibility
     torch.manual_seed(seed)
@@ -170,7 +198,7 @@ def build_pretrained_classifier(
         torch.cuda.manual_seed(seed)
 
     # Replace the classification head with a new one matching the desired number of classes
-    replace_classifier(model, hidden_dim, num_classes, device)
+    replace_head(model, feature_dim, mlp_hidden_dim, output_dim, dropout, device)
 
     return model
 

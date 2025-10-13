@@ -185,18 +185,21 @@ class ConvNeXt(nn.Module):
 
     Args:
         in_chans (int): Number of input image channels. Default: 3
-        num_classes (int): Number of output classes for classification. Default: 1000
+        output_dim (int): Number of output classes for classification or ouput scores for regression. Default: 1000
         depths (list of int): Number of ConvNeXt blocks at each stage. Default: [3, 3, 9, 3]
         dims (list of int): Number of channels (feature dimensions) at each stage. Default: [96, 192, 384, 768]
         drop_path_rate (float): Maximum stochastic depth rate for residual blocks. Default: 0.0
         layer_scale_init_value (float): Initial value for learnable layer scaling. Default: 1e-6
+        dropout (float): Dropout rate for regularization. Default: 0.3
         head_init_scale (float): Scaling factor for the classifier head weights and biases. Default: 1.0
+        mlp_hidden_dim (int): If specified, adds a hidden layer with GELU and dropout. Default: None
     """
 
-    def __init__(self, in_chans=3, num_classes=1000, 
+    def __init__(self, in_chans=3, output_dim=1000, 
                  depths=[3, 3, 9, 3], dims=[96, 192, 384, 768], 
                  drop_path_rate=0., layer_scale_init_value=1e-6, 
-                 head_init_scale=1.):
+                 head_init_scale=1., dropout=0.3,
+                 mlp_hidden_dim=None):
         super().__init__()
 
         # Stem and downsampling layers to reduce spatial resolution and increase channel depth
@@ -228,14 +231,44 @@ class ConvNeXt(nn.Module):
             self.stages.append(stage)
             cur += depths[i]
 
-        # Final normalization and classification head
+        # Final normalization and classification/regression head
         self.norm = nn.LayerNorm(dims[-1], eps=1e-6)
-        self.head = nn.Linear(dims[-1], num_classes)
+        if dropout is not None:
+            if not (0.0 <= dropout <= 1.0):
+                raise ValueError("dropout must be None or a float between 0 and 1")
+        else:
+            dropout = 0.0
+
+        if mlp_hidden_dim:
+            self.head = nn.Sequential(
+                nn.Linear(dims[-1], mlp_hidden_dim),
+                nn.GELU(),
+                nn.Dropout(p=dropout), 
+                nn.Linear(mlp_hidden_dim, output_dim)
+            )
+        else:
+            self.head = nn.Sequential(
+                nn.Dropout(p=dropout),
+                nn.Linear(dims[-1], output_dim)
+            )
 
         # Initialize model weights
         self.apply(self._init_weights)
-        self.head.weight.data.mul_(head_init_scale)
-        self.head.bias.data.mul_(head_init_scale)
+        #self.head.weight.data.mul_(head_init_scale)
+        #self.head.bias.data.mul_(head_init_scale)
+        # Scale only the final classification layer
+        if isinstance(self.head, nn.Linear):
+            self.head.weight.data.mul_(head_init_scale)
+            self.head.bias.data.mul_(head_init_scale)
+        elif isinstance(self.head, nn.Sequential):
+            final_linear = None
+            for layer in reversed(self.head):
+                if isinstance(layer, nn.Linear):
+                    final_linear = layer
+                    break
+            if final_linear is not None:
+                final_linear.weight.data.mul_(head_init_scale)
+                final_linear.bias.data.mul_(head_init_scale)
 
     def _init_weights(self, m):
 
@@ -297,14 +330,17 @@ model_urls = {
 
 # -------- ConvNeXt Tiny --------
 # @register_model  # Uncomment this if using a model registry like in timm
-def convnext_tiny(pretrained=False, **kwargs):
+def convnext_tiny(pretrained=False, freeze_backbone=False, **kwargs):
+    
     """
     ConvNeXt-Tiny model builder.
 
     Args:
         pretrained (bool): If True, load pretrained weights.
+        freeze_backbone (bool): If True, freeze all backbone layers (stages). Default: False
         kwargs: Additional arguments passed to ConvNeXt.
     """
+
     # Initialize model with tiny configuration
     model = ConvNeXt(depths=[3, 3, 9, 3], dims=[96, 192, 384, 768], **kwargs)
 
@@ -314,34 +350,56 @@ def convnext_tiny(pretrained=False, **kwargs):
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu", check_hash=True)
         model.load_state_dict(checkpoint["model"])
     
+    # Optionally freeze backbone (all ConvNeXt stages)
+    if freeze_backbone:      
+        for stage in model.stages:
+            for param in stage.parameters():
+                param.requires_grad = False
+    
     return model
 
 # -------- ConvNeXt Small --------
 @register_model
-def convnext_small(pretrained=False, **kwargs):
+def convnext_small(pretrained=False, freeze_backbone=False, **kwargs):
+
     """
-    ConvNeXt-Small model builder.
-    Larger depth than Tiny, same dimensions.
+    ConvNeXt-Small model builder. Larger depth than Tiny, same dimensions.
+
+    Args:
+        pretrained (bool): Load pretrained weights.        
+        freeze_backbone (bool): If True, freeze all backbone layers (stages). Default: False
+        kwargs: Additional arguments passed to ConvNeXt.
     """
+
     model = ConvNeXt(depths=[3, 3, 27, 3], dims=[96, 192, 384, 768], **kwargs)
 
     if pretrained:
         url = model_urls['convnext_small_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
         model.load_state_dict(checkpoint["model"])
+    
+    # Optionally freeze backbone (all ConvNeXt stages)
+    if freeze_backbone:      
+        for stage in model.stages:
+            for param in stage.parameters():
+                param.requires_grad = False
 
     return model
 
 # -------- ConvNeXt Base --------
 @register_model
-def convnext_base(pretrained=False, in_22k=False, **kwargs):
+def convnext_base(pretrained=False, in_22k=False, freeze_backbone=False, **kwargs):
+
     """
     ConvNeXt-Base model builder.
     
     Args:
         pretrained (bool): Load pretrained weights.
         in_22k (bool): Load weights trained on ImageNet-22K instead of 1K.
+        freeze_backbone (bool): If True, freeze all backbone layers (stages). Default: False
+        kwargs: Additional arguments passed to ConvNeXt.
     """
+
     model = ConvNeXt(depths=[3, 3, 27, 3], dims=[128, 256, 512, 1024], **kwargs)
 
     if pretrained:
@@ -349,31 +407,52 @@ def convnext_base(pretrained=False, in_22k=False, **kwargs):
         url = model_urls['convnext_base_22k'] if in_22k else model_urls['convnext_base_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
         model.load_state_dict(checkpoint["model"])
+    
+    # Optionally freeze backbone (all ConvNeXt stages)
+    if freeze_backbone:      
+        for stage in model.stages:
+            for param in stage.parameters():
+                param.requires_grad = False
 
     return model
 
 # -------- ConvNeXt Large --------
 @register_model
-def convnext_large(pretrained=False, in_22k=False, **kwargs):
+def convnext_large(pretrained=False, in_22k=False, freeze_backbone=False, **kwargs):
+
     """
     ConvNeXt-Large model builder.
-    
+
     Args:
         pretrained (bool): Load pretrained weights.
         in_22k (bool): Load weights trained on ImageNet-22K instead of 1K.
+        freeze_backbone (bool): If True, freeze all backbone layers (stages). Default: False
+        kwargs: Additional arguments passed to ConvNeXt.
     """
+
     model = ConvNeXt(depths=[3, 3, 27, 3], dims=[192, 384, 768, 1536], **kwargs)
 
     if pretrained:
         url = model_urls['convnext_large_22k'] if in_22k else model_urls['convnext_large_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
+        #model.load_state_dict(checkpoint["model"])
+        state_dict = checkpoint['model']
+        state_dict.pop('head.weight', None)
+        state_dict.pop('head.bias', None)
+        model.load_state_dict(state_dict, strict=False)
+
+    # Optionally freeze backbone (all ConvNeXt stages)
+    if freeze_backbone:      
+        for stage in model.stages:
+            for param in stage.parameters():
+                param.requires_grad = False
 
     return model
 
 # -------- ConvNeXt XLarge --------
 @register_model
-def convnext_xlarge(pretrained=False, in_22k=False, **kwargs):
+def convnext_xlarge(pretrained=False, in_22k=False, freeze_backbone=False, **kwargs):
+    
     """
     ConvNeXt-XLarge model builder.
     
@@ -382,7 +461,10 @@ def convnext_xlarge(pretrained=False, in_22k=False, **kwargs):
     Args:
         pretrained (bool): Load pretrained weights.
         in_22k (bool): Must be True. Asserts if False.
+        freeze_backbone (bool): If True, freeze all backbone layers (stages). Default: False
+        kwargs: Additional arguments passed to ConvNeXt.
     """
+
     model = ConvNeXt(depths=[3, 3, 27, 3], dims=[256, 512, 1024, 2048], **kwargs)
 
     if pretrained:
@@ -391,5 +473,11 @@ def convnext_xlarge(pretrained=False, in_22k=False, **kwargs):
         url = model_urls['convnext_xlarge_22k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
         model.load_state_dict(checkpoint["model"])
+    
+    # Optionally freeze backbone (all ConvNeXt stages)
+    if freeze_backbone:      
+        for stage in model.stages:
+            for param in stage.parameters():
+                param.requires_grad = False
 
     return model

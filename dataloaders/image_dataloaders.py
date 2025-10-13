@@ -260,8 +260,8 @@ class RegressionDataset(Dataset):
 
     Args:
         data (pd.DataFrame): DataFrame with at least two columns:
-            - 'image_path': path or filename of the image (with or without extension)
-            - 'score': float value to predict.
+            - 1st column: path or filename of the image (with or without extension)
+            - 2nd column: float value to predict.
         image_folder (str | Path, optional): Root directory where image files are stored.
             Used if 'image_path' entries are relative paths.
         transform (callable, optional): Transform applied to each image (e.g., resizing, normalization).
@@ -296,8 +296,12 @@ class RegressionDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.item()
 
+        # Rename columsn
+        #cols = list(self.data.columns)
+        #self.data = self.data.rename(columns={cols[0]: "image_path", cols[1]: "score"})
+
         # Build image file path
-        image_path = Path(self.data.loc[idx, 'image_path'])
+        image_path = Path(self.data.iloc[idx, 0])
         if not image_path.is_absolute() and not image_path.exists():
             if self.image_folder:
                 image_path = self.image_folder / image_path
@@ -306,8 +310,20 @@ class RegressionDataset(Dataset):
                     f"Image '{image_path}' not found and no image_folder was provided."
                 )
 
+        # If file does not exist, try to guess common extensions
         if not image_path.exists():
-            raise FileNotFoundError(f"Image file not found: {image_path}")
+            common_exts = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"]
+            found = False
+            for ext in common_exts:
+                candidate = image_path.with_suffix(ext)
+                if candidate.exists():
+                    image_path = candidate
+                    found = True
+                    break
+            if not found:
+                raise FileNotFoundError(
+                    f"Image file not found: {image_path} (also tried extensions {common_exts})"
+                )
 
         # Open image and convert to RGB mode
         img = Image.open(image_path).convert('RGB')
@@ -322,7 +338,7 @@ class RegressionDataset(Dataset):
             img = torch.from_numpy(img)
 
         # Retrieve score from the DataFrame and convert to float
-        score = torch.tensor(float(self.data.loc[idx, 'score']), dtype=torch.float32)
+        score = torch.tensor(float(self.data.iloc[idx, 1]), dtype=torch.float32)
 
         return img, score
 
@@ -377,10 +393,10 @@ def create_regression_dataloaders(
             raise TypeError("Input must be a DataFrame or a path to a CSV file.")
 
         # Validate column count
-        if df.shape[1] != 2:
-            raise ValueError("The dataset must have two columns: column 1 with image_paths, column 2 with scores.")
+        if df.shape[1] < 2:
+            raise ValueError("The dataset must have at least two columns: 1st column with image_paths, 2nd column with scores.")
 
-        # Rename columns
+        # Rename columns anyway
         cols = list(df.columns)
         df = df.rename(columns={cols[0]: "image_path", cols[1]: "score"})
 

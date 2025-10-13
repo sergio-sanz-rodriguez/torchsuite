@@ -5,7 +5,7 @@ import torchvision
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as TF
 from torch.nn.init import trunc_normal_
-from .pretrained_classifiers import build_pretrained_classifier
+from .pretrained_models import build_pretrained_model
 #, xavier_normal_, zeros_, orthogonal_, kaiming_normal_
 
 class HyperspectralToRGB(nn.Module):
@@ -176,11 +176,11 @@ class SpectralViT(nn.Module):
                 device=device
                 )
 
-        self.model = build_pretrained_classifier(
+        self.model = build_pretrained_model(
             model=model,
-            num_classes=num_classes,
+            output_dim=num_classes,
             dropout=dropout,
-            freeze=freeze_model,
+            freeze_backbone=freeze_model,
             seed=seed,
             device=device,
             )

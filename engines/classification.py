@@ -301,7 +301,7 @@ class ClassificationEngine(Common):
         if split == 'train':
             return (
                 f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
-                f"{self.color_train}Train: {self.color_other}| "
+                f"{self.color_train}Train {self.color_other}| "
                 f"{self.color_train}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}acc: {self.results[f'{split}_acc'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}f1: {self.results[f'{split}_f1'][-1]:.4f} {self.color_other}| "
@@ -313,7 +313,7 @@ class ClassificationEngine(Common):
         else:
             return (
                 f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
-                f"{self.color_test}Train: {self.color_other}| "
+                f"{self.color_test}Test  {self.color_other}| "
                 f"{self.color_test}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}acc: {self.results[f'{split}_acc'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}f1: {self.results[f'{split}_f1'][-1]:.4f} {self.color_other}| "
@@ -710,7 +710,7 @@ class ClassificationEngine(Common):
                 - None: the model will not be saved.
 
         Functionality:
-            Validates `recall_threshold`, `accumulation_steps`, and `epochs` parameters with assertions.
+            Validates input arguments with assertions.
             Prints configuration parameters using the `_print_config` method.
             Initializes the optimizer, loss function, and scheduler.
             Ensures the target directory for saving models exists, creating it if necessary.
@@ -1140,17 +1140,13 @@ class ClassificationEngine(Common):
     def _train_step(
         self,
         epoch: int = 1,
-        ) -> Tuple[float, float, float, float, float]:
+        ):
     
         """
         Trains a PyTorch model for a single epoch with gradient accumulation.
 
         Args:
             epoch: Epoch number.
-
-        Returns:
-            A tuple of training loss, training accuracy, f1, fpr at recall, and pauc metrics.
-            In the form (train_loss, train_accuracy, train_f1, train_fpr, train_pauc). For example: (0.1112, 0.8743, 0.88001, 0.01123, 0.15561).
         """
 
         # Measure time
@@ -1451,16 +1447,13 @@ class ClassificationEngine(Common):
     def _test_step(
         self,
         epoch: int = 1,
-        ) -> Tuple[float, float, float]:
+        ):
         
         """
         Tests a PyTorch model for a single epoch.
 
         Args:
             epoch: Epoch number.
-
-        Returns:
-            A tuple of test loss, test accuracy, FPR-at-recall, and pAUC-at-recall metrics.
         """
 
         # Execute the test step is apply_validation is enabled

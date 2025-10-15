@@ -62,7 +62,6 @@ def display_random_images_regression(
     else:
         raise ValueError(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
 
-
     # Setup the range to select images
     n = min(n, len(dataset))
 

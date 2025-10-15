@@ -17,7 +17,7 @@ import torchvision.ops as ops
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image
-from typing import List
+from typing import List, Literal, Dict, Union
 from collections import defaultdict, deque
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 from torchvision.transforms.functional import to_pil_image
@@ -26,19 +26,6 @@ from torchvision.transforms import v2 as T
 
 def collate_fn(batch):
     return tuple(zip(*batch))
-
-
-# Function to set random seed
-def set_seeds(seed: int=42):
-    """Sets random seeds for torch operations.
-
-    Args:
-        seed (int, optional): Random seed to set. Defaults to 42.
-    """
-    # Set the seed for general torch operations
-    torch.manual_seed(seed)
-    # Set the seed for CUDA torch operations (ones that happen on the GPU)
-    torch.cuda.manual_seed(seed)
 
 
 # Function to remove redundant boxes and masks
@@ -375,8 +362,8 @@ def display_and_save_predictions(
     print_classes: bool=True,
     print_scores: bool=True,
     label_to_class_dict={1: 'roi'},
-    save_dir: str = None
-    ):
+    save_dir: str = None,
+    theme: Union[Literal["light", "dark"], Dict[str, str]] = "light"):
 
     """
     This function displays images with predicted bounding boxes and segmentation masks.
@@ -390,9 +377,24 @@ def display_and_save_predictions(
         print_scores (bool): If True, the confidence scores will be printed on the bounding boxes.
         label_to_class_dict (dict): Dictionary mapping label indices to class names.
         save_dir (str, optional): Path to save images. If None, images will not be saved.
+        theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     """
 
     plt.close("all")
+
+     # Theme presets
+    theme_presets = {
+        "light": {"bg": "white", "text": "black"},
+        "dark": {"bg": "#1e1e1e", "text": "white"}
+    }
+
+    # Resolve theme
+    if isinstance(theme, dict):
+        figure_color_map = theme
+    elif theme in theme_presets:
+        figure_color_map = theme_presets[theme]
+    else:
+        raise ValueError(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
 
     # Convert dataset to DataLoader if needed
     if isinstance(dataloader, torch.utils.data.Dataset):
@@ -409,6 +411,7 @@ def display_and_save_predictions(
 
     # Set up the grid
     fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows))
+    fig.patch.set_facecolor(figure_color_map['bg'])
     axes = axes.flatten()
 
     # Loop through the predictions and process each image
@@ -451,7 +454,7 @@ def display_and_save_predictions(
         # Plot on the grid
         ax = axes[idx]
         ax.imshow(output_image.permute(1, 2, 0))  # Convert from (C, H, W) to (H, W, C)
-        ax.set_title(f"Prediction {idx + 1}")
+        ax.set_title(f"Prediction {idx + 1}", color=figure_color_map['text'])
         ax.axis("off")
 
     # Hide unused subplots (if any)
@@ -462,7 +465,13 @@ def display_and_save_predictions(
     plt.show()
 
 
-def visualize_transformed_data(img, target, transformed_img, transformed_target, color_conversion=None):
+def visualize_transformed_data(
+        img,
+        target,
+        transformed_img,
+        transformed_target,
+        color_conversion=None,
+        theme: Union[Literal["light", "dark"], Dict[str, str]] = "light"):
 
     """
     Visualizes the original and transformed image along with bounding boxes and masks.
@@ -477,8 +486,23 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target,
                         If None, assumes image is already in RGB.
     """
     
+    # Theme presets
+    theme_presets = {
+        "light": {"bg": "white", "text": "black"},
+        "dark": {"bg": "#1e1e1e", "text": "white"}
+    }
+
+    # Resolve theme
+    if isinstance(theme, dict):
+        figure_color_map = theme
+    elif theme in theme_presets:
+        figure_color_map = theme_presets[theme]
+    else:
+        raise ValueError(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
+
     # Visualize original image
     fig, axes = plt.subplots(1, 2, figsize=(15, 7))
+    fig.patch.set_facecolor(figure_color_map['bg'])
 
     # Convert tensors to numpy and apply color conversion if needed
     def convert_for_plot(tensor_img):
@@ -499,7 +523,7 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target,
             linewidth=2, edgecolor='r', facecolor='none'
         )
         axes[0].add_patch(rect)
-    axes[0].set_title('Original Image')
+    axes[0].set_title('Original Image', color=figure_color_map['text'])
     axes[0].axis('off')
 
     # Transformed Image
@@ -511,7 +535,7 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target,
             linewidth=2, edgecolor='g', facecolor='none'
         )
         axes[1].add_patch(rect)
-    axes[1].set_title('Transformed Image')
+    axes[1].set_title('Transformed Image', color=figure_color_map['text'])
     axes[1].axis('off')
 
     plt.show()

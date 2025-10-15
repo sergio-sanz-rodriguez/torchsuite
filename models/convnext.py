@@ -347,8 +347,11 @@ def convnext_tiny(pretrained=False, freeze_backbone=False, **kwargs):
     # Load pretrained weights if requested
     if pretrained:
         url = model_urls['convnext_tiny_1k']
-        checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu", check_hash=True)
-        model.load_state_dict(checkpoint["model"])
+        checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu") #, check_hash=True)        
+        state_dict = checkpoint['model']
+        state_dict.pop('head.weight', None)
+        state_dict.pop('head.bias', None)
+        model.load_state_dict(state_dict, strict=False)
     
     # Optionally freeze backbone (all ConvNeXt stages)
     if freeze_backbone:      
@@ -376,7 +379,10 @@ def convnext_small(pretrained=False, freeze_backbone=False, **kwargs):
     if pretrained:
         url = model_urls['convnext_small_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
+        state_dict = checkpoint['model']
+        state_dict.pop('head.weight', None)
+        state_dict.pop('head.bias', None)
+        model.load_state_dict(state_dict, strict=False)        
     
     # Optionally freeze backbone (all ConvNeXt stages)
     if freeze_backbone:      
@@ -406,7 +412,10 @@ def convnext_base(pretrained=False, in_22k=False, freeze_backbone=False, **kwarg
         # Choose URL based on pretraining dataset
         url = model_urls['convnext_base_22k'] if in_22k else model_urls['convnext_base_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
+        state_dict = checkpoint['model']
+        state_dict.pop('head.weight', None)
+        state_dict.pop('head.bias', None)
+        model.load_state_dict(state_dict, strict=False)
     
     # Optionally freeze backbone (all ConvNeXt stages)
     if freeze_backbone:      
@@ -472,7 +481,10 @@ def convnext_xlarge(pretrained=False, in_22k=False, freeze_backbone=False, **kwa
         assert in_22k, "only ImageNet-22K pre-trained ConvNeXt-XL is available; please set in_22k=True"
         url = model_urls['convnext_xlarge_22k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
+        state_dict = checkpoint['model']
+        state_dict.pop('head.weight', None)
+        state_dict.pop('head.bias', None)
+        model.load_state_dict(state_dict, strict=False)
     
     # Optionally freeze backbone (all ConvNeXt stages)
     if freeze_backbone:      

@@ -1264,7 +1264,7 @@ class ObjectDetectionEngine(Common):
                 else:
                     model = self.model_epoch[model_state-1]            
 
-
+        # Prepare prediction: model to eval and move to device
         y_preds = []
         model.eval()
         model.to(self.device)

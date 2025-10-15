@@ -14,11 +14,13 @@ import copy
 import warnings
 import re
 import gzip
+import tempfile
 import inspect
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .common import Common, Colors
 from .loss_functions import DistillationLoss
+from matplotlib.ticker import FuncFormatter
 from tqdm.auto import tqdm 
 from PIL import Image
 from pathlib import Path
@@ -158,6 +160,7 @@ class RegressionEngine(Common):
                 'r2':   ['r2', 'r2', 'R2'],
                 'plcc': ['plcc', 'plcc', 'Pearson Linear Correlation Coeff. (PLCC)'],
                 'srocc': ['srocc', 'srocc', 'Spearman''s Rank Correlation Coeff. (SROCC)'],
+                'time': ['time [s]', 'time', 'Time [MMmSSs]'],
                 'kde_train':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],
                 'kde_test':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],                
             }
@@ -190,7 +193,7 @@ class RegressionEngine(Common):
             default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
             self.figure_color_map = {'bg': 'white', 'text': 'black', 'grid': '#b0b0b0'} #cccccc
         else:
-            default_color_map = {'train': 'blue', 'test': 'light_red', 'other': 'white'}
+            default_color_map = {'train': 'yellow', 'test': 'light_red', 'other': 'white'}
             self.figure_color_map = {'bg': '#1e1e1e', 'text': 'white', 'grid': '#666666'}
 
         # Merge user-defined color_map with defaults (user values override defaults)
@@ -209,9 +212,9 @@ class RegressionEngine(Common):
         self.color_other = Colors.get_console_color(color_map['other'])        
         self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
         self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])     
-        self.color_other_plt = Colors.get_matplotlib_color(color_map['other'] if theme=='light' else 'dark_gray')
+        #self.color_other_plt = Colors.get_matplotlib_color(color_map['other'] if theme=='light' else 'dark_gray')
+        self.color_other_plt = Colors.get_matplotlib_color('dark_gray')
                     
-
         # Set the default line width for plots
         self.linewidth = Colors.get_linewidth()
 
@@ -230,14 +233,14 @@ class RegressionEngine(Common):
             resume_msg (str, optional): An additional string with information on resume
         """
 
-        if self.resume:
+        if self.resume and self.start_epoch > 0:
             self.info(f"Overriding arguments...")
             if isinstance(resume_msg, (str)) and len(resume_msg) > 0:
                 self.info(f"Resume: {resume_msg}")
             else:
                 self.info(f"Resume: {self.resume}")
         else:
-            self.info(f"Resume: {self.resume}")        
+            self.info(f"Resume: {self.resume}") 
         self.info(f"Use distillation: {self.use_distillation}")
         self.info(f"Device: {self.device}")
         self.info(f"Epochs: {self.epochs}")
@@ -304,8 +307,8 @@ class RegressionEngine(Common):
         split = split.lower()
         if split == 'train':
             return (
-                f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
-                f"{self.color_train}Train: {self.color_other}| "
+                f"{self.color_train}Epoch: {self.results['epoch'][-1]}/{self.epochs} {self.color_other}| "
+                f"{self.color_train}Train {self.color_other}| "
                 f"{self.color_train}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}plcc: {self.results[f'{split}_plcc'][-1]:.4f} {self.color_other}| "
@@ -315,8 +318,8 @@ class RegressionEngine(Common):
             )
         else:
             return (
-                f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
-                f"{self.color_test}Train: {self.color_other}| "
+                f"{self.color_test}Epoch: {self.results['epoch'][-1]}/{self.epochs} {self.color_other}| "
+                f"{self.color_test}Test  {self.color_other}| "
                 f"{self.color_test}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}plcc: {self.results[f'{split}_plcc'][-1]:.4f} {self.color_other}| "
@@ -326,9 +329,27 @@ class RegressionEngine(Common):
             )
 
     # Visualization helper function to plot the results
-    def _plot(self, ax, range_epochs, metric):
+    def _plot(
+        self,
+        ax,
+        range_epochs,
+        metric
+        ):
 
-        if metric in ['loss', 'r2', 'plcc', 'srocc']:
+        """
+        Plots the evolution of a specified training or validation metric over epochs.
+
+        This method handles both standard numerical metrics (like loss or accuracy)
+        and time-based metrics (in seconds), formatting the y-axis accordingly.
+
+        Args:
+            ax (matplotlib.axes.Axes): The subplot axis to draw on.
+            range_epochs (iterable): The range of epochs (x-axis).
+            metric (str): The name of the metric to plot. If 'lr', plots the learning rate.
+                        If 'time' is in the name, formats y-axis using MM:SS style.
+        """
+
+        if metric in ['loss', 'r2', 'plcc', 'srocc', 'time']:
             idx_train = f"train_{self.metric_labels[metric][0]}"
             idx_test = f"test_{self.metric_labels[metric][0]}"
             label_train = f"train_{self.metric_labels[metric][1]}"
@@ -338,6 +359,8 @@ class RegressionEngine(Common):
             if self.apply_validation:
                 ax.plot(range_epochs, self.results[idx_test], label=label_test, color=self.color_test_plt, linewidth=self.linewidth)
             ax.set_title(title, color=self.figure_color_map['text'])
+            if 'time' in metric:
+                ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: self.sec_to_min_sec(x)))            
             ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
         elif metric in ['kde_train', 'kde_test']:
             step = metric.split('_')[1]
@@ -563,43 +586,27 @@ class RegressionEngine(Common):
         if not (model_state in self.valid_modes or isinstance(model_state, int)):
             self.error(f"Invalid model value: {model_state}. Must be one of {self.valid_modes} or an integer.")
 
-        if model_state == "last":
-            model = self.model
-        elif model_state == "loss":
-            if self.model_loss is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_loss
-        elif model_state == "r2":
-            if self.model_r2 is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_r2
-        elif model_state == "plcc":
-            if self.model_plcc is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_plcc
-        elif model_state == "srocc":
-            if self.model_srocc is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_srocc
-        elif isinstance(model_state, int):
-            if self.model_epoch is None:
+        # Handle named model states
+        named_models = {
+            "last": self.model,
+            "loss": self.model_loss,
+            "r2": self.model_r2,
+            "plcc": self.model_plcc,
+            "srocc": self.model_srocc,
+        }
+
+        if isinstance(model_state, int):
+            if self.model_epoch is None or model_state > len(self.model_epoch):
                 self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                model = self.model
-            else:
-                if model_state > len(self.model_epoch):
-                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                    model = self.model
-                else:
-                    model = self.model_epoch[model_state-1]  
-        
+                return self.model
+            return self.model_epoch[model_state - 1]
+
+        # Fallback for named models if they're not available
+        model = named_models.get(model_state)
+        if model is None:
+            self.info(f"Model '{model_state}' not found, using last-epoch model for prediction.")
+            model = self.model
+
         return model
 
 
@@ -631,7 +638,8 @@ class RegressionEngine(Common):
         
         # Plot training and test loss, R2, and distribution curves.
         if self.plot_curves:
-        
+            
+            # First figure (top)
             n_cols = 4
             plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
             curr_epoch = len(self.results["train_loss"])
@@ -654,10 +662,13 @@ class RegressionEngine(Common):
             ax = plt.subplot(1, n_cols, 4)            
             self._plot(ax, range_epochs, 'srocc')
 
-            n_cols = 3
+            # Display plots
+            plt.show()
+
+            # Second figure (bottom)
+            n_cols = 4
             plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
                         
-
             # Plot prediction score distribution: train
             ax = plt.subplot(1, n_cols, 1)
             self._plot(ax, range_epochs, 'kde_train')
@@ -666,9 +677,13 @@ class RegressionEngine(Common):
             ax = plt.subplot(1, n_cols, 2)
             self._plot(ax, range_epochs, 'kde_test')
 
-            # Plot LR
+            # Plot time
             ax = plt.subplot(1, n_cols, 3)
-            self._plot(ax, range_epochs, 'lr')
+            self._plot(ax, range_epochs, 'time')
+
+            # Plot LR
+            ax = plt.subplot(1, n_cols, 4)
+            self._plot(ax, range_epochs, 'lr')           
 
             # Display plots
             plt.show()
@@ -683,7 +698,7 @@ class RegressionEngine(Common):
         self,
         target_dir: str=None,
         model_name: str=None,        
-        resume: bool=False,
+        enable_resume: bool=True,
         dataloaders: dict[str, torch.utils.data.DataLoader] = None,
         apply_validation: bool=True,
         augmentation_strategy: str="always",
@@ -705,7 +720,9 @@ class RegressionEngine(Common):
         Args:
             target_dir (str, optional): Directory to save the models. Defaults to "models" if not provided.
             model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
-            resume (bool, opotional): If True, resumes training from the last saved checkpoint. Useful when training is interrupted.
+            enable_resume (bool, optional): Enables resuming training from the last checkpoint. Default is True.
+                - True: Training will resume from the most recent saved checkpoint. Useful if training is interrupted.
+                - False: Checkpoints will not be saved, so training cannot be resumed after interruption. This speed up training.
             dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).                                                
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
             augmentation_strategy (str, optional): Determines how data augmentation is applied during training.
@@ -733,7 +750,7 @@ class RegressionEngine(Common):
                 - None: the model will not be saved.
 
         Functionality:
-            Validates arguments with assertions.
+            Validates input arguments with assertions.
             Prints configuration parameters using the `_print_config` method.
             Initializes the optimizer, loss function, and scheduler.
             Ensures the target directory for saving models exists, creating it if necessary.
@@ -746,10 +763,12 @@ class RegressionEngine(Common):
         self.info(f"Checking arguments...")
 
         # Validate resume
-        if not isinstance(resume, (bool)):
-            self.error("'resume' must be True or False.")
+        if not isinstance(enable_resume, (bool)):
+            self.error("'enable_resume' must be True or False.")
         else:
-            self.resume = resume
+            self.resume = enable_resume
+            if not self.resume:
+                self.warning("'enable_resume' is set to False. If training interrupts, the last checkpoint will not be recovered.")
 
         # Initialize use_distillation
         if not isinstance(self.use_distillation, (bool)):
@@ -874,12 +893,22 @@ class RegressionEngine(Common):
         # Initialize the display showing the numeric results
         self._init_results()
 
-        # Load checkpoint if resume is enabled. This overrides the arguments                      
         # Default checkpoint path
         self.checkpoint_path = os.path.join(
             self.target_dir,
             f"{self.checkpoint_path_prefix}_{self.model_name}.gz"
         )
+
+        # Remove leftover temp file from previous failed save
+        tmp_path = self.checkpoint_path + ".tmp"
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            self.info(f"Removed stale temp checkpoint file: {tmp_path}")
+        
+        # Initialize epoch number    
+        self.start_epoch = 0
+        
+        # Load checkpoint if resume is enabled. This overrides the arguments                      
         if self.resume:
 
             # Collect all matching checkpoints recursively (newest first)
@@ -888,10 +917,10 @@ class RegressionEngine(Common):
                 key=lambda p: p.stat().st_mtime,
                 reverse=True
             )
-
+            
             if not checkpoints or (not os.path.isfile(self.checkpoint_path) and model_name is not None):
-                self.warning(f"'resume' enabled but {self.checkpoint_path} does not exist. Disabling 'resume' and starting training from epoch 1.")
-                self.resume = False        
+                #self.warning(f"'resume' enabled but {self.checkpoint_path} does not exist. Disabling 'resume' and starting training from epoch 1.")
+                #self.resume = False        
                 self.start_epoch, resume_msg = 0, ""
             else:                
 
@@ -904,7 +933,7 @@ class RegressionEngine(Common):
                 for ckpt in candidates:
                     try:
                         self.checkpoint_path = str(ckpt)
-                        self.start_epoch, resume_msg, ckpt_match = self._load_checkpoint()
+                        self.start_epoch, resume_msg, ckpt_match = self._load_checkpoint()                        
                         if ckpt_match:
                             loaded = True                            
                             # self.info(f"Loaded {self.checkpoint_path}!.")
@@ -1131,6 +1160,8 @@ class RegressionEngine(Common):
 
             self.best_test_loss = float("inf") 
             self.best_test_r2 = float("-inf")
+            self.best_test_plcc = float("-inf")
+            self.best_test_srocc = float("-inf")
 
         # Display last checkpoint results
         if self.resume == True and self.start_epoch > 0:                        
@@ -1143,7 +1174,7 @@ class RegressionEngine(Common):
     def _train_step(
         self,
         epoch: int = 1,
-        ) -> Tuple[float, float, float, float, float]:
+        ):
     
         """
         Trains a PyTorch model for a single epoch with gradient accumulation.
@@ -1435,7 +1466,7 @@ class RegressionEngine(Common):
     def _test_step(
         self,
         epoch: int = 1,
-        ) -> Tuple[float, float, float]:
+        ):
         
         """
         Tests a PyTorch model for a single epoch.
@@ -1610,7 +1641,7 @@ class RegressionEngine(Common):
         
         # Otherwise set params with initial values
         else:
-            test_loss, test_r2 = self.best_test_loss, self.best_test_r2
+            test_loss, test_r2, test_plcc, test_srocc = self.best_test_loss, self.best_test_r2, self.best_test_plcc, self.best_test_srocc
             elapsed_time = 0.0
 
         # Scheduler step after the optimizer
@@ -1802,7 +1833,7 @@ class RegressionEngine(Common):
         ):
 
         """
-        Saves the current training state (model weights, optimizer, scheduler, etc.)
+        Safely saves the current training state (model weights, optimizer, scheduler, etc.)
         to a compressed checkpoint file.
 
         Args:
@@ -1815,42 +1846,71 @@ class RegressionEngine(Common):
             - scheduler state_dict
             - engine internal state (device, mode, results, etc.)
         """
+        if self.resume:
+            
+            # Define paths
+            final_path = self.checkpoint_path           # e.g., 'checkpoint.pth.gz'
+            temp_path = self.checkpoint_path + ".tmp"   # e.g., 'checkpoint.pth.gz.tmp'
+            backup_path = self.checkpoint_path + "_bk"  # e.g., 'checkpoint.pth.gz_bk'
 
-        checkpoint = {
-            'model_state': self.model.state_dict(),
-            'model_tch_state': self.model_teacher.state_dict() if self.use_distillation else None,
-            'use_distillation': self.use_distillation,
-            'optimizer_state': self.optimizer.state_dict(),
-            'scheduler_state': self.scheduler.state_dict() if self.scheduler is not None else None,
-            'loss_fn': self.loss_fn, #Warning: this checkpoint will not work if the class is renamed, removed, or moved.
-            'checkpoint_path': self.checkpoint_path,
-            'next_epoch': next_epoch,                        
-            'engine_state': {                
-                'target_dir': self.target_dir,
-                'device': self.device,
-                'accumulation_steps': self.accumulation_steps,                
-                'augmentation_off_epochs': self.augmentation_off_epochs,
-                'augmentation_random_prob': self.augmentation_random_prob,
-                'augmentation_strategy': self.augmentation_strategy,
-                'dataloaders': self.dataloaders,
-                'debug_mode': self.debug_mode,                
-                'amp': self.amp,
-                'enable_clipping': self.enable_clipping,
-                'keep_best_models_in_memory': self.keep_best_models_in_memory,
-                'log_verbose': self.log_verbose,
-                'mode': self.mode,
-                'model_name': self.model_name,
-                'num_epochs': self.epochs,
-                'plot_curves': self.plot_curves,                
-                'results': self.results,
-                'save_best_model': self.save_best_model,
-                'squeeze_dim': self.squeeze_dim,                
+            # Create checkpoint
+            checkpoint = {
+                'model_state': self.model.state_dict(),
+                'model_tch_state': self.model_teacher.state_dict() if self.use_distillation else None,
+                'use_distillation': self.use_distillation,
+                'optimizer_state': self.optimizer.state_dict(),
+                'scheduler_state': self.scheduler.state_dict() if self.scheduler is not None else None,
+                'loss_fn': self.loss_fn, #Warning: this checkpoint will not work if the class is renamed, removed, or moved.
+                'checkpoint_path': self.checkpoint_path,
+                'next_epoch': next_epoch,                        
+                'engine_state': {                
+                    'target_dir': self.target_dir,
+                    'device': self.device,
+                    'accumulation_steps': self.accumulation_steps,                
+                    'augmentation_off_epochs': self.augmentation_off_epochs,
+                    'augmentation_random_prob': self.augmentation_random_prob,
+                    'augmentation_strategy': self.augmentation_strategy,
+                    'dataloaders': self.dataloaders,
+                    'debug_mode': self.debug_mode,                
+                    'amp': self.amp,
+                    'enable_clipping': self.enable_clipping,
+                    'keep_best_models_in_memory': self.keep_best_models_in_memory,
+                    'log_verbose': self.log_verbose,
+                    'mode': self.mode,
+                    'model_name': self.model_name,
+                    'num_epochs': self.epochs,
+                    'plot_curves': self.plot_curves,                
+                    'results': self.results,
+                    'save_best_model': self.save_best_model,
+                    'squeeze_dim': self.squeeze_dim,                
+                }
             }
-        }
-        with gzip.open(f"{self.checkpoint_path}", 'wb') as f:
-            torch.save(checkpoint, f)
-        
-        #self.info(f"Saved {self.checkpoint_path} to resume training later.")
+
+            try:
+                # Save new checkpoint to a temporary file
+                with gzip.open(temp_path, 'wb') as f:
+                    torch.save(checkpoint, f)
+
+                # Move current checkpoint to backup (if exists)
+                if os.path.exists(final_path):
+                    os.replace(final_path, backup_path)
+
+                # Replace final path with the new checkpoint
+                os.replace(temp_path, final_path)
+
+                # Delete backup if everything went fine
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+
+            except Exception as e:
+                self.error(f"Failed to save checkpoint: {str(e)}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)  # Clean up temp file
+                print.info("Original checkpoint is still safe.")
+                raise
+            
+            #finally:
+                #self.info(f"Saved {self.checkpoint_path} to resume training later.")
 
     def _load_checkpoint(self):
 
@@ -1872,7 +1932,7 @@ class RegressionEngine(Common):
         ckpt_match = False
             
         # Check if the checkpoint file exists
-        if self.resume and os.path.isfile(self.checkpoint_path):            
+        if self.resume and os.path.isfile(self.checkpoint_path):
 
             # Load checkpoint
             with gzip.open(f"{self.checkpoint_path}", 'rb') as f:
@@ -1881,7 +1941,15 @@ class RegressionEngine(Common):
                 return start_epoch, resume_msg, ckpt_match
 
             # Load model weights
-            self.model.load_state_dict(checkpoint['model_state'])
+            try:
+                self.model.load_state_dict(checkpoint['model_state'])
+            except Exception as e:
+                self.error(
+                    f"Failed to load model state from checkpoint: {str(e)}\n"
+                    f"Possible cause: The saved checkpoint may not match the current model architecture.\n"
+                    f"Tip: Ensure the actual model definition (layers, names, shapes) hasn't changed since the checkpoint was saved.\n"
+                    f"Last resort: Manually delete the corrupted or outdated checkpoint file.\n"
+                )
 
             # Load model_teacher weights if distillation is enabled
             self.use_distillation = checkpoint['use_distillation']
@@ -2023,7 +2091,7 @@ class RegressionEngine(Common):
         self,
         target_dir: str=None,
         model_name: str=None,
-        resume: bool=False,
+        enable_resume: bool=True,
         dataloaders: dict[str, torch.utils.data.DataLoader]=None, 
         save_best_model: Union[str, List[str]] = "last",
         keep_best_models_in_memory: bool=False,                
@@ -2031,8 +2099,6 @@ class RegressionEngine(Common):
         augmentation_strategy: str="always",
         augmentation_off_epochs: int=5,
         augmentation_random_prob: float=0.5,
-        recall_threshold: float=0.99,
-        recall_threshold_pauc: float=0.0,
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
@@ -2057,7 +2123,9 @@ class RegressionEngine(Common):
             target_dir (str, optional): Directory to save the trained model.
             model_name (str, optional): Name for the saved model file. Must include file extension
                 such as ".pth", ".pt", ".pkl", ".h5", or ".torch".
-            resume (bool, optional): If True, resumes training from the last saved checkpoint. Useful when training is interrupted.
+            enable_resume (bool, optional): Enables resuming training from the last checkpoint. Default is True.
+                - True: Training will resume from the most recent saved checkpoint. Useful if training is interrupted.
+                - False: Checkpoints will not be saved, so training cannot be resumed after interruption. This speed up training.
             dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).            
             save_best_model (Union[str, List[str]], optional): Criterion(s) for saving the model.
                 Options include:
@@ -2077,9 +2145,7 @@ class RegressionEngine(Common):
                 - "random": augmentation is applied randomly according to `augmentation_random_prob`.
                 Default is "always".
             augmentation_off_epochs (int, optional): Number of final epochs in which augmentation is disabled if `augmentation_strategy` is set to "off_last". Default is 5.
-            augmentation_random_prob (float, optional): Probability (0.0-1.0) of applying augmentation in each batch if `augmentation_strategy` is set to "random". Default is 0.5.            
-            recall_threshold (float, optional): The recall threshold used to calculate the False Positive Rate (FPR). Default is 0.95.
-            recall_threshold_pauc (float, optional): The recall threshold used to calculate the partial Area Under the Curve (pAUC). Default is 0.95.
+            augmentation_random_prob (float, optional): Probability (0.0-1.0) of applying augmentation in each batch if `augmentation_strategy` is set to "random". Default is 0.5.                        
             epochs (int, optional): Number of epochs to train the model. Default is 30.
             plot_curves (bool, optional): Whether to plot training and testing curves. Default is True.
             amp (bool, optional): Whether to use Automatic Mixed Precision (AMP) during training. Default is True.
@@ -2135,7 +2201,7 @@ class RegressionEngine(Common):
         self._init_train(
             target_dir=target_dir,
             model_name=model_name,            
-            resume=resume,
+            enable_resume=enable_resume,
             dataloaders=dataloaders,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,
@@ -2168,7 +2234,7 @@ class RegressionEngine(Common):
             # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.            
             df_results = self._update_model()
             
-            # Save a checkpoint to allow resuming training later            
+            # Save a checkpoint to allow resuming training later
             self._save_checkpoint(next_epoch = epoch + 1)
 
         # Finish training process

@@ -3,11 +3,10 @@ Provides utility functions for deep learning object detection workflows in PyTor
 Some functions are based on https://raw.githubusercontent.com/pytorch/vision/main/references/detection/coco_utils.py"
 """
 
-import os
-import sys
-import time
 import datetime
 import errno
+import os
+import time
 import cv2
 import torch
 import random
@@ -18,41 +17,16 @@ import torchvision.ops as ops
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image
-from typing import List
+from typing import List, Literal, Dict, Union
 from collections import defaultdict, deque
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 from torchvision.transforms.functional import to_pil_image
 import torchvision.transforms.functional as F
 from torchvision.transforms import v2 as T
-
-# Import custom libraries
-sys.path.append(os.path.abspath(".."))
-from .classification_utils import set_seeds
-from engines.common import Logger
-
-# Instantiate logger
-logger = Logger()
-
-#def collate_fn(batch):
-#    return tuple(zip(*batch))
+from .common_utils import theme_presets
 
 def collate_fn(batch):
-    batch = [b for b in batch if b is not None]
-    if len(batch) == 0:
-        return None  # all were corrupted, rare case
     return tuple(zip(*batch))
-
-# Function to set random seed
-def set_seeds(seed: int=42):
-    """Sets random seeds for torch operations.
-
-    Args:
-        seed (int, optional): Random seed to set. Defaults to 42.
-    """
-    # Set the seed for general torch operations
-    torch.manual_seed(seed)
-    # Set the seed for CUDA torch operations (ones that happen on the GPU)
-    torch.cuda.manual_seed(seed)
 
 
 # Function to remove redundant boxes and masks
@@ -91,19 +65,19 @@ def prune_predictions(
     
     # Validate score_threshold
     if not isinstance(score_threshold, (int, float)) or not (0 <= score_threshold <= 1):
-        logger.error("'score_threshold' must be a float between 0 and 1")
+        raise ValueError("'score_threshold' must be a float between 0 and 1")
 
     # Validate iou_threshold
     if not isinstance(iou_threshold, (int, float)) or not (0 <= iou_threshold <= 1):
-        logger.error("'iou_threshold' must be a float between 0 and 1")
+        raise ValueError("'iou_threshold' must be a float between 0 and 1")
 
     # Validate best_candidate
     if best_candidate not in ("area", "score", None):
-        logger.error("'best_candidate' must be one of: 'area', 'score', or None")
+        raise ValueError("'best_candidate' must be one of: 'area', 'score', or None")
     
     # Validate remove_large_boxes
     if remove_large_boxes is not None and not isinstance(remove_large_boxes, numbers.Number):
-        logger.error("'remove_large_boxes' must be a numeric value or None")
+        raise ValueError("'remove_large_boxes' must be a numeric value or None")
 
     # Filter big boxes
     if remove_large_boxes is not None:
@@ -241,22 +215,22 @@ def prune_predictions_v2(
     
     # Validate score_threshold
     if not isinstance(score_threshold, (int, float)) or not (0 <= score_threshold <= 1):
-        logger.error("'score_threshold' must be a float between 0 and 1")
+        raise ValueError("'score_threshold' must be a float between 0 and 1")
 
     # Validate iou_threshold
     if not isinstance(iou_threshold, (int, float)) or not (0 <= iou_threshold <= 1):
-        logger.error("'iou_threshold' must be a float between 0 and 1")
+        raise ValueError("'iou_threshold' must be a float between 0 and 1")
 
     # Validate best_candidate
     if best_candidate not in ("area", "score", None):
-        logger.error("'best_candidate' must be one of: 'area', 'score', or None")
+        raise ValueError("'best_candidate' must be one of: 'area', 'score', or None")
     
     # Validate remove_large_boxes
     if remove_large_boxes is not None and not isinstance(remove_large_boxes, numbers.Number):
-        logger.error("'remove_large_boxes' must be a numeric value or None")
+        raise ValueError("'remove_large_boxes' must be a numeric value or None")
     
     if remove_small_boxes is not None and not isinstance(remove_small_boxes, numbers.Number):
-        logger.error("'remove_large_boxes' must be a numeric value or None")
+        raise ValueError("'remove_large_boxes' must be a numeric value or None")
 
     # --- Optional box size filtering ---
     # Removes boxes that are too large or too small.
@@ -381,7 +355,6 @@ def prune_predictions_v2(
 def display_and_save_predictions(
     preds: List=None,
     dataloader: torch.utils.data.Dataset | torch.utils.data.DataLoader = None,
-    num_images: int=None,
     box_color: str='white',
     mask_color: str='blue',
     width: int=1,
@@ -390,15 +363,14 @@ def display_and_save_predictions(
     print_classes: bool=True,
     print_scores: bool=True,
     label_to_class_dict={1: 'roi'},
-    save_dir: str = None
-    ):
+    save_dir: str = None,
+    theme: Union[Literal["light", "dark"], Dict[str, str]] = "light"):
 
     """
     This function displays images with predicted bounding boxes and segmentation masks.
     Arguments:
         preds (List): A list of predictions, each containing 'boxes', 'labels', 'scores', and optionally 'masks'.
         dataloader (torch.utils.data.DataLoader): A DataLoader object containing the images.
-        num_images (int): Number of images to display. Defaults to None (all images)
         box_color (str): Color of the bounding boxes drawn on the image.
         mask_color (str): Color of the segmentation masks drawn on the image.
         width (int): The width of the bounding box lines.
@@ -406,16 +378,22 @@ def display_and_save_predictions(
         print_scores (bool): If True, the confidence scores will be printed on the bounding boxes.
         label_to_class_dict (dict): Dictionary mapping label indices to class names.
         save_dir (str, optional): Path to save images. If None, images will not be saved.
+        theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     """
 
     plt.close("all")
 
+    # Resolve theme
+    if isinstance(theme, dict):
+        figure_color_map = theme
+    elif theme in theme_presets:
+        figure_color_map = theme_presets[theme]
+    else:
+        raise ValueError(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
+
     # Convert dataset to DataLoader if needed
     if isinstance(dataloader, torch.utils.data.Dataset):
         dataloader = torch.utils.data.DataLoader(dataloader, batch_size=1, shuffle=False, collate_fn=collate_fn)
-
-    if not (num_images is not None and isinstance(num_images, int) and num_images > 0):
-        logger.error("'num_images' must be a positive integer")
 
     # Create save directory if saving images
     if save_dir:
@@ -428,6 +406,7 @@ def display_and_save_predictions(
 
     # Set up the grid
     fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows))
+    fig.patch.set_facecolor(figure_color_map['bg'])
     axes = axes.flatten()
 
     # Loop through the predictions and process each image
@@ -470,11 +449,8 @@ def display_and_save_predictions(
         # Plot on the grid
         ax = axes[idx]
         ax.imshow(output_image.permute(1, 2, 0))  # Convert from (C, H, W) to (H, W, C)
-        ax.set_title(f"Prediction {idx + 1}")
+        ax.set_title(f"Prediction {idx + 1}", color=figure_color_map['text'])
         ax.axis("off")
-
-        if num_images is not None and idx + 1 > num_images:
-            break
 
     # Hide unused subplots (if any)
     for i in range(idx + 1, len(axes)):
@@ -484,23 +460,39 @@ def display_and_save_predictions(
     plt.show()
 
 
-def visualize_transformed_data(img, target, transformed_img, transformed_target, color_conversion=None):
+def visualize_transformed_data(
+        img,
+        target,
+        transformed_img,
+        transformed_target,
+        color_conversion=None,
+        theme: Union[Literal["light", "dark"], Dict[str, str]] = "light"):
 
     """
     Visualizes the original and transformed image along with bounding boxes and masks.
     
-    Parameters:
-    - img: Original image tensor.
-    - target: Original target dictionary (contains boxes, masks, labels).
-    - transformed_img: Transformed image tensor.
-    - transformed_target: Transformed target dictionary.
-    - color_conversion: Optional OpenCV color conversion code (e.g., cv2.COLOR_HSV2RGB).
+    Args:
+        img: Original image tensor.
+        target: Original target dictionary (contains boxes, masks, labels).
+        transformed_img: Transformed image tensor.
+        transformed_target: Transformed target dictionary.
+        color_conversion: Optional OpenCV color conversion code (e.g., cv2.COLOR_HSV2RGB).
                         https://docs.opencv.org/3.4/d8/d01/group__imgproc__color__conversions.html
                         If None, assumes image is already in RGB.
+        theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     """
-    
+
+    # Resolve theme
+    if isinstance(theme, dict):
+        figure_color_map = theme
+    elif theme in theme_presets:
+        figure_color_map = theme_presets[theme]
+    else:
+        raise ValueError(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
+
     # Visualize original image
     fig, axes = plt.subplots(1, 2, figsize=(15, 7))
+    fig.patch.set_facecolor(figure_color_map['bg'])
 
     # Convert tensors to numpy and apply color conversion if needed
     def convert_for_plot(tensor_img):
@@ -521,7 +513,7 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target,
             linewidth=2, edgecolor='r', facecolor='none'
         )
         axes[0].add_patch(rect)
-    axes[0].set_title('Original Image')
+    axes[0].set_title('Original Image', color=figure_color_map['text'])
     axes[0].axis('off')
 
     # Transformed Image
@@ -533,7 +525,7 @@ def visualize_transformed_data(img, target, transformed_img, transformed_target,
             linewidth=2, edgecolor='g', facecolor='none'
         )
         axes[1].add_patch(rect)
-    axes[1].set_title('Transformed Image')
+    axes[1].set_title('Transformed Image', color=figure_color_map['text'])
     axes[1].axis('off')
 
     plt.show()

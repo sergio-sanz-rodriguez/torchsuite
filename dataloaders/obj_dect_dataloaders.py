@@ -4,23 +4,19 @@ Contains functionality for creating PyTorch DataLoaders for object dectection.
 
 import os
 import torch
-import pandas as pd
-import numpy as np
-from PIL import Image, ImageFile
+#import pandas as pd
+#import numpy as np
+from PIL import Image
 from torchvision import tv_tensors
 from torchvision.io import read_image
-from torch.utils.data import DataLoader, Subset, Dataset
-from torchvision import datasets, transforms
+from torch.utils.data import Dataset
+#from torchvision import datasets, transforms
 from torchvision.transforms import v2
 from torchvision.ops.boxes import masks_to_boxes
 from torchvision.transforms.v2 import functional as F
-from pycocotools.coco import COCO
-#import torchvision.tv_tensors as tv_tensors
-
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # Implement a class that processes the database
-class ProcessDataset(torch.utils.data.Dataset):
+class ProcessDataset(Dataset):
 
     """
     Custom Dataset class for loading and processing image and mask pairs for object detection.
@@ -33,8 +29,7 @@ class ProcessDataset(torch.utils.data.Dataset):
             image_path,
             mask_path,
             transforms,
-            num_classes=1,
-            pin_memory=False):
+            num_classes=1):
 
         """
         Initializes the dataset with image and mask paths and transformations. Bounding boxes are created
@@ -45,8 +40,6 @@ class ProcessDataset(torch.utils.data.Dataset):
         image_path (str): Relative path to the folder containing image files.
         mask_path (str): Relative path to the folder containing mask files.
         transforms (callable, optional): Optional transformations to apply to the images and targets.
-        pin_memory (bool, optional): If True, enables pinned memory for the output images and targets.
-                                     This can improve GPU data transfer speed by allocating tensors in page-locked memory.
         num_classes (int): Number of classes excluding the background. 
             If there are more objects ids than num_classes, then the ids are upper clipped to num_classes.
             If num_classes is 1 (default), then it is a binary classification task, such as ROI detection.
@@ -57,36 +50,10 @@ class ProcessDataset(torch.utils.data.Dataset):
         self.mask_path = mask_path
         self.transforms = transforms
         self.num_classes = num_classes
-        self.pin_memory = pin_memory
 
         # load all image files, sorting them to ensure that they are aligned
         self.imgs = list(sorted(os.listdir(os.path.join(root, image_path))))
         self.masks = list(sorted(os.listdir(os.path.join(root, mask_path))))
-    
-    @staticmethod
-    def open_image(path):
-
-        """
-        Attempts to open an image file at the given path.
-        """
-
-        try:
-            img = Image.open(path).convert("RGB")
-            return img
-        except (OSError, IOError) as e:            
-            return None
-    
-    @staticmethod
-    def are_valid_boxes(boxes):
-        
-        """
-        Checks if all boxes have positive width and height.
-        """
-
-        if boxes.numel() == 0:  # allow empty boxes (no objects)
-            return True
-        x_min, y_min, x_max, y_max = boxes.unbind(dim=1)
-        return torch.all(x_max > x_min).item() and torch.all(y_max > y_min).item()
 
     def __getitem__(self, idx):
 
@@ -113,9 +80,7 @@ class ProcessDataset(torch.utils.data.Dataset):
         mask_path = os.path.join(self.root, self.mask_path, self.masks[idx])
 
         # Read image
-        img = self.open_image(img_path)
-        if img is None:
-            return None
+        img = Image.open(img_path).convert("RGB")
         img = F.to_tensor(img)
 
         # Read mask
@@ -159,23 +124,8 @@ class ProcessDataset(torch.utils.data.Dataset):
         target["area"] = area
         target["iscrowd"] = iscrowd
 
-        # Apply safe transformation
         if self.transforms is not None:
-            img_t, target_t = self.transforms(img, target)
-            if self.are_valid_boxes(target_t["boxes"]):
-                img, target = img_t, target_t        
-            else:
-                # Skip transformed version and keep the original image/target
-                pass  
-        
-        # Clone tensors to avoid shared memory issues with pin_memory=True
-        if self.pin_memory:
-            target["boxes"] = target["boxes"].clone()
-            target["masks"] = target["masks"].clone()
-            target["labels"] = target["labels"].clone()
-            target["area"] = target["area"].clone()
-            target["iscrowd"] = target["iscrowd"].clone()
-            img = img.clone()
+            img, target = self.transforms(img, target)
 
         return img, target
 
@@ -190,94 +140,6 @@ class ProcessDataset(torch.utils.data.Dataset):
 
         return len(self.imgs)
 
-
-class ProcessDatasetCOCO(torch.utils.data.Dataset):
-
-    """
-    Dataset class for images annotated in COCO format.
-    Bounding boxes are read directly from the COCO JSON file.
-
-    Args:
-        root (str): Root directory containing the image and label folders.
-        image_path (str): Subdirectory within root where images are stored.
-        label_path (str): Subdirectory within root where label files are stored.
-        transforms (callable, optional): A function/transform to apply to both image and target.
-        num_classes (int): Number of classes (default is 1 for binary detection).
-    """
-
-    def __init__(self, root, image_path, coco_json, transforms=None, num_classes=1, pin_memory=False):
-        self.root = root
-        self.image_path = image_path
-        self.transforms = transforms
-        self.num_classes = num_classes
-        self.pin_memory = pin_memory
-
-        # Load COCO annotations
-        self.coco = COCO(coco_json)
-        self.img_ids = self.coco.getImgIds()
-    
-    def __len__(self):
-        return len(self.img_ids)
-
-    @staticmethod
-    def open_image(path):
-        try:
-            return Image.open(path).convert("RGB")
-        except (OSError, IOError):
-            return None
-
-    def __getitem__(self, idx):
-
-        img_id = self.img_ids[idx]
-        img_info = self.coco.loadImgs(img_id)[0]
-        img_path = os.path.join(self.root, self.image_path, img_info['file_name'])
-        img = self.open_image(img_path)
-        if img is None:
-            return None
-        img = F.to_tensor(img)
-        canvas_size = F.get_size(img)
-
-        # Load annotations for this image
-        ann_ids = self.coco.getAnnIds(imgIds=img_id)
-        anns = self.coco.loadAnns(ann_ids)
-
-        if len(anns) == 0:
-            boxes = torch.zeros((0, 4), dtype=torch.float32)
-            labels = torch.zeros((0,), dtype=torch.int64)
-            area = torch.zeros((0,), dtype=torch.float32)
-            iscrowd = torch.zeros((0,), dtype=torch.int64)
-        else:
-            boxes = torch.tensor([ann['bbox'] for ann in anns], dtype=torch.float32)
-            # COCO bbox format is [x, y, width, height] -> convert to [x1, y1, x2, y2]
-            boxes[:, 2] = boxes[:, 0] + boxes[:, 2]
-            boxes[:, 3] = boxes[:, 1] + boxes[:, 3]
-
-            labels = torch.tensor([ann['category_id'] for ann in anns], dtype=torch.int64)
-            labels = torch.clamp(labels, max=self.num_classes)
-            area = torch.tensor([ann['area'] for ann in anns], dtype=torch.float32)
-            iscrowd = torch.tensor([ann.get('iscrowd', 0) for ann in anns], dtype=torch.int64)
-
-        target = {
-            "boxes": tv_tensors.BoundingBoxes(boxes, format="XYXY", canvas_size=canvas_size),
-            "labels": labels,
-            "image_id": torch.tensor([img_id]),
-            "area": area,
-            "iscrowd": iscrowd
-        }
-
-        if self.transforms:
-            img_t, target_t = self.transforms(tv_tensors.Image(img), target)
-            img, target = img_t, target_t
-
-        # Pin memory if needed
-        if self.pin_memory:
-            target["boxes"] = target["boxes"].clone()
-            target["labels"] = target["labels"].clone()
-            target["area"] = target["area"].clone()
-            target["iscrowd"] = target["iscrowd"].clone()
-            img = img.clone()
-
-        return tv_tensors.Image(img), target
 
 # Implement a class that processes the database
 class ProcessDatasetYOLO(torch.utils.data.Dataset):

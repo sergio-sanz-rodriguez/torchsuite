@@ -8,104 +8,2008 @@ import torch
 import torchaudio
 import random
 import time
-import numpy as np
 import pandas as pd
+import numpy as np
 import copy
 import warnings
 import re
-from datetime import datetime
-from typing import Tuple, Dict, Any, List, Union, Optional, Callable
-from tqdm.auto import tqdm 
-from IPython.display import clear_output
+import gzip
+import inspect
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
-from timeit import default_timer as timer
+from .common import Common, Colors
+from .loss_functions import DistillationLoss
+from matplotlib.ticker import FuncFormatter
+from tqdm.auto import tqdm 
 from PIL import Image
+from pathlib import Path
+from typing import Tuple, Dict, Any, List, Union, Optional, Callable
+from IPython.display import clear_output, display, HTML
+from timeit import default_timer as timer
+from contextlib import nullcontext
+from sklearn.metrics import r2_score
+from scipy.stats import pearsonr, spearmanr
 try:
     from torch.amp import GradScaler, autocast
 except ImportError:
     from torch.cuda.amp import GradScaler, autocast
-from sklearn.metrics import classification_report
-from contextlib import nullcontext
-from .common import Common, Colors
 
-import warnings
 warnings.filterwarnings("ignore")
 
             
 # Training and prediction engine class
 class RegressionEngine(Common):
 
-    """
-    A class to handle training, evaluation, and predictions for a PyTorch model.
-
-    This class provides functionality to manage the training and evaluation lifecycle
-    of a PyTorch model, including saving the best model based on specific criteria.
-
-    Args:
-        - model (torch.nn.Module, optional): The PyTorch model to handle. Must be instantiated.
-        - color_map (dict, optional): Specifies the colors for the training and evaluation curves:
-          'black', 'blue', 'orange', 'green', 'red', 'yellow', 'magenta', 'cyan', 'white',
-          'light_gray', 'dark_gray', 'light_blue', 'light_green', 'light_red', 'light_yellow',
-          'light_magenta', 'light_cyan'.
-          Example: {'train': 'blue', 'test': 'orange', 'other': 'black'}
-        - log_verbose (bool, optional): if True, activate logger messages.
-        - device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
-    """
-
     def __init__(
         self,
         model: torch.nn.Module=None,
+        model_teacher: torch.nn.Module=None,
+        use_distillation: bool=False,
+        optimizer: torch.optim.Optimizer=None,
+        loss_fn: torch.nn.Module=None,
+        scheduler: torch.optim.lr_scheduler=None,
         color_map: dict=None,
+        theme: str='light',
         log_verbose: bool=True,
         device: str="cuda" if torch.cuda.is_available() else "cpu"
         ):
 
-        super().__init__()
+        """
+        A class to handle training, evaluation, and predictions for a PyTorch model.
+
+        This class provides functionality to manage the training and evaluation lifecycle
+        of a PyTorch model, including saving the best model based on specific criteria.
+
+        Args:
+            model (torch.nn.Module): PyTorch model to train. It must be instantiated.
+            model_teacher (torch.nn.Module, optional, for .train() only): Teacher model for distillation-based training. It must be instantiated.
+            use_distillation (bool, optional, for .train() only): If true, training is performed using the distillation technique.
+            optimizer (torch.optim.Optimizer, for .train() only): The optimizer to minimize the loss function.
+            loss_fn (torch.nn.Module, for .train() only): The loss function to minimize during training.
+            scheduler (torch.optim.lr_scheduler, optional, for .train() only): Learning rate scheduler for the optimizer. If None, LR is fixed.
+            color_map (dict, optional): Specifies the colors for the training and evaluation curves:
+                'black', 'off-black' or 'very_dark_gray', 'blue', 'orange', 'green', 'red', 'yellow', 
+                'magenta', 'cyan', 'white', 'light_gray', 'dark_gray', 'light_blue', 'light_green',
+                'light_red', 'light_yellow', 'light_magenta', 'light_cyan'.
+                Example: {'train': 'blue', 'test': 'orange', 'other': 'black'}
+                Note: if some keys are not specified, their default colors will be used based on the theme argument.
+            theme (str, optional): Theme for logging and plot visualization.
+                Must be either 'light' or 'dark'. Affects background, text, and grid colors.
+            log_verbose (bool, optional): if True, activate logger messages.
+            device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available, else 'cpu'.
+        
+        Public API:
+            .load(...): Loads a PyTorch model into the engine from a target directory and optionally returns it. Engine must be instantiated beforehand.
+            .save(...): Saves a PyTorch model to a target directory.
+            .train(...): Trains and tests a PyTorch model for a given number of epochs.
+            .predict(...): Predicts classes for a given dataset using a trained model.
+            .predict_and_store(...): Predicts classes for a given dataset using a trained model and stores the per-sample results in dictionaries.
+        """
+
+        super().__init__(theme=theme, log_verbose=log_verbose)
 
         # Initialize self variables
-        self.device = device
         self.model = model
-        self.model_loss = None     
-        self.model_r2 = None   
+        self.model_teacher = model_teacher
+        self.use_distillation = use_distillation
+        self.optimizer = optimizer        
+        self.loss_fn = loss_fn
+        self.scheduler = scheduler
+        self.log_verbose = log_verbose
+        self.device = device
+        self._set_colormap(color_map, theme)        
+        self.model_loss = None
+        self.model_r2 = None
+        self.model_plcc = None
+        self.model_srocc = None
         self.model_epoch = None
         self.save_best_model = False
         self.keep_best_models_in_memory = False
         self.mode = None
-        self.optimizer = None
-        self.loss_fn = None
-        self.scheduler = None
         self.model_name = None
         self.model_name_loss = None        
         self.model_name_r2 = None
+        self.model_name_plcc = None
+        self.model_name_srocc = None
         self.squeeze_dim = False
-        self.log_verbose = log_verbose
-
-        # Initialize colors
-        default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
-
-        # If the user provides a color_map, update the default with it
-        if color_map is None:
-            color_map = default_color_map # Use defaults if no user input
-        else:
-            color_map = {**default_color_map, **color_map} # Merge user input with defaults
-        self.color_train = Colors.get_console_color(color_map['train'])
-        self.color_test =  Colors.get_console_color(color_map['test'])
-        self.color_other = Colors.get_console_color(color_map['other'])
-        self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
-        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])
-        self.color_other_plt =  Colors.get_matplotlib_color(color_map['other'])
+        self.checkpoint_path_prefix = "ckpt"
+        self.valid_modes = {"loss", "r2", "plcc", "srocc", "last", "all"}
         
-
-        # Initialize result logs
-        self.results = {}
-
         # Check if model is provided
         if self.model is None:
             self.error(f"Instantiate the engine by passing a PyTorch model to handle.")
         else:
-            self.model.to(self.device)
+            self.model.to(self.device)  
+
+
+    # ======================================= #
+    # ========== UTILITY / LOGGING ========== #
+    # ======================================= #
+
+    # Function to initialize the result logs
+    def _init_results(self):
+
+        """
+        Creates an empty dictionary with training results and metric labels for visualization
+        """
+
+        self.results = {
+            "epoch": [],
+            "train_loss": [],            
+            "train_r2": [],
+            "train_plcc": [],
+            "train_srocc": [],
+            "train_pred": [],
+            "train_y": [],
+            "train_time [s]": [],
+            "test_loss": [],            
+            "test_r2": [],
+            "test_plcc": [],
+            "test_srocc": [],
+            "test_pred": [],
+            "test_y": [],
+            "test_time [s]": [],
+            "lr": [],
+            }
+        
+        if self.plot_curves:
+            self.metric_labels = {
+                'loss':      ['loss', 'loss', 'Loss'],
+                'r2':        ['r2', 'r2', 'R2'],
+                'plcc':      ['plcc', 'plcc', 'Pearson Linear Correlation Coeff. (PLCC)'],
+                'srocc':     ['srocc', 'srocc', 'Spearman''s Rank Correlation Coeff. (SROCC)'],
+                'time':      ['time [s]', 'time', 'Time [MMmSSs]'],
+                'kde_train': ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],
+                'kde_test':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],
+                'lr':        ['lr', 'lr', 'Learning Rate']    
+            }
+
+    # Function to set the settings and line width for visualization
+    def _set_colormap(
+        self,
+        color_map,
+        theme
+        ):
+
+        """
+        Initializes the color settings and line width for visualization.
+
+        Args:
+            color_map (dict or None): A dictionary specifying custom colors for 'train', 'test', and 'other' categories.
+                If None, default colors will be used based on the theme.
+            theme : (str): Visualization theme to apply. Must be either 'light' or 'dark'.
+                Affects background, text, and grid colors.
+        """
+
+        # Validate and set the theme (default to 'light' if invalid)
+        if isinstance(theme, str) and theme.lower() in ['light', 'dark']:
+            self.theme = theme.lower()
+        else:
+            self.theme = 'light'
+
+        # Set default color mappings based on the theme
+        if self.theme == 'light':
+            default_color_map = {'train': 'blue', 'test': 'orange', 'other': 'black'}
+            self.figure_color_map = {'bg': 'white', 'text': 'black', 'grid': '#b0b0b0'} #cccccc
+        else:
+            default_color_map = {'train': 'yellow', 'test': 'light_red', 'other': 'white'}
+            self.figure_color_map = {'bg': '#1e1e1e', 'text': 'white', 'grid': '#666666'}
+
+        # Merge user-defined color_map with defaults (user values override defaults)
+        if color_map is None:
+            color_map = default_color_map # Use defaults if no user input
+        else:
+            user_map = color_map.copy()
+            # Set 'other' if user hasn't defined it
+            if 'other' not in user_map:
+                user_map['other'] = default_color_map['other']
+            color_map = {**default_color_map, **user_map} # Merge user input with defaults
+            
+        # Convert color names to console-friendly and matplotlib-compatible formats
+        self.color_train = Colors.get_console_color(color_map['train'])
+        self.color_test =  Colors.get_console_color(color_map['test'])
+        self.color_other = Colors.get_console_color(color_map['other'])        
+        self.color_train_plt = Colors.get_matplotlib_color(color_map['train'])
+        self.color_test_plt =  Colors.get_matplotlib_color(color_map['test'])     
+        #self.color_other_plt = Colors.get_matplotlib_color(color_map['other'] if theme=='light' else 'dark_gray')
+        self.color_other_plt = Colors.get_matplotlib_color('dark_gray')
+                    
+        # Set the default line width for plots
+        self.linewidth = Colors.get_linewidth()
+
+    # Funtion to display the training configuration parameters
+    def _print_config(
+        self,
+        batch_size,
+        resume_msg
+        ):
+        
+        """
+        Prints the configuration of the training process.
+
+        Args:
+            batch_size (int): Batch size
+            resume_msg (str, optional): An additional string with information on resume
+        """
+
+        if self.resume and self.start_epoch > 0:
+            self.info(f"Overriding arguments...")
+            if isinstance(resume_msg, (str)) and len(resume_msg) > 0:
+                self.info(f"Resume: {resume_msg}")
+            else:
+                self.info(f"Resume: {self.resume}")
+        else:
+            self.info(f"Resume: {self.resume}") 
+        self.info(f"Use distillation: {self.use_distillation}")
+        self.info(f"Device: {self.device}")
+        self.info(f"Epochs: {self.epochs}")
+        self.info(f"Batch size: {batch_size}")
+        self.info(f"Accumulation steps: {self.accumulation_steps}")
+        self.info(f"Effective batch size: {batch_size * self.accumulation_steps}")
+        self.info(f"Augmentation strategy: {self.augmentation_strategy}")
+        if self.augmentation_strategy == "off_last":
+            self.info(f"Augmentation off epochs: last {self.augmentation_off_epochs}")
+        if self.augmentation_strategy == "random":
+            self.info(f"Augmentation probability: {self.augmentation_random_prob}")
+        self.info(f"Initial learning rate: {self.optimizer.param_groups[0]['lr']}")
+        self.info(f"Apply validation: {self.apply_validation}")        
+        self.info(f"Plot curves: {self.plot_curves}")
+        self.info(f"Automatic Mixed Precision (AMP): {self.amp}")
+        self.info(f"Enable clipping: {self.enable_clipping}")
+        self.info(f"Debug mode: {self.debug_mode}")        
+        self.info(f"Save model: {self.save_best_model}")
+        self.info(f"Target directory: {self.target_dir}")        
+        
+        if self.save_best_model:
+
+            # Extract base name and extension from the model name
+            base_name, extension = os.path.splitext(self.model_name)
+            
+            # Print base name and extension
+            self.info(f"Model name base: {base_name}")
+            self.info(f"Model name extension: {extension}")
+            
+            # Iterate over modes and format model name, skipping 'last'
+            for mode in self.mode:
+                if mode == "last" or mode == "all":
+                    # Skip adding 'last' and just use epoch in the filename
+                    model_name_with_mode = f"_epoch<int>{extension}"
+                else:
+                    # For other modes, include mode and epoch in the filename
+                    model_name_with_mode = f"_{mode}_epoch<int>{extension}"
+                
+                # Print the final model save path for each mode
+                self.info(f"Save best model - {mode}: {base_name + model_name_with_mode}")
+
+        if self.keep_best_models_in_memory:
+            self.warning(f"Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
+        else:
+            self.info(f"Keeping best models in memory: {self.keep_best_models_in_memory}")
+    
+    # Visualization helper function to print out the results
+    def _format_epoch_results(
+        self,
+        split: str
+        ):
+
+        """
+        Format training/validation/test metrics into a colored log string.
+
+        Args:
+            split (str): Dataset split name (e.g., "Train", "Test").
+
+        Returns:
+            str: Formatted string with metrics for the given split.
+
+        """
+
+        split = split.lower()
+        if split == 'train':
+            return (
+                f"{self.color_train}Epoch: {self.results['epoch'][-1]}/{self.epochs} {self.color_other}| "
+                f"{self.color_train}Train {self.color_other}| "
+                f"{self.color_train}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
+                f"{self.color_train}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "
+                f"{self.color_train}plcc: {self.results[f'{split}_plcc'][-1]:.4f} {self.color_other}| "
+                f"{self.color_train}srocc: {self.results[f'{split}_srocc'][-1]:.4f} {self.color_other}| "
+                f"{self.color_train}time: {self.sec_to_min_sec(self.results[f'{split}_time [s]'][-1])} {self.color_other}| "            
+                f"{self.color_train}lr: {self.results['lr'][-1]:.10f}"
+            )
+        else:
+            return (
+                f"{self.color_test}Epoch: {self.results['epoch'][-1]}/{self.epochs} {self.color_other}| "
+                f"{self.color_test}Test  {self.color_other}| "
+                f"{self.color_test}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
+                f"{self.color_test}r2: {self.results[f'{split}_r2'][-1]:.4f} {self.color_other}| "
+                f"{self.color_test}plcc: {self.results[f'{split}_plcc'][-1]:.4f} {self.color_other}| "
+                f"{self.color_test}srocc: {self.results[f'{split}_srocc'][-1]:.4f} {self.color_other}| "
+                f"{self.color_test}time: {self.sec_to_min_sec(self.results[f'{split}_time [s]'][-1])} {self.color_other}| "            
+                f"{self.color_test}lr: {self.results['lr'][-1]:.10f}"
+            )
+
+    # Visualization helper function to plot the results
+    def _plot(
+        self,
+        ax,
+        range_epochs,
+        metric
+        ):
+
+        """
+        Plots the evolution of a specified training or validation metric over epochs.
+
+        This method handles both standard numerical metrics (like loss or accuracy)
+        and time-based metrics (in seconds), formatting the y-axis accordingly.
+
+        Args:
+            ax (matplotlib.axes.Axes): The subplot axis to draw on.
+            range_epochs (iterable): The range of epochs (x-axis).
+            metric (str): The name of the metric to plot. If 'lr', plots the learning rate.
+                        If 'time' is in the name, formats y-axis using MM:SS style.
+        """
+
+        if metric in ['loss', 'r2', 'plcc', 'srocc', 'time']:
+            idx_train = f"train_{self.metric_labels[metric][0]}"
+            idx_test = f"test_{self.metric_labels[metric][0]}"
+            label_train = f"train_{self.metric_labels[metric][1]}"
+            label_test = f"test_{self.metric_labels[metric][1]}"
+            title = self.metric_labels[metric][2]
+            marker = 'o' if range_epochs[-1] == 1 else ''
+            ax.plot(range_epochs, self.results[idx_train], label=label_train, color=self.color_train_plt, linewidth=self.linewidth, marker=marker)
+            if self.apply_validation:
+                ax.plot(range_epochs, self.results[idx_test], label=label_test, color=self.color_test_plt, linewidth=self.linewidth, marker=marker)
+            ax.set_title(title, color=self.figure_color_map['text'])
+            if metric == 'time':
+                ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: self.sec_to_min_sec(x)))            
+            ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
+        elif metric in ['kde_train', 'kde_test']:
+            step = metric.split('_')[1]
+            idx_y = f"{step}_y"
+            idx_pred = f"{step}_pred"
+            label_y = f"{step}_{self.metric_labels[metric][0]}"           
+            label_pred = f"{step}_{self.metric_labels[metric][1]}"          
+            title = self.metric_labels[metric][2]
+            color_plt = self.color_train_plt if step == "train" else self.color_test_plt
+            sns.kdeplot(self.results[idx_y], label=label_y, color=self.color_other_plt, linewidth=self.linewidth, fill=True)
+            sns.kdeplot(self.results[idx_pred], label=label_pred, color=color_plt, linewidth=self.linewidth, fill=True)            
+            ax.set_title(title, color=self.figure_color_map['text'])
+            ax.set_xlabel('Score', color=self.figure_color_map['text'])
+            ax.set_ylabel('Density', color=self.figure_color_map['text'])
+        else: #lr
+            idx = self.metric_labels[metric][0]
+            label = self.metric_labels[metric][1]
+            title = self.metric_labels[metric][2]
+            marker = 'o' if range_epochs[-1] == 1 else ''
+            ax.plot(range_epochs, self.results[idx], label=label, color=self.color_train_plt, linewidth=self.linewidth, marker=marker)
+            ax.set_title(title, color=self.figure_color_map['text'])
+            ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
+
+        ax.tick_params(axis='x', colors=self.figure_color_map['text'])
+        ax.tick_params(axis='y', colors=self.figure_color_map['text'])            
+        ax.grid(visible=True, which="both", axis="both", color=self.figure_color_map['grid'], alpha=0.8)
+        ax.set_facecolor(self.figure_color_map['bg']) 
+
+        legend = ax.legend()
+        legend.get_frame().set_facecolor(self.figure_color_map['bg'])
+        legend.get_frame().set_edgecolor(self.figure_color_map['text'])
+
+        for spine in ax.spines.values():
+            spine.set_color(self.figure_color_map['text'])
+        for text in legend.get_texts():
+            text.set_color(self.figure_color_map['text'])
+
+    # Function to validate the format of the dataloaders
+    def _validate_dataloaders(self):
+
+        """
+        Validates the format of the dataloaders as a dictionary with three keys: 'train', 'test', 'train_aug_off'.
+        """
+
+        # Validate dataloaders
+        if self.dataloaders is None:
+            self.error(f"'dataloaders' must be provided as a dictionary with fields: 'train', 'train_aug_off' (opt), 'test'.")
+        
+        # 'train' is always required
+        if "train" not in self.dataloaders or not isinstance(self.dataloaders["train"], torch.utils.data.DataLoader):
+            self.error(f"'dataloaders' must contain key 'train' with a DataLoader instance.")
+        
+        # 'test' is required only if apply_validation is True        
+        if self.apply_validation:
+            if "test" not in self.dataloaders or not isinstance(self.dataloaders["test"], torch.utils.data.DataLoader):
+                self.error(f"'dataloaders' must contain key 'test' with a DataLoader instance when apply_validation=True.")
+        
+        # 'train_aug_off' is required for the off_epochs and random augmentation strategies
+        if self.augmentation_strategy != "always":
+            if "train_aug_off" not in self.dataloaders or not isinstance(self.dataloaders["train_aug_off"], torch.utils.data.DataLoader):
+                self.error(f"'dataloaders' must contain key 'train_aug_off' for the selected augmentation strategy: {self.augmentation_strategy}.")
+
+    # Utility function for _progress_bar
+    def _inject_notebook_tqdm_style(self):
+
+        """
+        Inject CSS fix for notebook tqdm bar background in dark themes.
+        """
+
+        style = """
+        <style>
+        .cell-output-ipywidget-background {
+            background-color: transparent !important;
+        }
+        :root {
+            --jp-widgets-color: var(--vscode-editor-foreground);
+            --jp-widgets-font-size: var(--vscode-editor-font-size);
+        }  
+        </style>
+        """
+        display(HTML(style))
+
+    # Utility function to squeeze dimension 1
+    def _squeeze(self, X):
+
+        """
+        Squeezes dimension 1, mainly thought for audio signals where this dimension is not needed
+        """
+
+        if self.squeeze_dim:
+            X = X.squeeze(1)
+        return X
+    
+
+    # Utility function for _progress_bar
+    def _is_notebook(self):
+
+        """
+        Check if running in a Jupyter notebook.
+        """
+
+        try:
+            from IPython import get_ipython
+            shell = get_ipython().__class__.__name__
+            return shell == 'ZMQInteractiveShell'
+        except:
+            return False
+        
+    # Display progress bar
+    def _progress_bar(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        total: int,
+        stage: str,
+        epoch: int = 1,
+        desc_length: int = 22):
+
+        """
+        Creates the tqdm progress bar for the training and validation stages.
+
+        Args:
+            dataloader: The dataloader for the current stage.
+            total: Length of the dataloader
+            stage: The current stage ("train" or "validate").
+            epoch: The current epoch number.            
+            desc_length: The length of the description string for the progress bar.
+
+        Returns:
+            A tqdm progress bar instance for the current stage.
+        """
+
+        # Inject CSS to fix tqdm notebook theme-based background (only once per call)
+        if self._is_notebook():
+            self._inject_notebook_tqdm_style()
+        
+        # Set messages and color
+        train_str = f"Training epoch {epoch+1}"
+        val_str = f"Validating epoch {epoch+1}"
+        if stage == 'train':
+            color = self.color_train_plt
+            desc = f"Training epoch {epoch+1}".ljust(desc_length) + " "
+        elif stage == 'validation' or stage == "test":
+            color = self.color_test_plt
+            desc = f"Validating epoch {epoch+1}".ljust(desc_length) + " "
+        else:
+            color = self.color_test_plt
+            desc = f"Making predictions"
+        
+        # Create the progress_bar object
+        progress = tqdm(enumerate(dataloader), total=total, colour=color) #, dynamic_ncols=True
+        progress.set_description(desc)
+
+        return progress
+
+    # Function that switchs training dataloaders based on selected stategy
+    def _switch_dataloaders(
+        self,
+        epoch
+        ):
+
+        """
+        Selects the appropriate training dataloader for the current epoch.
+
+        Uses the standard dataloader for most epochs, and switches to the
+        no-augmentation dataloader during the last `augmentation_off_epochs`
+        to stabilize training (if specified).
+
+        Args:
+            epoch (int): Current epoch number (zero-indexed).
+
+        Returns:
+            torch.utils.data.DataLoader: The dataloader to use for this epoch.
+        """
+
+        # Strategy 1: Always use augmentation
+        if self.augmentation_strategy == "always":
+            return self.dataloaders['train']
+        
+        # Strategy 2: Disable augmentation for the last N epochs
+        elif self.augmentation_strategy == "off_last":
+            if self.augmentation_off_epochs > 0 and epoch >= (self.epochs - self.augmentation_off_epochs):
+                if epoch == (self.epochs - self.augmentation_off_epochs):
+                    self.info(f"Epoch {epoch+1}/{self.epochs}: Using no-augmentation dataloader for stabilization.")
+                return self.dataloaders['train_aug_off']
+            else:
+                return self.dataloaders['train']
+        
+        # Strategy 3: Disable augmentation for the first N epochs
+        elif self.augmentation_strategy == "off_first":
+            if self.augmentation_off_epochs > 0 and epoch < self.augmentation_off_epochs:
+                self.info(f"Epoch {epoch+1}/{self.epochs}: Using no-augmentation dataloader for stabilization.")
+                return self.dataloaders['train_aug_off']
+            else:
+                return self.dataloaders['train']
+        
+        # Strategy 4: Randomly toggle augmentation per epoch
+        elif self.augmentation_strategy == "random":
+            use_aug = random.random() < self.augmentation_random_prob
+            if not use_aug:                
+                self.info(f"Epoch {epoch+1}/{self.epochs}: Using no-augmentation dataloader for stabilization.")
+                return self.dataloaders['train_aug_off']                
+            else:
+                self.info(f"Epoch {epoch+1}/{self.epochs}: Using augmentation dataloader for stabilization.")
+                return self.dataloaders['train']
+            
+    def _load_inference_model(
+            self,
+            model_state
+    ):
+        
+        """
+        LoadS the appropriate model for inference based on the given 'model_state'.
+        
+        Args:
+            model_state (str): Specifies which model to load:
+                - 'last' : last trained model
+                - 'loss' : model with the lowest test loss
+                - 'r2'  : model with the highest test R2
+                - 'plcc': model with the highest test PLCC
+                - 'srocc': model with the highest test SROCC
+                - int    : specific epoch number (1-based)
+        
+        Returns:
+            model (torch.nn.Module): The model selected for inference.
+        """
+                
+        if not (model_state in self.valid_modes or isinstance(model_state, int)):
+            self.error(f"Invalid model value: {model_state}. Must be one of {self.valid_modes} or an integer.")
+
+        # Handle named model states
+        named_models = {
+            "last": self.model,
+            "loss": self.model_loss,
+            "r2": self.model_r2,
+            "plcc": self.model_plcc,
+            "srocc": self.model_srocc,
+        }
+
+        if isinstance(model_state, int):
+            if self.model_epoch is None or model_state > len(self.model_epoch):
+                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
+                return self.model
+            return self.model_epoch[model_state - 1]
+
+        # Fallback for named models if they're not available
+        model = named_models.get(model_state)
+        if model is None:
+            self.info(f"Model '{model_state}' not found, using last-epoch model for prediction.")
+            model = self.model
+
+        return model
+
+
+    # ======================================= #
+    # ============ VISUALIZATION ============ #
+    # ======================================= #
+
+    # Function to display and plot the results
+    def _display_results(self):
+    
+        """
+        Displays the training and validation results both numerically and visually.
+
+        Functionality:
+            Outputs key metrics such as training and validation loss, R2, and distributions
+            Generates plots that visualize the training process, such as:
+                - Loss curves (training vs validation loss over epochs).
+                - R2 curves (training vs validation R2 over epochs).
+                - Output distributions
+        """
+        
+        # Clear output
+        clear_output(wait=True)
+
+        # Print results   
+        print(self._format_epoch_results("train"))        
+        if self.apply_validation:
+            print(self._format_epoch_results("test"))
+        
+        # Plot training and test loss, R2, and distribution curves.
+        if self.plot_curves:
+            
+            # First figure (top)
+            n_cols = 4
+            plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
+            curr_epoch = len(self.results["train_loss"])
+            range_epochs = range(1, curr_epoch+1)            
+
+            # Plot loss
+            ax = plt.subplot(1, n_cols, 1)
+            self._plot(ax, range_epochs, 'loss')
+
+            # Plot R2
+            ax = plt.subplot(1, n_cols, 2)
+            self._plot(ax, range_epochs, 'r2')
+                    
+            # Plot PLCC
+            ax = plt.subplot(1, n_cols, 3)
+            #self._plot(ax, range_epochs, 'kde_train')
+            self._plot(ax, range_epochs, 'plcc')
+
+            # Plot SROCC
+            ax = plt.subplot(1, n_cols, 4)            
+            self._plot(ax, range_epochs, 'srocc')
+
+            # Display plots
+            plt.show()
+
+            # Second figure (bottom)
+            n_cols = 4
+            plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
+                        
+            # Plot prediction score distribution: train
+            ax = plt.subplot(1, n_cols, 1)
+            self._plot(ax, range_epochs, 'kde_train')
+
+            # Plot prediction score distribution: test
+            ax = plt.subplot(1, n_cols, 2)
+            self._plot(ax, range_epochs, 'kde_test')
+
+            # Plot time
+            ax = plt.subplot(1, n_cols, 3)
+            self._plot(ax, range_epochs, 'time')
+
+            # Plot LR
+            ax = plt.subplot(1, n_cols, 4)
+            self._plot(ax, range_epochs, 'lr')           
+
+            # Display plots
+            plt.show()
+
+
+    # ======================================= #
+    # ===== INTERNAL CORE TRAINING LOGIC ==== #
+    # ======================================= #
+
+    # Fuction that initializes training process and validates training parameters
+    def _init_train(
+        self,
+        target_dir: str=None,
+        model_name: str=None,        
+        enable_resume: bool=True,
+        dataloaders: dict[str, torch.utils.data.DataLoader] = None,
+        apply_validation: bool=True,
+        augmentation_strategy: str="always",
+        augmentation_off_epochs: int=5,
+        augmentation_random_prob: float=0.5,
+        save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
+        keep_best_models_in_memory: bool=False,        
+        epochs: int=30, 
+        plot_curves: bool=True,
+        amp: bool=True,
+        enable_clipping: bool=False,
+        accumulation_steps: int=1,
+        debug_mode: bool=False
+        ):
+
+        """
+        Initializes the training process by setting up the required configurations, parameters, and resources.
+
+        Args:
+            target_dir (str, optional): Directory to save the models. Defaults to "models" if not provided.
+            model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
+            enable_resume (bool, optional): Enables resuming training from the last checkpoint. Default is True.
+                - True: Training will resume from the most recent saved checkpoint. Useful if training is interrupted.
+                - False: Checkpoints will not be saved, so training cannot be resumed after interruption. This speed up training.
+            dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).                                                
+            apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
+            augmentation_strategy (str, optional): Determines how data augmentation is applied during training.
+                - "always": augmentation is applied every epoch.
+                - "off_last": augmentation is disabled during the last `augmentation_off_epochs` epochs.
+                - "off_first": augmentation is disabled during the first `augmentation_off_epochs` epochs.
+                - "random": augmentation is applied randomly according to `augmentation_random_prob`.
+                Default is "always".
+            augmentation_off_epochs (int, optional): Number of final epochs in which augmentation is disabled if `augmentation_strategy` is set to "off_last_n". Default is 5.
+            augmentation_random_prob (float, optional): Probability (0.0-1.0) of applying augmentation in each batch if `augmentation_strategy` is set to "random". Default is 0.5.            
+            epochs (int, optional): Number of epochs to train. Must be an integer greater than or equal to 1. Default is 30.
+            plot_curves (bool, optional): Whether to plot training and validation curves. Default is True.
+            amp (bool, optional): Enable automatic mixed precision for faster training. Default is True.
+            enable_clipping (bool, optional): Whether to enable gradient clipping. Default is True.
+            accumulation_steps (int, optional): Steps for gradient accumulation. Must be an integer greater than or equal to 1. Default is 1.
+            debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
+            save_best_model (Union[str, List[str]]): Criterion mode for saving the model: 
+                - "loss": saves the epoch with the lowest validation loss
+                - "r2": saves the epoch with the highest validation R2
+                - "plcc": saves the epoch with the highest validation PLCC
+                - "srocc": saves the epoch with the highest validation SROCC
+                - "last": saves last epoch
+                - "all": saves models for all epochs
+                - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
+                - None: the model will not be saved.
+
+        Functionality:
+            Validates input arguments with assertions.
+            Prints configuration parameters using the `_print_config` method.
+            Initializes the optimizer, loss function, and scheduler.
+            Ensures the target directory for saving models exists, creating it if necessary.
+            Sets the model name for saving, defaulting to the model's class name if not provided.
+            Initializes structures to track the best-performing model and epoch-specific models:
+            
+        This method sets up the environment for training, ensuring all necessary resources and parameters are prepared.
+        """
+
+        self.info(f"Checking arguments...")
+
+        # Validate resume
+        if not isinstance(enable_resume, (bool)):
+            self.error("'enable_resume' must be True or False.")
+        else:
+            self.resume = enable_resume
+            if not self.resume:
+                self.warning("'enable_resume' is set to False. If training interrupts, the last checkpoint will not be recovered.")
+
+        # Initialize use_distillation
+        if not isinstance(self.use_distillation, (bool)):
+            self.error("'use_distillation' must be True or False.")
+        
+        # Check if model_teacher is provided
+        if self.use_distillation:
+            if self.model_teacher == None:
+                self.error(f"Instantiate the engine in distillation mode by passing a PyTorch model corresponding to the teacher.")
+            else:
+                self.model_teacher.to(self.device)
+
+        # Validate keep_best_models_in_memory
+        if not isinstance(keep_best_models_in_memory, (bool)):
+            self.error(f"'keep_best_models_in_memory' must be True or False.")
+        else:
+            self.keep_best_models_in_memory = keep_best_models_in_memory
+
+        # Validate apply_validation
+        if not isinstance(apply_validation, (bool)):
+            self.error(f"'apply_validation' must be True or False.")
+        else:
+            self.apply_validation = apply_validation              
+
+        # Validate accumulation_steps
+        if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
+            self.error(f"'accumulation_steps' must be an integer greater than or equal to 1.")
+        else:
+            self.accumulation_steps = accumulation_steps
+
+        # Validate epochs
+        if not isinstance(epochs, int) or epochs is None or epochs < 1:
+            self.error(f"'epochs' must be an integer greater than or equal to 1.")
+        self.epochs = epochs
+
+        # Validate augmentation_strategy
+        valid_aug_strategies = {"always", "off_last", "off_first", "random"}
+        if augmentation_strategy not in valid_aug_strategies:
+            self.error(f"'augmentation_strategy' must be any of these strings: {valid_aug_strategies}.")
+        self.augmentation_strategy = augmentation_strategy
+
+        # Validate augmentation_off_epochs
+        if not isinstance(augmentation_off_epochs, (int)):
+            self.error(f"'augmentation_off_epochs' must be a positive integer.")
+        self.augmentation_off_epochs = min(augmentation_off_epochs, epochs)
+
+        # Validate augmentation_random_prob
+        if not isinstance(augmentation_random_prob, (int, float)) or not (0.0 <= float(augmentation_random_prob) <= 1.0):
+            self.error(f"'augmentation_random_prob' must be a float between 0.0 and 1.0.")
+        self.augmentation_random_prob = augmentation_random_prob
+
+        # Validate plot_curves
+        if not isinstance(plot_curves, (bool)):
+            self.error(f"'plot_curves' must be True or False.")
+        else:
+            self.plot_curves = plot_curves
+        
+        # Validate amp
+        if not isinstance(amp, (bool)):
+            self.error(f"'amp' must be True or False.")
+        else:
+            self.amp = amp
+
+        # Validate enable_clipping
+        if not isinstance(enable_clipping, (bool)):
+            self.error(f"'enable_clipping' must be True or False.")
+        else:
+            self.enable_clipping = enable_clipping
+
+        # Validate debug_mode
+        if not isinstance(debug_mode, (bool)):
+            self.error(f"'debug_mode' must be True or False.")
+        else:
+            self.debug_mode = debug_mode
+            
+        # Ensure save_best_model is correctly handled
+        if save_best_model is None:
+            self.save_best_model = False
+            mode = []
+        elif isinstance(save_best_model, (str, list)):
+            self.save_best_model = True
+            mode = [save_best_model] if isinstance(save_best_model, str) else save_best_model  # Ensure mode is a list
+        else:
+            self.error(f"'save_best_model' must be None, a string, or a list of strings.")
+
+        # Validate mode only if save_best_model is True        
+        if self.save_best_model:
+            if not isinstance(mode, list):
+                self.error(f"'mode' must be a string or a list of strings.")
+            for m in mode:
+                if m not in self.valid_modes:
+                    self.error(f"Invalid mode value: '{m}'. Must be one of {self.valid_modes}.")
+
+        # Assign the validated mode list
+        self.mode = mode
+
+        # Assign dataloaders (to be validated later on)
+        self.dataloaders = dataloaders
+        
+        # Initialize model name path and ensure target directory exists
+        self.target_dir = target_dir or "outputs"
+        os.makedirs(self.target_dir, exist_ok=True)  
+        self.model_name = model_name or "unnamed.pth"
+
+        # List of acceptable extensions
+        valid_extensions = ['.pth', '.pt', '.pkl', '.h5', '.torch']
+
+        # Check if model_name already has a valid extension, otherwise add the default .pth extension
+        if not any(self.model_name.endswith(ext) for ext in valid_extensions):
+            self.model_name += '.pth'
+
+        # Initialize optimizer
+        if self.optimizer is None:
+            self.error("Invalid 'optimizer'. Some examples: torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD.")        
+
+        # Initialize loss_fn
+        if self.loss_fn is None:
+            self.error("Invalid 'loss_fn'. Some examples: torch.nn.MSELoss(), torch.nn.HuberLoss(delta=0.1).")
+
+        # No need to check scheduler, it can be None
+
+        # Initialize the display showing the numeric results
+        self._init_results()
+
+        # Default checkpoint path
+        self.checkpoint_path = os.path.join(
+            self.target_dir,
+            f"{self.checkpoint_path_prefix}_{self.model_name}.gz"
+        )
+
+        # Remove leftover temp file from previous failed save
+        tmp_path = self.checkpoint_path + ".tmp"
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            self.info(f"Removed stale temp checkpoint file: {tmp_path}.")
+        
+        # Initialize epoch number    
+        self.start_epoch = 0
+        
+        # Load checkpoint if resume is enabled. This overrides the arguments                      
+        if self.resume:
+
+            # Collect all matching checkpoints recursively (newest first)
+            checkpoints = sorted(
+                Path(".").rglob(f"{self.checkpoint_path_prefix}*.gz"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            
+            if not checkpoints or (not os.path.isfile(self.checkpoint_path) and model_name is not None):
+                #self.warning(f"'resume' enabled but {self.checkpoint_path} does not exist. Disabling 'resume' and starting training from epoch 1.")
+                #self.resume = False        
+                self.start_epoch, resume_msg = 0, ""
+            else:                
+
+                # Build candidate list: default path first, then all found checkpoints
+                candidates = [Path(self.checkpoint_path)] + checkpoints
+                
+                # Loop over all detected checkpoints
+                loaded = False
+                self.info(f"Loading checkpoint...")
+                for ckpt in candidates:
+                    try:
+                        self.checkpoint_path = str(ckpt)
+                        self.start_epoch, resume_msg, ckpt_match = self._load_checkpoint()                        
+                        if ckpt_match:
+                            loaded = True                            
+                            # self.info(f"Loaded {self.checkpoint_path}!.")
+                            break
+                    except Exception as e:
+                        pass
+
+                if not loaded:
+                    self.error("No checkpoint could be loaded.")
+        else:
+            self.start_epoch, resume_msg = 0, ""
+
+        # Check loss_fn        
+        try:
+            # Get number of parameters of the forward method
+            num_args = len(inspect.signature(self.loss_fn.forward).parameters)
+        except (AttributeError, TypeError) as e:
+            self.error(f"Error inspecting loss function: {e}. "
+                       "Perhaps the loss_fn is not correctly instantiated.")
+        # Distillation: forward(student logits, teacher logits, target) / CrossEntropyLoss: forward(input, target)        
+        expected_args = 3 if self.use_distillation else 2
+        if num_args != expected_args:            
+            self.error(f"Unexpected number of arguments in loss_fn.forward: {num_args}. "
+                       f"Expected {expected_args} for use_distillation={self.use_distillation}.")
+
+        # Validate fields in the dataloaders
+        self._validate_dataloaders()
+        
+        # Get batch size from dataloaders
+        if hasattr(self.dataloaders['train'], 'batch_size'):
+            batch_size = self.dataloaders['train'].batch_size
+        else:
+            self.warning("Parameter 'batch_size' does not exist in the dataloader. Set to 4.")
+            batch_size = 4  # or set a default value
+
+        # Print configuration parameters
+        self._print_config(batch_size=batch_size, resume_msg=resume_msg)
+
+        self.info(f"Checking dataloaders...")   
+
+        # Set the model in train mode for checking dataloaders
+        self.model.eval()
+
+        # Initialize num_classes
+        self.num_classes = 0
+
+        # Regular training: attempting a forward pass to check if the shape of X is compatible
+        if not(self.use_distillation):
+            
+            # Load the first image of the dataset for verification
+            data = self.dataloaders['train'].dataset[0]
+            #data = next(iter(self.dataloaders['train']))
+
+            if isinstance(data, (tuple, list)) and len(data) == 2:    
+                X = data[0].unsqueeze(0).to(self.device) # Add batch dimension                
+            else:
+                self.error('The training dataset should contain two elements: image, label.')
+
+            try:
+
+                # Here is where the model will "complain" if the shape is incorrect
+                with torch.no_grad():
+
+                    # We just try the first signal of the batch
+                    y_pred = self.get_predictions(self.model(X))
+
+            except RuntimeError as e:
+
+                # If the shape is wrong, reshape X and try again
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                #if match:
+                #    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                #else:
+                #    self.warning(f"Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]                    
+                    self.squeeze_dim = True
+                    X = self._squeeze(X)                    
+                    
+                elif X.ndimension() == 2:  # [batch_size, time_steps]                    
+                    pass  # No change needed
+                else:
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}.")
+
+                with torch.no_grad():
+                    y_pred = self.get_predictions(self.model(X))
+            
+            except Exception as e:
+
+                # Catch any unexpected errors (not shape-related)
+                self.error(f"Unexpected error during input shape compatibility checking: {str(e)}")
+            
+            finally:
+                
+                # Always attempt to detect the number of classes
+                try:
+
+                    # If y_pred was successfully computed, get the number of classes
+                    if 'y_pred' in locals():
+                        self.num_classes = y_pred.shape[1]
+                        self.info(f"Detected number of scores: {self.num_classes}.")                        
+                    
+                    # Otherwise, throw an exception
+                    else:
+                        self.error("y_pred is not defined due to a failure in the forward pass.")
+                
+                except Exception as e:
+
+                    # Throw an exception if the shape of the output tensor is unexpected
+                    shape_info = getattr(y_pred, 'shape', 'undefined')
+                    self.error(f"Unexpected shape in of the prediction output: {shape_info}.")
+        
+        # Distillation
+        else:
+            
+             # Set the teacher model in evaluation model
+            self.model_teacher.eval()
+
+            # Load the first image of the dataset for verification
+            data = self.dataloaders['train'].dataset[0]
+
+            if isinstance(data, (tuple, list)) and len(data) == 3:                
+                X = data[0].unsqueeze(0).to(self.device) # Add batch dimension
+                X_tch = data[1].unsqueeze(0).to(self.device) # Add batch dimension
+            else:
+                self.error('The training dataset should contain three elements: image_student, image_teacher, label.')
+            
+            try:
+
+                # Here is where the model will "complain" if the shape is incorrect
+                y_pred_std = self.get_predictions(self.model(X))   
+                y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
+
+            except RuntimeError as e:
+
+                # If the shape is wrong, reshape X and try again
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                if match:
+                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                else:
+                    self.warning(f"Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
+                    self.squeeze_dim = True
+                    X = self._squeeze(X)
+
+                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}.")                
+                    
+                # Check the current shape of X and attempt a fix
+                if X_tch.ndimension() == 3 and X_tch.shape[1] == 1:  # [batch_size, 1, time_steps]
+                    X_tch = self._squeeze(X_tch)                    
+                elif X_tch.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    self.error(f"Unexpected input shape after exception handling: {X_tch.shape}.")
+                
+                with torch.no_grad():
+                    y_pred_std = self.get_predictions(self.model(X))
+                    y_pred_tch = self.get_predictions(self.model(X_tch))  
+
+            except Exception as e:
+
+                # Catch any unexpected errors (not shape-related)
+                self.error(f"Unexpected error during input shape compatibility checking: {str(e)}")                  
+            
+            finally:
+
+                # Always attempt to detect the number of classes
+                try:
+
+                    # If y_pred was successfully computed, get the number of classes
+                    if 'y_pred_std' in locals() or 'y_pred_tch' in locals():
+                        self.num_classes = y_pred_std.shape[1]
+                        num_classes_tch = y_pred_tch.shape[1]
+                        self.info(f"Detected number of score: {self.num_classes}.")
+
+                        if self.num_classes != num_classes_tch:
+                            self.error("The number of scores in the teacher and student models are different.")
+                    
+                    # Otherwise, throw an exception
+                    else:
+                        self.error("Either the predictions by student ('y_pred_std') or by teacher ('y_pred_tch') are not defined due to a failure in the forward pass.")
+                
+                except Exception as e:
+
+                    # Throw an exception if the shape of the output tensor is unexpected
+                    self.error(f"Unexpected shape in of the prediction output: {y_pred_std.shape}.")
+
+        #self.info("Making an in-memory copy of the model...")
+
+        # Initialize the best model and model_epoch list based on the specified mode.
+        if self.save_best_model:
+            if "loss" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_loss = copy.deepcopy(self.model)                            
+                    self.model_loss.to(self.device)
+                self.model_name_loss = self.model_name.replace(".", f"_loss.")
+            if "r2" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_r2 = copy.deepcopy(self.model)                            
+                    self.model_r2.to(self.device)
+                self.model_name_r2 = self.model_name.replace(".", f"_r2.")
+            if "plcc" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_plcc = copy.deepcopy(self.model)
+                    self.model_plcc.to(self.device)
+                self.model_name_plcc = self.model_name.replace(".", f"_plcc.")
+            if "srocc" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_srocc = copy.deepcopy(self.model)
+                    self.model_srocc.to(self.device)
+                self.model_name_srocc = self.model_name.replace(".", f"_srocc.")
+            if "all" in self.mode:
+                if self.keep_best_models_in_memory:
+                    self.model_epoch = []
+                    for k in range(epochs):
+                        self.model_epoch.append(copy.deepcopy(self.model))
+                        self.model_epoch[k].to(self.device)
+
+            self.best_test_loss = float("inf") 
+            self.best_test_r2 = float("-inf")
+            self.best_test_plcc = float("-inf")
+            self.best_test_srocc = float("-inf")
+
+        # Display last checkpoint results
+        if self.resume == True and self.start_epoch > 0:                        
+            self._display_results()
+            self.info(f"Verification complete! Training continues.")
+        else:
+            self.info(f"Verification complete! Training beggings.")
+    
+    # Training step for a single epoch
+    def _train_step(
+        self,
+        epoch: int = 1,
+        ):
+    
+        """
+        Trains a PyTorch model for a single epoch with gradient accumulation.
+
+        Args:
+            epoch: Epoch number.
+        """
+
+        # Measure time
+        start_time = time.time()
+
+        # Switch dataloaders according to 'augmentation_strategy'
+        dataloader = self._switch_dataloaders(epoch)
+
+        # Put model in train mode
+        self.model.train()
+        
+        # If distillation training is enabled, put teacher model in valuation mode
+        if self.use_distillation:            
+            self.model_teacher.eval()
+
+        # Initialize the GradScaler for Automatic Mixed Precision (AMP)
+        scaler = GradScaler() if self.amp else None
+
+        # Setup train loss and train r2 values
+        len_dataloader = len(dataloader)
+        train_loss, train_r2, train_plcc, train_srocc, = 0, 0, 0, 0
+        all_y_pred = []
+        all_y = []
+
+        # Loop through data loader data batches
+        self.optimizer.zero_grad()  # Clear gradients before starting
+        
+        # Regular training
+        if not(self.use_distillation):
+
+            for batch, (X, y) in self._progress_bar(
+                dataloader=dataloader,
+                total=len_dataloader,
+                epoch=epoch,
+                stage='train'
+                ):
+                
+                # Send data to target device
+                X, y = self._squeeze(X.to(self.device)), y.to(self.device)
+  
+                # Optimize training with amp if available
+                if self.amp:
+                    with autocast(device_type='cuda', dtype=torch.float16):
+
+                        # Forward pass
+                        y_pred = self.get_predictions(self.model(X))
+                        
+                        # Check if the output has NaN or Inf values
+                        if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
+                            if self.enable_clipping:
+                                self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                                #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
+                                y_pred = torch.nan_to_num(
+                                    y_pred,
+                                    nan=torch.mean(y_pred).item(), 
+                                    posinf=torch.max(y_pred).item(), 
+                                    neginf=torch.min(y_pred).item()
+                                    )
+                            else:
+                                self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                                continue
+                        
+                        # Calculate loss, normalize by accumulation steps
+                        loss = self.loss_fn(y_pred, y) / self.accumulation_steps
+                    
+                        # Check for NaN or Inf in loss
+                        if self.debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
+                            self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping...")
+                            continue
+
+                    # Backward pass with scaled gradients
+                    if self.debug_mode:
+                        # Use anomaly detection
+                        with torch.autograd.detect_anomaly():
+                            scaler.scale(loss).backward()
+                    else:
+                        scaler.scale(loss).backward()
+
+                else:
+                    # Forward pass
+                    y_pred = self.get_predictions(self.model(X))
+                    
+                    # Calculate loss, normalize by accumulation steps
+                    loss = self.loss_fn(y_pred, y) / self.accumulation_steps
+
+                    # Backward pass
+                    loss.backward()
+
+                # Gradient cliping
+                if self.enable_clipping:
+                    # Apply clipping if needed
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
+                # Perform optimizer step and clear gradients every accumulation_steps
+                if (batch + 1) % self.accumulation_steps == 0 or (batch + 1) == len_dataloader:
+
+                    if self.amp:
+
+                        # Gradient cliping
+                        if self.enable_clipping:
+                            # Unscale the gradients before performing any operations on them
+                            scaler.unscale_(self.optimizer)
+                            # Apply clipping if needed
+                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                        
+                        # Check gradients for NaN or Inf values
+                        if self.debug_mode:
+                            for name, param in self.model.named_parameters():
+                                if param.grad is not None:
+                                    if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
+                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}.")
+                                        break
+
+                        # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
+                        # If these gradients do not contain ``inf``s or ``NaN``s, optimizer.step() is then called,
+                        # otherwise, optimizer.step() is skipped.
+                        scaler.step(self.optimizer)
+                        scaler.update()
+
+                    else:
+                        # Optimizer step
+                        self.optimizer.step()
+
+                    # Optimizer zero grad
+                    self.optimizer.zero_grad()
+
+                # Accumulate metrics
+                train_loss += loss.item() * self.accumulation_steps  # Scale back to original loss
+                y_pred = y_pred.float().view(-1) # Convert to float for stability                
+                #train_r2 += self.calculate_r2(y, y_pred).item()
+                
+                all_y_pred.append(y_pred.detach().cpu())
+                all_y.append(y.detach().cpu())
+        
+        # Distillation
+        else:
+
+            for batch, (X, X_tch, y) in self._progress_bar(
+                dataloader=dataloader,            
+                total=len_dataloader,
+                epoch=epoch,
+                stage="train"):
+                
+                # Send data to target device
+                X, X_tch, y = self._squeeze(X.to(self.device)), self._squeeze(X_tch.to(self.device)), y.to(self.device)
+
+                # Optimize training with amp if available
+                if self.amp:
+                    with autocast(device_type='cuda', dtype=torch.float16):
+
+                        # Forward pass
+                        y_pred = self.get_predictions(self.model(X))
+                        y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
+
+                        # Check if the output has NaN or Inf values
+                        if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
+                            if self.enable_clipping:
+                                self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                                #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
+                                y_pred = torch.nan_to_num(
+                                    y_pred,
+                                    nan=torch.mean(y_pred).item(), 
+                                    posinf=torch.max(y_pred).item(), 
+                                    neginf=torch.min(y_pred).item()
+                                    )
+                            else:
+                                self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
+                                continue
+                        
+                        # Calculate loss, normalize by accumulation steps
+                        loss = self.loss_fn(y_pred, y_pred_tch, y) / self.accumulation_steps
+                    
+                        # Check for NaN or Inf in loss
+                        if self.debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
+                            self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping...")
+                            continue
+
+                    # Backward pass with scaled gradients
+                    if self.debug_mode:
+                        # Use anomaly detection
+                        with torch.autograd.detect_anomaly():
+                            scaler.scale(loss).backward()
+                    else:
+                        scaler.scale(loss).backward()
+
+                else:
+
+                    # Forward pass
+                    y_pred = self.get_predictions(self.model(X))
+                    y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
+                    
+                    # Calculate loss, normalize by accumulation steps
+                    loss = self.loss_fn(y_pred, y_pred_tch, y) / self.accumulation_steps
+
+                    # Backward pass
+                    loss.backward()
+
+                # Gradient cliping
+                if self.enable_clipping:                    
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
+                # Perform optimizer step and clear gradients every accumulation_steps
+                if (batch + 1) % self.accumulation_steps == 0 or (batch + 1) == len_dataloader:
+
+                    if self.amp:
+
+                        # Gradient cliping
+                        if self.enable_clipping:
+
+                            # Unscale the gradients before performing any operations on them
+                            scaler.unscale_(self.optimizer)
+
+                            # Apply clipping if needed
+                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                        
+                        # Check gradients for NaN or Inf values
+                        if self.debug_mode:
+                            for name, param in self.model.named_parameters():
+                                if param.grad is not None:
+                                    if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
+                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}.")
+                                        break
+
+                        # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
+                        # If these gradients do not contain ``inf``s or ``NaN``s, optimizer.step() is then called,
+                        # otherwise, optimizer.step() is skipped.
+                        scaler.step(self.optimizer)
+                        scaler.update()
+
+                    else:
+
+                        # Optimizer step
+                        self.optimizer.step()
+
+                    # Optimizer zero grad
+                    self.optimizer.zero_grad()
+
+                # Accumulate metrics
+                train_loss += loss.item() * self.accumulation_steps  # Scale back to original loss
+                y_pred = y_pred.float().view(-1) # Convert to float for stability                
+                #train_r2 += self.calculate_r2(y, y_pred).item()
+                
+                all_y_pred.append(y_pred.detach().cpu())
+                all_y.append(y.detach().cpu())
+
+        # Collect outputs
+        all_y_pred = torch.cat(all_y_pred).numpy()
+        all_y = torch.cat(all_y).numpy()
+
+        # Adjust metrics to get average loss and R2 per batch
+        train_loss = train_loss / len_dataloader
+        #train_r2 = train_r2 / len_dataloader
+        train_r2 = r2_score(all_y, all_y_pred)
+        train_plcc = pearsonr(all_y, all_y_pred)[0]
+        train_srocc = spearmanr(all_y, all_y_pred)[0]
+
+        # Compute elapsed time 
+        elapsed_time = time.time() - start_time
+
+        # Remove variables
+        self.clear_cuda_memory(['X', 'y', 'y_pred', 'loss'], locals())
+        if self.use_distillation:
+            self.clear_cuda_memory(['X_tch', 'y_pred_tch'], locals())
+
+        # Retrieve the learning rate
+        if self.scheduler is None or isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            lr = self.optimizer.param_groups[0]['lr']
+        else:
+            lr = self.scheduler.get_last_lr()[0]
+        
+        # Update results dictionary
+        self.results["epoch"].append(epoch+1)
+        self.results["train_loss"].append(train_loss)
+        self.results["train_r2"].append(train_r2)
+        self.results["train_plcc"].append(train_plcc)
+        self.results["train_srocc"].append(train_srocc)
+        self.results["train_time [s]"].append(elapsed_time)
+        self.results["lr"].append(lr)
+        self.results["train_pred"] = all_y_pred
+        self.results["train_y"] = all_y
+
+    # Validation/test step for a single epoch
+    def _test_step(
+        self,
+        epoch: int = 1,
+        ):
+        
+        """
+        Tests a PyTorch model for a single epoch.
+
+        Args:
+            epoch: Epoch number.
+        """
+
+        # Execute the test step is apply_validation is enabled
+        if self.apply_validation:
+
+            # Measure time
+            start_time = time.time()
+
+            # Get test dataloader
+            dataloader = self.dataloaders['test']
+
+            # Put model in eval mode
+            self.model.eval()
+
+            # If distillation training is enabled, put teacher model in valuation mode
+            if self.use_distillation:            
+                self.model_teacher.eval()
+            
+            # Setup test loss and test R2 values
+            len_dataloader = len(dataloader)
+            test_loss, test_r2, test_plcc, test_srocc = 0, 0, 0, 0
+            all_y_pred = []
+            all_y = []
+
+            # Set inference context
+            try:
+                inference_context = torch.inference_mode()
+                with torch.inference_mode():
+                    # Load the first image and add the batch dimension
+                    data = dataloader.dataset[0]
+                    X = data[0].unsqueeze(0)
+                    # Remove dimension 1 for audio signals: [1, time]
+                    X = self._squeeze(X)
+                    y_pred = self.get_predictions(self.model(X.to(self.device)))
+                    
+            except RuntimeError:
+                inference_context = torch.no_grad()
+                #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
+
+            # Turn on inference context manager 
+            with inference_context:
+                
+                # Regular inference mode
+                if not(self.use_distillation):
+
+                    # Loop through DataLoader batches
+                    for batch, (X, y) in self._progress_bar(
+                        dataloader=dataloader,
+                        total=len_dataloader,
+                        epoch=epoch,
+                        stage='test'):
+
+                        # Send data to target device
+                        X, y = self._squeeze(X.to(self.device)), y.to(self.device)                        
+                        
+                        if torch.isnan(X).any() or torch.isinf(X).any():
+                            self.warning(f"NaN or Inf detected in test input!")
+
+                        # Enable AMP if specified
+                        with torch.autocast(device_type='cuda', dtype=torch.float16) if self.amp else nullcontext():
+
+                            # Forward pass
+                            y_pred = self.get_predictions(self.model(X))
+
+                            # Check for NaN/Inf in predictions
+                            if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
+                                if self.enable_clipping:
+                                    self.warning(f"Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                                    y_pred = torch.nan_to_num(
+                                        y_pred,
+                                        nan=torch.mean(y_pred).item(),
+                                        posinf=torch.max(y_pred).item(),
+                                        neginf=torch.min(y_pred).item()
+                                    )
+                                else:
+                                    self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                                    continue
+
+                            # Calculate and accumulate loss
+                            loss = self.loss_fn(y_pred, y)
+                            test_loss += loss.item()
+
+                            # Debug NaN/Inf loss
+                            if self.debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
+                                self.warning(f"Loss is NaN/Inf at batch {batch}. Skipping...")
+                                continue
+
+                        # Calculate and accumulate R2
+                        y_pred = y_pred.float().view(-1)                        
+                        #test_r2 += self.calculate_r2(y, y_pred).item()
+                        
+                        all_y_pred.append(y_pred.detach().cpu())
+                        all_y.append(y.detach().cpu())
+                
+                # Inference mode with distillation
+                else:
+
+                    # Loop through DataLoader batches                   
+                    for batch, (X, X_tch, y) in self._progress_bar(
+                        dataloader=dataloader,
+                        total=len_dataloader,
+                        epoch=epoch,
+                        stage="test"):
+
+                        # Send data to target device                    
+                        X, X_tch, y = self._squeeze(X.to(self.device)), self._squeeze(X_tch.to(self.device)), y.to(self.device)                        
+
+                        if torch.isnan(X).any() or torch.isinf(X).any() or torch.isnan(X_tch).any() or torch.isinf(X_tch).any():
+                            self.warning(f"NaN or Inf detected in test input!")
+
+                        # Enable AMP if specified
+                        with torch.autocast(device_type='cuda', dtype=torch.float16) if self.amp else nullcontext():
+
+                            # Forward pass
+                            y_pred = self.get_predictions(self.model(X))
+                            y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
+
+                            # Check for NaN/Inf in predictions
+                            if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
+                                if self.enable_clipping:
+                                    self.warning(f"Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
+                                    y_pred = torch.nan_to_num(
+                                        y_pred,
+                                        nan=torch.mean(y_pred).item(),
+                                        posinf=torch.max(y_pred).item(),
+                                        neginf=torch.min(y_pred).item()
+                                    )
+                                else:
+                                    self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
+                                    continue
+
+                            # Calculate and accumulate loss
+                            loss = self.loss_fn(y_pred, y_pred_tch, y)
+                            test_loss += loss.item()
+
+                            # Debug NaN/Inf loss
+                            if self.debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
+                                self.warning(f"Loss is NaN/Inf at batch {batch}. Skipping...")
+                                continue
+
+                        # Calculate and accumulate R2
+                        y_pred = y_pred.float().view(-1)                        
+                        #test_r2 += self.calculate_r2(y, y_pred).item()
+                        
+                        all_y_pred.append(y_pred.detach().cpu())
+                        all_y.append(y.detach().cpu())
+
+            # Collect outputs
+            all_y_pred = torch.cat(all_y_pred).numpy()
+            all_y = torch.cat(all_y).numpy()
+
+            # Adjust metrics to get average loss and R2 per batch 
+            test_loss = test_loss / len_dataloader
+            #test_r2 = test_rplot2 / len_dataloader
+            test_r2 = r2_score(all_y, all_y_pred)
+            test_plcc = pearsonr(all_y, all_y_pred)[0]
+            test_srocc = spearmanr(all_y, all_y_pred)[0]
+
+            # Remove variables
+            self.clear_cuda_memory(['X', 'y', 'y_pred', 'loss'], locals())
+            if self.use_distillation:
+                self.clear_cuda_memory(['X_tch', 'y_pred_tch'], locals())
+            
+            # Compute elapsed time 
+            elapsed_time = time.time() - start_time
+        
+        # Otherwise set params with initial values
+        else:
+            test_loss, test_r2, test_plcc, test_srocc = self.best_test_loss, self.best_test_r2, self.best_test_plcc, self.best_test_srocc
+            elapsed_time = 0.0
+
+        # Scheduler step after the optimizer
+        self._scheduler_step(
+            test_loss=test_loss,
+            test_r2=test_r2
+            )
+        
+        # Update results dictionary
+        self.results["test_loss"].append(test_loss)
+        self.results["test_r2"].append(test_r2)
+        self.results["test_plcc"].append(test_plcc)
+        self.results["test_srocc"].append(test_srocc)
+        self.results["test_time [s]"].append(elapsed_time)
+        self.results["test_pred"] = all_y_pred
+        self.results["test_y"] = all_y
+    
+    # Scheduler step after the optimizer
+    def _scheduler_step(
+        self,
+        test_loss: float=None,
+        test_r2: float=None,
+        ):
+
+        """
+        Performs a scheduler step after the optimizer step.
+
+        Args:            
+            test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
+            test_r2 (float, optional): Test R2 value, required for ReduceLROnPlateau with 'max' mode.
+        """
+            
+        if self.scheduler:        
+            if self.apply_validation and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                # Check whether scheduler is configured for "min" or "max"
+                if self.scheduler.mode == "min" and test_loss is not None:
+                    self.scheduler.step(test_loss)  # Minimize test_loss
+                elif self.scheduler.mode == "max" and test_r2 is not None:
+                    self.scheduler.step(test_r2)  # Maximize test_r2
+                else:
+                    self.error(
+                        f"The scheduler requires either `test_loss` or `test_r2` "
+                        "depending on its mode ('min' or 'max')."
+                        )
+            else:
+                self.scheduler.step()  # For other schedulers
+
+    # Updates and saves the best model and model_epoch list based on the specified mode.
+    def _update_model(self) -> pd.DataFrame:
+
+        """
+        Updates and saves the best model and model_epoch list based on the specified mode(s), as well as the last-epoch model.
+
+        Returns:
+            A dataframe of training and testing metrics for each epoch.
+    
+        Functionality:
+            Saves the last-epoch model.
+            Saves the logs (self.results).
+            Saves the best-performing model during training based on the specified evaluation mode.
+            If mode is "all", saves the model for every epoch.
+            Updates `self.model_<loss, r2, epoch>` accordingly.
+        """
+
+        if isinstance(self.mode, str):
+            self.mode = [self.mode]  # Ensure self.mode is always a list
+
+        # Get actual epoch number        
+        epoch = self.results["epoch"][-1]
+
+        # If 'apply_validation' is enabled, then update models based on validation results
+        if self.apply_validation:
+            test_loss = self.results["test_loss"][-1]
+            test_r2 = self.results["test_r2"][-1]
+            test_plcc = self.results["test_plcc"][-1]
+            test_srocc = self.results["test_srocc"][-1]
+        else:
+            test_loss = self.results["train_loss"][-1]
+            test_r2 = self.results["train_r2"][-1]
+            test_plcc = self.results["train_plcc"][-1]
+            test_srocc = self.results["train_srocc"][-1]
+
+        # Some helper functions
+        def remove_previous_best(model_name):
+
+            """
+            Removes previously saved best model files.
+            """
+
+            file_to_remove = glob.glob(os.path.join(self.target_dir, model_name.replace(".", "_epoch*.")))
+            for f in file_to_remove:
+                os.remove(f)
+
+        def save_model(model_name):
+
+            """
+            Helper function to save the model.
+            """
+
+            #self.save(model=self.model, target_dir=self.target_dir, model_name=model_name.replace(".", f"_epoch{epoch+1}."))
+            self.save(model=self.model, target_dir=self.target_dir, model_name=model_name.replace(".", f"_epoch{epoch}."))
+        
+        if self.save_best_model:            
+            for mode in self.mode:
+                # Loss criterion
+                if mode == "loss":
+                    if test_loss is None:
+                        self.error(f"'test_loss' must be provided when mode is 'loss'.")
+                    if test_loss < self.best_test_loss:
+                        remove_previous_best(self.model_name_loss)
+                        self.best_test_loss = test_loss
+                        if self.keep_best_models_in_memory:
+                            self.model_loss.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_loss)
+                # R2 criterion
+                elif mode == "r2":
+                    if test_r2 is None:
+                        self.error(f"'test_r2' must be provided when mode is 'r2'.")
+                    if test_r2 > self.best_test_r2:
+                        remove_previous_best(self.model_name_r2)
+                        self.best_test_r2 = test_r2
+                        if self.keep_best_models_in_memory:
+                            self.model_r2.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_r2)
+                # PLCC criterion
+                elif mode == "plcc":
+                    if test_plcc is None:
+                        self.error(f"'test_plcc' must be provided when mode is 'plcc'.")
+                    if test_plcc > self.best_test_plcc:
+                        remove_previous_best(self.model_name_plcc)
+                        self.best_test_plcc = test_plcc
+                        if self.keep_best_models_in_memory:
+                            self.model_plcc.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_plcc)
+                # SROCC criterion
+                elif mode == "srocc":
+                    if test_srocc is None:
+                        self.error(f"'test_srocc' must be provided when mode is 'srocc'.")
+                    if test_srocc > self.best_test_srocc:
+                        remove_previous_best(self.model_name_srocc)
+                        self.best_test_srocc = test_srocc
+                        if self.keep_best_models_in_memory:
+                            self.model_srocc.load_state_dict(self.model.state_dict())
+                        save_model(self.model_name_srocc)
+                # Last-epoch criterion
+                elif mode == "last":
+                    remove_previous_best(self.model_name)
+                    save_model(self.model_name)
+                # All epochs
+                elif mode == "all":
+                    if self.keep_best_models_in_memory:
+                        if isinstance(self.model_epoch, list) and epoch < len(self.model_epoch):
+                            self.model_epoch[epoch].load_state_dict(self.model.state_dict())
+                    save_model(self.model_name)
+
+        # Save results to CSV
+        name, _ = self.model_name.rsplit('.', 1)
+        csv_file_name = f"{name}.csv"
+        exclude_keys = ["train_pred", "train_y", "test_pred", "test_y"]
+        filtered_results = {k: v for k, v in self.results.items() if k not in exclude_keys}
+        df_results = pd.DataFrame(filtered_results)
+        df_results.to_csv(os.path.join(self.target_dir, csv_file_name), index=False)
+
+        return df_results
+
+    def _finish_train(
+        self,
+        elapsed_time: float=None,
+        ):
+
+        """
+        Finalizes the training process by showing the elapsed time.
+        
+        Args:
+            elapsed_time: Elapsed time.
+        """
+
+        # Remove checkpoint
+        if os.path.exists(self.checkpoint_path):
+            os.remove(self.checkpoint_path)
+            #self.info(f"Removed {self.checkpoint_path}.")
+
+        # Print elapsed time
+        self.info(f"Training finished! Elapsed time: {self.sec_to_min_sec(elapsed_time)}")
+
+    def _save_checkpoint(
+        self,
+        next_epoch
+        ):
+
+        """
+        Safely saves the current training state (model weights, optimizer, scheduler, etc.)
+        to a compressed checkpoint file.
+
+        Args:
+            next_epoch (int): The epoch number you will start from next time (usually current_epoch + 1).
+
+        This creates a compressed file 'checkpoint.pth.gz' containing:
+            - model state_dict
+            - teacher model state_dict (if distillation is enabled)
+            - optimizer state_dict
+            - scheduler state_dict
+            - engine internal state (device, mode, results, etc.)
+        """
+        if self.resume:
+            
+            # Define paths
+            final_path = self.checkpoint_path           # e.g., 'checkpoint.pth.gz'
+            temp_path = self.checkpoint_path + ".tmp"   # e.g., 'checkpoint.pth.gz.tmp'
+            backup_path = self.checkpoint_path + "_bk"  # e.g., 'checkpoint.pth.gz_bk'
+
+            # Create checkpoint
+            checkpoint = {
+                'model_state': self.model.state_dict(),
+                'model_tch_state': self.model_teacher.state_dict() if self.use_distillation else None,
+                'use_distillation': self.use_distillation,
+                'optimizer_state': self.optimizer.state_dict(),
+                'scheduler_state': self.scheduler.state_dict() if self.scheduler is not None else None,
+                'loss_fn': self.loss_fn, #Warning: this checkpoint will not work if the class is renamed, removed, or moved.
+                'checkpoint_path': self.checkpoint_path,
+                'next_epoch': next_epoch,                        
+                'engine_state': {                
+                    'target_dir': self.target_dir,
+                    'device': self.device,
+                    'accumulation_steps': self.accumulation_steps,                
+                    'augmentation_strategy': self.augmentation_strategy,
+                    'augmentation_off_epochs': self.augmentation_off_epochs,
+                    'augmentation_random_prob': self.augmentation_random_prob,                    
+                    #'dataloaders': self.dataloaders,
+                    'debug_mode': self.debug_mode,                
+                    'amp': self.amp,
+                    'enable_clipping': self.enable_clipping,
+                    'keep_best_models_in_memory': self.keep_best_models_in_memory,
+                    'log_verbose': self.log_verbose,
+                    'mode': self.mode,
+                    'model_name': self.model_name,
+                    'num_epochs': self.epochs,
+                    'plot_curves': self.plot_curves,                
+                    'results': self.results,
+                    'save_best_model': self.save_best_model,
+                    'squeeze_dim': self.squeeze_dim,                
+                }
+            }
+
+            try:
+                # Save new checkpoint to a temporary file
+                with gzip.open(temp_path, 'wb') as f:
+                    torch.save(checkpoint, f)
+
+                # Move current checkpoint to backup (if exists)
+                if os.path.exists(final_path):
+                    os.replace(final_path, backup_path)
+
+                # Replace final path with the new checkpoint
+                os.replace(temp_path, final_path)
+
+                # Delete backup if everything went fine
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+
+            except Exception as e:
+                self.error(f"Failed to save checkpoint: {str(e)}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)  # Clean up temp file
+                print.info("Original checkpoint is still safe.")
+                raise
+            
+            #finally:
+                #self.info(f"Saved {self.checkpoint_path} to resume training later.")
+
+    def _load_checkpoint(self):
+
+        """
+        Loads the training state from the last saved checkpoint.
+
+        Returns:
+            int: The epoch number loaded from the checkpoint (start from this epoch when resuming).
+
+        Behavior:
+            - Looks for 'checkpoint.pth.gz' first (compressed file)
+            - Falls back to 'checkpoint.pth' if needed (uncompressed)
+            - Restores model, teacher model (if distillation), optimizer, scheduler,
+            and engine internal state.
+        """
+        
+        start_epoch = 0
+        resume_msg = ""
+        ckpt_match = False
+            
+        # Check if the checkpoint file exists
+        if self.resume and os.path.isfile(self.checkpoint_path):
+
+            # Load checkpoint
+            with gzip.open(f"{self.checkpoint_path}", 'rb') as f:
+                checkpoint = torch.load(f, map_location=self.device)            
+            if os.path.basename(checkpoint['checkpoint_path']) != os.path.basename(self.checkpoint_path):
+                return start_epoch, resume_msg, ckpt_match
+
+            # Load model weights
+            try:
+                self.model.load_state_dict(checkpoint['model_state'])
+            except Exception as e:
+                self.error(
+                    f"Failed to load model state from checkpoint: {str(e)}\n"
+                    f"Possible cause: The saved checkpoint may not match the current model architecture.\n"
+                    f"Tip: Ensure the actual model definition (layers, names, shapes) hasn't changed since the checkpoint was saved.\n"
+                    f"Last resort: Manually delete the corrupted or outdated checkpoint file.\n"
+                )
+
+            # Load model_teacher weights if distillation is enabled
+            self.use_distillation = checkpoint['use_distillation']
+            if self.use_distillation and 'model_tch_state' in checkpoint and checkpoint['model_tch_state'] is not None:
+                if self.model_teacher is None:
+                    self.error("Checkpoint loaded with distillation enabled, but the teacher model is not initialized.")
+                self.model_teacher.load_state_dict(checkpoint['model_tch_state'])
+
+            # Load optimizer
+            self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+
+            # Load scheduler (it can be None)
+            if self.scheduler is not None:
+                self.scheduler.load_state_dict(checkpoint['scheduler_state'])
+
+            # Load loss_fn
+            if self.use_distillation:
+                self.loss_fn = checkpoint.get('loss_fn', DistillationLoss(alpha=0.4, temperature=2, label_smoothing=0.1))                
+            else:
+                self.loss_fn = checkpoint.get('loss_fn', torch.nn.CrossEntropyLoss(label_smoothing=0.1))
+
+            # Restore engine internal state
+            engine_state = checkpoint.get('engine_state', {})           
+            self.target_dir = engine_state.get('target_dir', 'models')
+            self.device = engine_state.get('device', self.device)
+            self.accumulation_steps = engine_state.get('accumulation_steps', 1)
+            self.augmentation_off_epochs = engine_state.get('augmentation_off_epochs', 5)
+            self.augmentation_random_prob = engine_state.get('augmentation_random_prob', 0.5)
+            self.augmentation_strategy = engine_state.get('augmentation_strategy', "always")
+            #self.dataloaders = engine_state.get('dataloaders', None)
+            self.debug_mode = engine_state.get('debug_mode', False)
+            self.amp = engine_state.get('amp', True)
+            self.enable_clipping = engine_state.get('enable_clipping', True)
+            self.keep_best_models_in_memory = engine_state.get('keep_best_models_in_memory', True)
+            self.log_verbose = engine_state.get('log_verbose', self.log_verbose)
+            self.mode = engine_state.get('mode', "last")
+            self.model_name = engine_state.get('model_name', 'model')
+            self.epochs = engine_state.get('num_epochs', 30)
+            self.plot_curves = engine_state.get('plot_curves', True)
+            self.results = engine_state.get('results', self.results)
+            self.save_best_model = engine_state.get('save_best_model', True)
+            self.squeeze_dim = engine_state.get('squeeze_dim', self.squeeze_dim)
+
+            # Return the epoch to resume from
+            start_epoch = checkpoint.get('next_epoch', 0)
+            
+            # Print successful loading
+            resume_msg = f"sucessfully loaded checkpoint from epoch {start_epoch}"
+            ckpt_match = True
+
+        return start_epoch, resume_msg, ckpt_match
+    
+    
+    # ======================================= #
+    # ============= PUBLIC API ============== #
+    # ======================================= #
 
     def save(
         self,
@@ -114,7 +2018,8 @@ class RegressionEngine(Common):
         model_name: str
         ):
 
-        """Saves a PyTorch model to a target directory.
+        """
+        Saves a PyTorch model to a target directory.
 
         Args:
             model: A target PyTorch model to save.
@@ -149,19 +2054,21 @@ class RegressionEngine(Common):
     def load(
         self,
         target_dir: str,
-        model_name: str
+        model_name: str,
+        is_teacher: bool = False
         ):
         
-        """Loads a PyTorch model from a target directory and optionally returns it.
+        """
+        Loads a PyTorch model from a target directory and optionally returns it.
 
         Args:
             target_dir: A directory where the model is located.
-            model_name: The name of the model to load. Should include
+            model_name: The name of the model to load. Should include.
+            is_teacher: Whether the model to load is teacher (if use_distillation is True) or not.
             ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
-            return_model: Whether to return the loaded model (default: False).
 
         Returns:
-            The loaded PyTorch model (if return_model=True).
+            The loaded PyTorch model.
         """
 
         # Define the list of valid extensions
@@ -175,837 +2082,28 @@ class RegressionEngine(Common):
 
         # Load the model
         self.info(f"Loading model from: {model_path}")
-        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
-        
-        return self
-    
-    
-    def print_config(
-            self,
-            batch_size,
-            epochs,
-            plot_curves,
-            amp,
-            enable_clipping,
-            accumulation_steps,
-            debug_mode
-            ):
-        
-        """
-        Prints the configuration of the training process.
-        """
 
-        self.info(f"Device: {self.device}")
-        self.info(f"Epochs: {epochs}")
-        self.info(f"Batch size: {batch_size}")
-        self.info(f"Accumulation steps: {accumulation_steps}")
-        self.info(f"Effective batch size: {batch_size * accumulation_steps}")
-        self.info(f"Learning rate: {self.optimizer.param_groups[0]['lr']}")        
-        self.info(f"Apply validation: {self.apply_validation}")
-        self.info(f"Plot curves: {plot_curves}")
-        self.info(f"Automatic Mixed Precision (AMP): {amp}")
-        self.info(f"Enable clipping: {enable_clipping}")
-        self.info(f"Debug mode: {debug_mode}")        
-        self.info(f"Save model: {self.save_best_model}")
-        self.info(f"Target directory: {self.target_dir}")        
-        if self.save_best_model:
-          # Extract base name and extension from the model name
-            base_name, extension = os.path.splitext(self.model_name)
-            
-            # Print base name and extension
-            self.info(f"Model name base: {base_name}")
-            self.info(f"Model name extension: {extension}")
-            
-            # Iterate over modes and format model name, skipping 'last'
-            for mode in self.mode:
-                if mode == "last" or mode == "all" or mode == "r2":
-                    # Skip adding 'last' and just use epoch in the filename
-                    model_name_with_mode = f"_epoch<int>{extension}"
-                else:
-                    # For other modes, include mode and epoch in the filename
-                    model_name_with_mode = f"_{mode}_epoch<int>{extension}"
-                
-                # Print the final model save path for each mode
-                self.info(f"Save best model - {mode}: {base_name + model_name_with_mode}")
-        if self.keep_best_models_in_memory:
-            self.warning(f"Keeping best models in memory: {self.keep_best_models_in_memory} - it may slow down the training process.")
+        if is_teacher and self.use_distillation:
+            self.model_teacher.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
+            return self.model_teacher
         else:
-            self.info(f"Keeping best models in memory: {self.keep_best_models_in_memory}")
-    
-    # Function to initialize the result logs
-    def init_results(self):
+            state_dict = torch.load(model_path, weights_only=True, map_location=self.device)
+            self.model.load_state_dict(state_dict)
+            return self.model
 
-        """Creates a empty results dictionary"""
-
-        self.results = {
-            "epoch": [],
-            "train_loss": [],            
-            "train_r2": [],
-            "train_time [s]": [],
-            "test_loss": [],            
-            "test_r2": [],
-            "test_time [s]": [],
-            "lr": [],
-            }
-    
-    # Function to display and plot the results
-    def display_results(
-        self,
-        epoch,
-        max_epochs,
-        train_loss,
-        train_r2,    
-        train_pred,
-        train_y,           
-        train_epoch_time,
-        test_loss,        
-        test_r2,
-        test_pred, 
-        test_y,               
-        test_epoch_time,
-        plot_curves,
-        ):
-    
-        """
-        Displays the training and validation results both numerically and visually.
-
-        Functionality:
-        - Outputs key metrics such as training and validation loss, accuracy, and fpr at recall in numerical form.
-        - Generates plots that visualize the training process, such as:
-        - Loss curves (training vs validation loss over epochs).
-        - R2 curves (training vs validation accuracy over epochs).
-        - Data distribtutions
-        - LR curve
-        """
-
-        # Retrieve the learning rate
-        if self.scheduler is None or isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            lr = self.optimizer.param_groups[0]['lr']
-        else:
-            lr = self.scheduler.get_last_lr()[0]
-        
-        # Print results
-        print(
-            f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
-            f"{self.color_train}Train: {self.color_other}| "
-            f"{self.color_train}loss: {train_loss:.4f} {self.color_other}| "
-            f"{self.color_train}r2: {train_r2:.4f} {self.color_other}| "            
-            f"{self.color_train}time: {self.sec_to_min_sec(train_epoch_time)} {self.color_other}| "            
-            f"{self.color_train}lr: {lr:.10f}"
-        )
-        if self.apply_validation:
-            print(
-                f"{self.color_other}Epoch: {epoch+1}/{max_epochs} | "
-                f"{self.color_test}Test:  {self.color_other}| "
-                f"{self.color_test}loss: {test_loss:.4f} {self.color_other}| "
-                f"{self.color_test}r2: {test_r2:.4f} {self.color_other}| "            
-                f"{self.color_test}time: {self.sec_to_min_sec(test_epoch_time)} {self.color_other}| "            
-                f"{self.color_test}lr: {lr:.10f}"
-            )
-        
-        # Update results dictionary
-        self.results["epoch"].append(epoch+1)
-        self.results["train_loss"].append(train_loss)        
-        self.results["test_loss"].append(test_loss)
-        self.results["train_r2"].append(train_r2)        
-        self.results["test_r2"].append(test_r2)
-        self.results["train_time [s]"].append(train_epoch_time)
-        self.results["test_time [s]"].append(test_epoch_time)
-        self.results["lr"].append(lr)        
-
-        # Plots training and test loss, accuracy, and fpr-at-recall curves.
-        if plot_curves:
-        
-            n_plots = 4
-            plt.figure(figsize=(20, 6))
-            range_epochs = range(1, len(self.results["train_loss"])+1)
-
-            # Plot loss
-            plt.subplot(1, n_plots, 1)
-            plt.plot(range_epochs, self.results["train_loss"], label="train_loss", color=self.color_train_plt)
-            if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_loss"], label="test_loss", color=self.color_test_plt)
-            plt.title("Loss")
-            plt.xlabel("Epochs")
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
-
-            # Plot R2
-            plt.subplot(1, n_plots, 2)
-            plt.plot(range_epochs, self.results["train_r2"], label="train_r2", color=self.color_train_plt)
-            if self.apply_validation:
-                plt.plot(range_epochs, self.results["test_r2"], label="test_r2", color=self.color_test_plt)
-            plt.title("R2")
-            plt.xlabel("Epochs")
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
-
-            plt.subplot(1, n_plots, 3)            
-            sns.kdeplot(train_y, label="train_kde_gt", color=self.color_other_plt, fill=True)
-            sns.kdeplot(train_pred, label="train_kde_pred", color=self.color_train_plt, fill=True)
-            plt.title('Prediction Score Distributions')
-            plt.xlabel('Score')
-            plt.ylabel('Density')
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
-
-            plt.subplot(1, n_plots, 4)            
-            sns.kdeplot(test_y, label="test_kde_gt", color=self.color_other_plt, fill=True)
-            sns.kdeplot(test_pred, label="test_kde_pred", color=self.color_test_plt, fill=True)
-            plt.title('Prediction Score Distributions')
-            plt.xlabel('Score')
-            plt.ylabel('Density')
-            plt.grid(visible=True, which="both", axis="both")
-            plt.legend()
-
-            # Plot LR
-            #plt.subplot(1, n_plots, 3)
-            #plt.plot(range_epochs, self.results["lr"], label="lr", color=self.color_train_plt)            
-            #plt.title("Learning Rate")
-            #plt.xlabel("Epochs")
-            #plt.grid(visible=True, which="both", axis="both")
-            #plt.legend()
-
-            #png_name = os.path.splitext(self.model_name)[0]
-            #png_name = png_name + ".png"
-            #plt.savefig(png_name)
-
-            plt.show()
-
-    def init_train(
-        self,
-        target_dir: str=None,
-        model_name: str=None,
-        dataloader: torch.utils.data.DataLoader=None,
-        apply_validation: bool=True,
-        save_best_model: Union[str, List[str]] = "last",  # Allow both string and list
-        keep_best_models_in_memory: bool=False,
-        optimizer: torch.optim.Optimizer=None,
-        loss_fn: torch.nn.Module=None,
-        scheduler: torch.optim.lr_scheduler=None,
-        batch_size: int=64,        
-        epochs: int=30, 
-        plot_curves: bool=True,
-        amp: bool=True,
-        enable_clipping: bool=False,
-        accumulation_steps: int=1,
-        debug_mode: bool=False,
-        ):
-
-        """
-        Initializes the training process by setting up the required configurations, parameters, and resources.
-
-        Args:
-            target_dir (str, optional): Directory to save the models. Defaults to "models" if not provided.
-            model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
-            dataloader: A DataLoader instance for the model to be trained on.
-            optimizer (torch.optim.Optimizer, optional): The optimizer to minimize the loss function.
-            loss_fn (torch.nn.Module, optional): The loss function to minimize during training.
-            scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler for the optimizer.
-            batch_size (int, optional): Batch size for the training process. Default is 64.            
-            epochs (int, optional): Number of epochs to train. Must be an integer greater than or equal to 1. Default is 30.
-            plot_curves (bool, optional): Whether to plot training and validation curves. Default is True.
-            amp (bool, optional): Enable automatic mixed precision for faster training. Default is True.
-            enable_clipping (bool, optional): Whether to enable gradient clipping. Default is True.
-            accumulation_steps (int, optional): Steps for gradient accumulation. Must be an integer greater than or equal to 1. Default is 1.
-            debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
-            save_best_model (Union[str, List[str]]): Criterion mode for saving the model: 
-                - "loss": saves the epoch with the lowest validation loss                
-                - "r2": saves the epoch with the highest r2 value
-                - "last": saves last epoch
-                - "all": saves models for all epochs
-                - A list, e.g., ["loss", "last"], is also allowed. Only applicable if `save_best_model` is True.
-                - None: the model will not be saved.
-
-        Functionality:
-            Validates `epochs` parameters with assertions.
-            Prints configuration parameters using the `print_config` method.
-            Initializes the optimizer, loss function, and scheduler.
-            Ensures the target directory for saving models exists, creating it if necessary.
-            Sets the model name for saving, defaulting to the model's class name if not provided.
-            Initializes structures to track the best-performing model and epoch-specific models:
-            
-        This method sets up the environment for training, ensuring all necessary resources and parameters are prepared.
-        """
-
-        # Validate keep_best_models_in_memory
-        if not isinstance(keep_best_models_in_memory, (bool)):
-            self.error(f"'keep_best_models_in_memory' must be True or False.")
-        else:
-            self.keep_best_models_in_memory = keep_best_models_in_memory
-
-        # Validate apply_validation
-        if not isinstance(apply_validation, (bool)):
-            self.error(f"'apply_validation' must be True or False.")
-        else:
-            self.apply_validation = apply_validation        
-
-        # Validate accumulation_steps
-        if not isinstance(accumulation_steps, int) or accumulation_steps < 1:
-            self.error(f"'accumulation_steps' must be an integer greater than or equal to 1.")
-
-        # Validate epochs
-        if not isinstance(epochs, int) or epochs < 1:
-            self.error(f"'epochs' must be an integer greater than or equal to 1.")
-
-        # Ensure save_best_model is correctly handled
-        if save_best_model is None:
-            self.save_best_model = False
-            mode = []
-        elif isinstance(save_best_model, (str, list)):
-            self.save_best_model = True
-            mode = [save_best_model] if isinstance(save_best_model, str) else save_best_model  # Ensure mode is a list
-        else:
-            self.error(f"'save_best_model' must be None, a string, or a list of strings.")
-
-        # Validate mode only if save_best_model is True
-        valid_modes = {"loss", "r2", "last", "all"}
-        if self.save_best_model:
-            if not isinstance(mode, list):
-                self.error(f"'mode' must be a string or a list of strings.")
-
-            for m in mode:
-                if m not in valid_modes:
-                    self.error(f"Invalid mode value: '{m}'. Must be one of {valid_modes}")
-
-        # Assign the validated mode list
-        self.mode = mode
-
-        # Initialize model name path and ensure target directory exists
-        self.target_dir = target_dir if target_dir is not None else "models"
-        os.makedirs(self.target_dir, exist_ok=True)  
-        self.model_name = model_name if model_name is not None else f"model.pth"
-
-        # List of acceptable extensions
-        valid_extensions = ['.pth', '.pt', '.pkl', '.h5', '.torch']
-
-        # Check if model_name already has a valid extension, otherwise add the default .pth extension
-        if not any(self.model_name.endswith(ext) for ext in valid_extensions):
-            self.model_name += '.pth'
-
-        # Initialize optimizer, loss_fn, scheduler, and result_log
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.scheduler = scheduler
-        self.scaler = GradScaler() if amp else None
-        self.init_results()
-                
-        # Print configuration parameters
-        self.print_config(
-            batch_size=batch_size,            
-            epochs=epochs,
-            plot_curves=plot_curves,
-            amp=amp,
-            enable_clipping=enable_clipping,
-            accumulation_steps=accumulation_steps,            
-            debug_mode=debug_mode
-            )
-        
-        # Set the model in train mode
-        self.model.train()
-
-        # Attempt a forward pass to check if the shape of X is compatible
-        for batch, (X, y) in enumerate(dataloader):
-            
-            try:
-                # This is where the model will "complain" if the shape is incorrect
-                check = self.get_predictions(self.model(X.to(self.device)))                                
-
-            except Exception as e:
-                # If the shape is wrong, reshape X and try again
-                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
-                if match:
-                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
-                else:
-                    self.warning(f"Attempting to reshape X.")
-
-                # Check the current shape of X and attempt a fix
-                if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
-                    self.squeeze_dim = True
-                elif X.ndimension() == 2:  # [batch_size, time_steps]
-                    pass  # No change needed
-                else:
-                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
-            break
-    
-        # Initialize the best model and model_epoch list based on the specified mode.
-        if self.save_best_model:
-            if "loss" in self.mode:
-                if self.keep_best_models_in_memory:
-                    self.model_loss = copy.deepcopy(self.model)                            
-                    self.model_loss.to(self.device)
-                self.model_name_loss = self.model_name.replace(".", f"_loss.")
-            if "r2" in self.mode:
-                if self.keep_best_models_in_memory:
-                    self.model_r2 = copy.deepcopy(self.model)                            
-                    self.model_r2.to(self.device)
-                self.model_name_r2 = self.model_name.replace(".", f"_r2.")            
-            if "all" in self.mode:
-                if self.keep_best_models_in_memory:
-                    self.model_epoch = []
-                    for k in range(epochs):
-                        self.model_epoch.append(copy.deepcopy(self.model))
-                        self.model_epoch[k].to(self.device)
-            self.best_test_loss = float("inf")             
-            self.best_test_r2 = float("-inf")
-    
-    def progress_bar(
-        self,
-        dataloader: torch.utils.data.DataLoader,
-        total: int,
-        stage: str,
-        epoch_number: int = 1,
-        desc_length: int = 22):
-
-        """
-        Creates the tqdm progress bar for the training and validation stages.
-
-        Args:
-            dataloader: The dataloader for the current stage.
-            total: The total number of batches in the dataloader.
-            epoch_number: The current epoch number.
-            stage: The current stage ("train" or "validate").
-            desc_length: The length of the description string for the progress bar.
-
-        Returns:
-            A tqdm progress bar instance for the current stage.
-        """
-
-        train_str = f"Training epoch {epoch_number+1}"
-        val_str = f"Validating epoch {epoch_number+1}"
-        
-        if stage == 'train':
-            color = self.color_train_plt
-            desc = f"Training epoch {epoch_number+1}".ljust(desc_length) + " "
-        elif stage == 'validation' or stage == "test":
-            color = self.color_test_plt
-            desc = f"Validating epoch {epoch_number+1}".ljust(desc_length) + " "
-        else:
-            color = self.color_test_plt
-            desc = f"Making predictions"
-        progress = tqdm(enumerate(dataloader), total=total, colour=color)
-        progress.set_description(desc)
-
-        return progress
-
-
-    # This train step function includes gradient accumulation (experimental)
-    def train_step_v2(
-        self,
-        dataloader: torch.utils.data.DataLoader,         
-        epoch_number: int = 1,
-        amp: bool=True,
-        enable_clipping=False,
-        accumulation_steps: int = 1,
-        debug_mode: bool=False
-        ) -> Tuple[float, float, float]:
-    
-        """Trains a PyTorch model for a single epoch with gradient accumulation.
-
-        Args:
-            dataloader: A DataLoader instance for the model to be trained on.
-            epoch_number: Epoch number.
-            amp: Whether to use mixed precision training (True) or not (False).
-            enable_clipping: enables clipping on gradients and model outputs.
-            accumulation_steps: Number of mini-batches to accumulate gradients before an optimizer step.
-                If batch size is 64 and accumulation_steps is 4, gradients are accumulated for 256 mini-batches before an optimizer step.
-            debug_mode: A boolean indicating whether the debug model is enabled or not. It may slow down the training process.
-
-        Returns:
-            train_loss, train_r2.
-        """
-
-        # Put model in train mode
-        self.model.train()
-        #self.model.to(self.device) # Already done in __init__
-
-        # Initialize the GradScaler for Automatic Mixed Precision (AMP)
-        scaler = self.scaler
-
-        # Setup train loss and train accuracy values
-        len_dataloader = len(dataloader)
-        train_loss, train_r2 = 0, 0
-        all_y_pred = []
-        all_y = []
-
-        # Loop through data loader data batches
-        self.optimizer.zero_grad()  # Clear gradients before starting
-        for batch, (X, y) in self.progress_bar(
-            dataloader=dataloader,
-            total=len_dataloader,
-            epoch_number=epoch_number,
-            stage='train'
-            ):
-            
-            # Send data to target device
-            X, y = X.to(self.device), y.to(self.device)            
-            X = X.squeeze(1) if self.squeeze_dim else X
-            
-            # Optimize training with amp if available
-            if amp:
-                with autocast(device_type='cuda', dtype=torch.float16):
-                    # Forward pass
-                    y_pred = self.get_predictions(self.model(X))
-                    #y_pred = y_pred.clamp(1, 100)
-                    
-                    # Check if the output has NaN or Inf values
-                    if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
-                        if enable_clipping:
-                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")                            
-                            y_pred = torch.nan_to_num(
-                                y_pred,
-                                nan=torch.mean(y_pred).item(), 
-                                posinf=torch.max(y_pred).item(), 
-                                neginf=torch.min(y_pred).item()
-                                )
-                        else:
-                            self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
-                            continue
-                    
-                    # Calculate loss, normalize by accumulation steps
-                    loss = self.loss_fn(y_pred, y) / accumulation_steps
-                
-                    # Check for NaN or Inf in loss
-                    if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                        self.warning(f"Loss is NaN or Inf at batch {batch}. Skipping...")
-                        continue
-
-                # Backward pass with scaled gradients
-                if debug_mode:
-                    # Use anomaly detection
-                    with torch.autograd.detect_anomaly():
-                        scaler.scale(loss).backward()
-                else:
-                    scaler.scale(loss).backward()
-
-            else:
-                # Forward pass
-                y_pred = self.get_predictions(self.model(X))
-                #y_pred = y_pred.clamp(1, 100)
-                
-                # Calculate loss, normalize by accumulation steps
-                loss = self.loss_fn(y_pred, y) / accumulation_steps
-
-                # Backward pass
-                loss.backward()
-
-            # Gradient cliping
-            if enable_clipping:
-                # Apply clipping if needed
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-
-            # Perform optimizer step and clear gradients every accumulation_steps
-            if (batch + 1) % accumulation_steps == 0 or (batch + 1) == len(dataloader):
-
-                if amp:         
-                    # Gradient cliping
-                    if enable_clipping:
-                        # Unscale the gradients before performing any operations on them
-                        scaler.unscale_(self.optimizer)
-                        # Apply clipping if needed
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                    
-                    # Check gradients for NaN or Inf values
-                    if debug_mode:
-                        for name, param in self.model.named_parameters():
-                            if param.grad is not None:
-                                if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                    self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}")
-                                    break
-
-                    # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
-                    # If these gradients do not contain ``inf``s or ``NaN``s, optimizer.step() is then called,
-                    # otherwise, optimizer.step() is skipped.
-                    scaler.step(self.optimizer)
-                    scaler.update()
-
-                else:
-                    # Optimizer step
-                    self.optimizer.step()
-
-                # Optimizer zero grad
-                self.optimizer.zero_grad()
-
-            # Accumulate metrics
-            train_loss += loss.item() * accumulation_steps  # Scale back to original loss            
-            y_pred = y_pred.float().view(-1)
-            train_r2 += self.calculate_r2(y, y_pred).item()
-
-            all_y_pred.append(y_pred.detach().cpu())
-            all_y.append(y.detach().cpu())
-
-            self.clear_cuda_memory(['X', 'y', 'loss'], locals())
-
-        # Adjust metrics to get average loss and accuracy per batch
-        train_loss = train_loss / len_dataloader
-        train_r2 = train_r2 / len_dataloader
-        all_y_pred = torch.cat(all_y_pred).numpy()
-        all_y = torch.cat(all_y).numpy()
-        
-        return train_loss, train_r2, all_y_pred, all_y
-
-    def test_step(
-        self,
-        dataloader: torch.utils.data.DataLoader,        
-        epoch_number: int = 1,
-        amp: bool = True,
-        debug_mode: bool = False,
-        enable_clipping: bool = False
-        ) -> Tuple[float, float, float]:
-        
-        """Tests a PyTorch model for a single epoch.
-
-        Args:
-            dataloader: A DataLoader instance for the model to be tested on.            
-            epoch_number: Epoch number.
-            amp: Whether to use Automatic Mixed Precision for inference.
-            debug_mode: Enables logging for debugging purposes.
-            enable_clipping: Enables NaN/Inf value clipping for test predictions.
-
-        Returns:
-            test_loss, test_r2.
-        """
-
-        # Execute the test step is apply_validation is enabled
-        if self.apply_validation:
-
-            # Put model in eval mode
-            self.model.eval() 
-            #self.model.to(self.device) # Already done in __init__
-
-            # Setup test loss and test accuracy values
-            len_dataloader = len(dataloader)
-            test_loss, test_r2 = 0, 0
-            all_y_pred = []
-            all_y = []
-
-            # Set inference context
-            try:
-                inference_context = torch.inference_mode()
-                with torch.inference_mode():        
-                    for batch, (X, y) in enumerate(dataloader):
-                        X = X.squeeze(1) if self.squeeze_dim else X
-                        y_pred = self.get_predictions(self.model(X.to(self.device)))
-                        break
-            except RuntimeError:
-                inference_context = torch.no_grad()
-
-            # Turn on inference context manager 
-            with inference_context:
-
-                # Loop through DataLoader batches
-                for batch, (X, y) in self.progress_bar(
-                    dataloader=dataloader,
-                    total=len_dataloader,
-                    epoch_number=epoch_number,
-                    stage='test'):
-
-                    # Send data to target device
-                    X, y = X.to(self.device), y.to(self.device)                    
-                    X = X.squeeze(1) if self.squeeze_dim else X
-                    
-                    if torch.isnan(X).any() or torch.isinf(X).any():
-                        self.warning(f"NaN or Inf detected in test input!")
-
-                    # Enable AMP if specified
-                    with torch.autocast(device_type='cuda', dtype=torch.float16) if amp else nullcontext():
-
-                         # Forward pass
-                        y_pred = self.get_predictions(self.model(X))
-                        #y_pred = y_pred.clamp(1, 100)
-                        
-                        # Check for NaN/Inf in predictions
-                        if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
-                            if enable_clipping:
-                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Applying clipping...")
-                                y_pred = torch.nan_to_num(
-                                    y_pred,
-                                    nan=torch.mean(y_pred).item(),
-                                    posinf=torch.max(y_pred).item(),
-                                    neginf=torch.min(y_pred).item()
-                                )
-                            else:
-                                self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
-                                continue
-
-                        # Calculate and accumulate loss
-                        loss = self.loss_fn(y_pred, y)
-                        test_loss += loss.item()
-
-                        # Debug NaN/Inf loss
-                        if debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
-                            self.warning(f"Loss is NaN/Inf at batch {batch}. Skipping...")
-                            continue
-                    
-                    # Calculate and accumulate R2                    
-                    y_pred = y_pred.float().view(-1)                       
-                    test_r2 += self.calculate_r2(y, y_pred).item()
-
-                    all_y_pred.append(y_pred.detach().cpu())
-                    all_y.append(y.detach().cpu())
-
-                    self.clear_cuda_memory(['X', 'y', 'loss'], locals())
-
-            # Adjust metrics to get average loss and accuracy per batch 
-            test_loss = test_loss / len_dataloader
-            test_r2 = test_r2 / len_dataloader
-            all_y_pred = torch.cat(all_y_pred).numpy()
-            all_y = torch.cat(all_y).numpy()
-        
-        # Otherwise set params with initial values
-        else:
-
-            test_loss, test_r2, all_y_pred, all_y = self.best_test_loss, self.best_test_r2, None, None
-        
-        return test_loss, test_r2, all_y_pred, all_y
-
-    # Scheduler step after the optimizer
-    def scheduler_step(
-        self,
-        test_loss: float=None,
-        test_r2: float=None
-        ):
-
-        """
-        Performs a scheduler step after the optimizer step.
-
-        Parameters:
-        - scheduler (torch.optim.lr_scheduler): The learning rate scheduler.
-        - test_loss (float, optional): Test loss value, required for ReduceLROnPlateau with 'min' mode.
-        - test_acc (float, optional): Test accuracy value, required for ReduceLROnPlateau with 'max' mode.
-        """
-            
-        if self.scheduler:
-            if self.apply_validation and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                # Check whether scheduler is configured for "min" or "max"
-                if self.scheduler.mode == "min" and test_loss is not None:
-                    self.scheduler.step(test_loss)  # Minimize test_loss                
-                elif self.scheduler.mode == "max" and test_r2 is not None:
-                    self.scheduler.step(test_r2)  # Maximize test_r2
-                else:
-                    self.error(
-                        f"The scheduler requires either `test_loss` or `test_acc` "
-                        "depending on its mode ('min' or 'max')."
-                        )
-            else:
-                self.scheduler.step()  # For other schedulers
-    
-    # Updates and saves the best model and model_epoch list based on the specified mode.
-    def update_model(
-        self,
-        test_loss: float = None,
-        test_r2: float = None,        
-        epoch: int = None,
-    ) -> pd.DataFrame:
-
-        """
-        Updates and saves the best model and model_epoch list based on the specified mode(s), as well as the last-epoch model.
-
-        Parameters:
-        - test_loss (float, optional): Test loss for the current epoch (used in "loss" mode).        
-        - epoch (int, optional): Current epoch index, used for naming models when saving all epochs in "all" mode.
-
-        Functionality:
-        - Saves the last-epoch model.
-        - Saves the logs (self.results).
-        - Saves the best-performing model during training based on the specified evaluation mode.
-        - If mode is "all", saves the model for every epoch.
-        - Updates `self.model_<loss, acc, fpr, pauc, epoch>` accordingly.
-
-        Returns:
-            A dataframe of training and testing metrics for each epoch.
-        """
-
-        if isinstance(self.mode, str):
-            self.mode = [self.mode]  # Ensure self.mode is always a list
-
-        if epoch is None:
-            self.error(f"'epoch' must be provided when mode includes 'all' or 'last'.")
-
-        # Save model according criteria
-
-        # Helper functions
-        def remove_previous_best(model_name):
-            """Removes previously saved best model files."""
-            file_to_remove = glob.glob(os.path.join(self.target_dir, model_name.replace(".", "_epoch*.")))
-            for f in file_to_remove:
-                os.remove(f)
-
-        def save_model(model_name):
-            """Helper function to save the model."""
-            self.save(model=self.model, target_dir=self.target_dir, model_name=model_name.replace(".", f"_epoch{epoch+1}."))
-
-        if self.save_best_model:            
-            for mode in self.mode:
-                # Loss criterion
-                if mode == "loss":
-                    if test_loss is None:
-                        self.error(f"'test_loss' must be provided when mode is 'loss'.")
-                    if test_loss < self.best_test_loss:
-                        remove_previous_best(self.model_name_loss)
-                        self.best_test_loss = test_loss
-                        if self.keep_best_models_in_memory:
-                            self.model_loss.load_state_dict(self.model.state_dict())
-                        save_model(self.model_name_loss)
-                # R2 criterion
-                elif mode == "r2":
-                    if test_r2 is None:
-                        self.error(f"'test_r2' must be provided when mode is 'r2'.")
-                    if test_r2 > self.best_test_r2:
-                        remove_previous_best(self.model_name_r2)
-                        self.best_test_r2 = test_r2
-                        if self.keep_best_models_in_memory:
-                            self.model_r2.load_state_dict(self.model.state_dict())
-                        save_model(self.model_name_r2)
-                # Last-epoch criterion
-                elif mode == "last":
-                    if "all" not in self.mode:
-                        remove_previous_best(self.model_name)
-                    save_model(self.model_name)
-                # All epochs
-                elif mode == "all":
-                    if self.keep_best_models_in_memory:
-                        if isinstance(self.model_epoch, list) and epoch < len(self.model_epoch):
-                            self.model_epoch[epoch].load_state_dict(self.model.state_dict())
-                    save_model(self.model_name)
-
-        # Save results to CSV
-        name, _ = self.model_name.rsplit('.', 1)
-        csv_file_name = f"{name}.csv"
-        df_results = pd.DataFrame(self.results)
-        df_results.to_csv(os.path.join(self.target_dir, csv_file_name), index=False)
-
-        return df_results
-
-    
-    def finish_train(
-        self,
-        train_time: float=None,
-        ):
-
-        """
-        Finalizes the training process by showing the elapsed time.
-        
-        Args:
-            train_time: Elapsed time.
-        """
-
-        # Print elapsed time
-        self.info(f"Training finished! Elapsed time: {self.sec_to_min_sec(train_time)}")
-            
     # Trains and tests a Pytorch model
     def train(
         self,
         target_dir: str=None,
         model_name: str=None,
+        enable_resume: bool=True,
+        dataloaders: dict[str, torch.utils.data.DataLoader]=None, 
         save_best_model: Union[str, List[str]] = "last",
-        keep_best_models_in_memory: bool=False,
-        train_dataloader: torch.utils.data.DataLoader=None, 
-        test_dataloader: torch.utils.data.DataLoader=None,
+        keep_best_models_in_memory: bool=False,                
         apply_validation: bool=True,        
-        optimizer: torch.optim.Optimizer=None,
-        loss_fn: torch.nn.Module=None,
-        scheduler: torch.optim.lr_scheduler=None,        
+        augmentation_strategy: str="always",
+        augmentation_off_epochs: int=5,
+        augmentation_random_prob: float=0.5,
         epochs: int=30, 
         plot_curves: bool=True,
         amp: bool=True,
@@ -1024,25 +2122,35 @@ class RegressionEngine(Common):
 
         During training, the model is evaluated after each epoch based on the provided dataloaders.
         The model can be saved at different stages (e.g., at the end of each epoch or when the model 
-        achieves the best performance according to a specified metric such as loss, accuracy, or FPR).
+        achieves the best performance according to a specified metric such as loss, R2).
 
         Args:
             target_dir (str, optional): Directory to save the trained model.
             model_name (str, optional): Name for the saved model file. Must include file extension
                 such as ".pth", ".pt", ".pkl", ".h5", or ".torch".
+            enable_resume (bool, optional): Enables resuming training from the last checkpoint. Default is True.
+                - True: Training will resume from the most recent saved checkpoint. Useful if training is interrupted.
+                - False: Checkpoints will not be saved, so training cannot be resumed after interruption. This speed up training.
+            dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).            
             save_best_model (Union[str, List[str]], optional): Criterion(s) for saving the model.
                 Options include:
-                - "loss" (validation loss),                
+                - "loss" (validation loss),
+                - "r2" (validation R2),
+                - "plcc" (validation PLCC),
+                - "srocc" (validation SROCC),
                 - "last" (save model at the last epoch),
                 - "all" (save models for all epochs),
                 - A list, e.g., ["loss", "fpr"], is also allowed. Only applicable if `save_best_model` is True.
-            keep_best_models_in_memory (bool, optional): If True, the best models are kept in memory for future inference. The model state from the last epoch will always be kept in memory.
-            train_dataloader (torch.utils.data.DataLoader, optional): Dataloader for training the model.
-            test_dataloader (torch.utils.data.DataLoader, optional): Dataloader for testing/validating the model.
-            apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.            
-            optimizer (torch.optim.Optimizer, optional): Optimizer to use during training.
-            loss_fn (torch.nn.Module, optional): Loss function used for training.
-            scheduler (torch.optim.lr_scheduler, optional): Learning rate scheduler to adjust learning rate during training.            
+            keep_best_models_in_memory (bool, optional): If True, the best models are kept in memory for future inference. The model state from the last epoch will always be kept in memory.            
+            apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
+            augmentation_strategy (str, optional): Determines how data augmentation is applied during training.
+                - "always": augmentation is applied every epoch.
+                - "off_last": augmentation is disabled during the last `augmentation_off_epochs` epochs.
+                - "off_first": augmentation is disabled during the first `augmentation_off_epochs` epochs.
+                - "random": augmentation is applied randomly according to `augmentation_random_prob`.
+                Default is "always".
+            augmentation_off_epochs (int, optional): Number of final epochs in which augmentation is disabled if `augmentation_strategy` is set to "off_last". Default is 5.
+            augmentation_random_prob (float, optional): Probability (0.0-1.0) of applying augmentation in each batch if `augmentation_strategy` is set to "random". Default is 0.5.                        
             epochs (int, optional): Number of epochs to train the model. Default is 30.
             plot_curves (bool, optional): Whether to plot training and testing curves. Default is True.
             amp (bool, optional): Whether to use Automatic Mixed Precision (AMP) during training. Default is True.
@@ -1054,42 +2162,58 @@ class RegressionEngine(Common):
             pd.DataFrame: A dataframe containing the metrics for training and testing across all epochs.
             The dataframe will have the following columns:
             - epoch: List of epoch numbers.
-            - train_loss: List of training loss values for each epoch.            
+            - train_loss: List of training loss values for each epoch.
+            - train_r2: List of training R2 values for each epoch.
+            - train_plcc: List of training PLCC values for each epoch.
+            - train_srocc: List of training SROCC values for each epoch.            
             - test_loss: List of test loss values for each epoch.
-            - train_r2: List of training R2 values for each epoch.            
-            - test_r2: List of test R2 values for each epoch.            
+            - test_r2: List of test r2 values for each epoch.
+            - test_plcc: List of testing PLCC values for each epoch.
+            - test_srocc: List of testing SROCC values for each epoch. 
             - train_time: List of training time for each epoch.
             - test_time: List of testing time for each epoch.
-            - lr: List of learning rate values for each epoch.            
+            - lr: List of learning rate values for each epoch.
+            - train_pred: List of predicted values for training set
+            - train_y: List of ground-truth values for training set
+            - test_pred: List of predicted values for test set
+            - test_y: List of ground-truth values for test set
 
         Example output (for 2 epochs):
         {
             epoch: [1, 2],
-            train_loss: [2.0616, 1.0537],            
+            train_loss: [2.0616, 1.0537],
+            train_r2: [0.3945, 0.3945],            
+            train_plcc: [0.8444, 0.9352],
+            train_srocc: [0.7525, 0.9012],
             test_loss: [1.2641, 1.5706],
-            train_r2: [0.7626, 0.8100],            
-            test_r2: [0.5178, 0.5612],            
+            test_r2: [0.3400, 0.2973],
+            test_plcc: [0.8523, 0.73452],
+            test_srocc: [0.8312, 0.7851],            
             train_time: [1.1234, 1.5678],
             test_time: [0.4567, 0.7890],
-            lr: [0.001, 0.0005],            
+            lr: [0.001, 0.0005],
+            train_pred: [0.1234, 0.2345],
+            test_pred: [0.3456, 0.4567],
+            train_y: [0.1254, 0.3445],
+            test_y: [0.3154, 0.4817]
         }
         """
 
         # Starting training time
-        train_start_time = time.time()
+        start_time = time.time()
 
-        # Initialize training process
-        self.init_train(
+        # Initialize training process and check arguments
+        self._init_train(
             target_dir=target_dir,
-            model_name=model_name,
-            dataloader=train_dataloader,
+            model_name=model_name,            
+            enable_resume=enable_resume,
+            dataloaders=dataloaders,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,
-            apply_validation= apply_validation,
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            scheduler=scheduler,
-            batch_size=train_dataloader.batch_size,            
+            apply_validation=apply_validation,
+            augmentation_strategy=augmentation_strategy,
+            augmentation_off_epochs=augmentation_off_epochs,
+            augmentation_random_prob=augmentation_random_prob,            
             epochs=epochs, 
             plot_curves=plot_curves,
             amp=amp,
@@ -1097,132 +2221,72 @@ class RegressionEngine(Common):
             accumulation_steps=accumulation_steps,
             debug_mode=debug_mode,
             )
-
+            
         # Loop through training and testing steps for a number of epochs
-        for epoch in range(epochs):
+        # If 'resume' is True, resume training from 'self.start_epoch', the checkpoint epoch, otherwise self.start_epoch = 0
+        # 'self.epochs' is the total number of epochs originally set
+        for epoch in range(self.start_epoch, self.epochs):
 
-            # Perform training step and time it
-            train_epoch_start_time = time.time()
-            train_loss, train_r2, train_pred, train_y = self.train_step_v2(
-                dataloader=train_dataloader,                
-                epoch_number=epoch,
-                amp=amp,
-                enable_clipping=enable_clipping,
-                accumulation_steps=accumulation_steps,
-                debug_mode=debug_mode
-                )
-            train_epoch_time = time.time() - train_epoch_start_time
+            # Perform training step  
+            self._train_step(epoch)            
 
-            # Perform test step and time it
-            test_epoch_start_time = time.time()
-            test_loss, test_r2, test_pred, test_y = self.test_step(
-                dataloader=test_dataloader,                
-                epoch_number=epoch,
-                amp=amp,
-                enable_clipping=enable_clipping,
-                debug_mode=debug_mode
-                )
-            test_epoch_time = time.time() - test_epoch_start_time if self.apply_validation else 0.0            
-
-            clear_output(wait=True)
-
+            # Perform test step
+            self._test_step(epoch)            
+            
             # Show results
-            self.display_results(
-                epoch=epoch,
-                max_epochs=epochs,
-                train_loss=train_loss,
-                train_r2=train_r2,
-                train_pred=train_pred,
-                train_y=train_y,                
-                train_epoch_time=train_epoch_time,
-                test_loss=test_loss,               
-                test_r2=test_r2,                 
-                test_pred=test_pred,
-                test_y=test_y,
-                test_epoch_time=test_epoch_time,
-                plot_curves=plot_curves,
-            )
+            self._display_results()
 
-            # Scheduler step after the optimizer
-            self.scheduler_step(
-                test_loss=test_loss,                
-                test_r2=test_r2
-            )
-
-            # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.
-            # If apply_validation is enabled then upate models based on validation results
-            df_results = self.update_model(
-                test_loss=test_loss if self.apply_validation else train_loss,   
-                test_r2=test_r2 if self.apply_validation else train_r2,            
-                epoch=epoch
-                )
+            # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.            
+            df_results = self._update_model()
+            
+            # Save a checkpoint to allow resuming training later
+            self._save_checkpoint(next_epoch = epoch + 1)
 
         # Finish training process
-        train_time = time.time() - train_start_time
-        self.finish_train(train_time)
+        total_elapsed_time = time.time() - start_time
+        self._finish_train(total_elapsed_time)
 
         return df_results
 
     def predict(
         self,
         dataloader: torch.utils.data.DataLoader,
-        model_state: str="last",        
+        model_state: str="last",
         ) -> torch.Tensor:
 
         """
-        Predicts classes for a given dataset using a trained model.
+        Makes predictions for a given dataset using a trained model.
 
         Args:
+            dataloader (torch.utils.data.DataLoader): The dataset to predict on.
             model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
-            dataloader (torch.utils.data.DataLoader): The dataset to predict on.            
 
         Returns:
             (list): All of the predicted class labels represented by prediction probabilities (softmax)
         """
- 
-        # Check model to use
-        valid_modes =  {"loss", "r2", "last", "all"}
-        if not (model_state in valid_modes or isinstance(model_state, int)):
-            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
 
-        if model_state == "last":
-            model = self.model
-        elif model_state == "loss":
-            if self.model_loss is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_loss
-        elif model_state == "r2":
-            if self.model_r2 is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_r2
-        elif isinstance(model_state, int):
-            if self.model_epoch is None:
-                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                model = self.model
-            else:
-                if model_state > len(self.model_epoch):
-                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                    model = self.model
-                else:
-                    model = self.model_epoch[model_state-1]            
+        self.info(f"Checking arguments...")
+
+        # Select model to use
+        model = self._load_inference_model(model_state)          
 
         y_preds = []
         model.eval()
         model.to(self.device)
 
+        self.info(f"Checking dataloader...")
+
         # Set inference context
         try:
             inference_context = torch.inference_mode()
-            with torch.inference_mode():
-                for batch, (X, y) in enumerate(dataloader):
-                    if X.ndimension() == 3 and X.shape[1] == 1:
-                        X = X.squeeze(1)
-                    check = self.get_predictions(model(X.to(self.device)))
-                    break
+            with torch.inference_mode():                                
+                # Load the first image
+                data = dataloader.dataset[0]
+                X = data[0].unsqueeze(0) # Add batch dimension to the image
+                if X.ndimension() == 3 and X.shape[1] == 1:
+                    X = X.squeeze(1)
+                check = self.get_predictions(model(X.to(self.device)))
+            
         except RuntimeError:
             inference_context = torch.no_grad()
             #self.warning(f"torch.inference_mode() check caused an issue. Falling back to torch.no_grad().")
@@ -1232,48 +2296,55 @@ class RegressionEngine(Common):
 
         # Attempt a forward pass to check if the shape of X is compatible
         with inference_context:
-            for batch, (X, y) in enumerate(dataloader):            
-                try:
-                    # This is where the model will "complain" if the shape is incorrect
-                    check = self.get_predictions(model(X.to(self.device)))
-                except Exception as e:
-                    # If the shape is wrong, reshape X and try again
-                    match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
-                    if match:
-                        self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
-                    else:
-                        self.warning(f"Attempting to reshape X.")
+            try:
 
-                    # Check the current shape of X and attempt a fix
-                    if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
-                        self.squeeze_dim = True
-                    elif X.ndimension() == 2:  # [batch_size, time_steps]
-                        pass  # No change needed
-                    else:
-                        self.error(f"Unexpected input shape after exception handling: {X.shape}")
-                break
+                # Load the first image
+                data = dataloader.dataset[0]
+                # Here is where the model will "complain" if the shape is incorrect
+                X = data[0].unsqueeze(0) # Add batch dimension to the image
+                check = self.get_predictions(model(X.to(self.device)))
+
+            except Exception as e:
+
+                # If the shape is wrong, reshape X and try again
+                match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
+                if match:
+                    self.warning(f"Wrong input shape: {match.group(1)}. Attempting to reshape X.")
+                else:
+                    self.warning(f"Attempting to reshape X.")
+
+                # Check the current shape of X and attempt a fix
+                if X.ndimension() == 3 and X.shape[1] == 1:  # [batch_size, 1, time_steps]
+                    self.squeeze_dim = True
+                elif X.ndimension() == 2:  # [batch_size, time_steps]
+                    pass  # No change needed
+                else:
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
         
         # Free up unused GPU memory after shape-checking
-        torch.cuda.empty_cache()      
+        torch.cuda.empty_cache()
+
+        self.info(f"Verification complete! Predition beggins.")
 
         # Turn on inference context manager 
         with inference_context:
-            for batch, (X, y) in self.progress_bar(
+            
+            for _, data in self._progress_bar(
                 dataloader=dataloader,
                 total=len(dataloader),
                 stage='inference'
                 ):
 
                 # Send data and targets to target device
-                X, y = X.to(self.device), y.to(self.device)
-                X = X.squeeze(1) if self.squeeze_dim else X
+                X = data[0]
+                X = self._squeeze(X.to(self.device))                
                 
-                # Do the forward pass
-                y_pred = self.get_predictions(model(X))               
+                # Perform forward pass
+                y_pred = self.get_predictions(model(X))                
 
                 # Put predictions on CPU for evaluation
                 y_preds.append(y_pred.cpu())
-
+        
         # Concatenate list of predictions into a tensor
         return torch.cat(y_preds)
 
@@ -1287,49 +2358,22 @@ class RegressionEngine(Common):
         ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         
         """
-        Predicts classes for a given dataset using a trained model and stores the per-sample results in dictionaries.
+        Makes predictions for a given dataset using a trained model and stores the per-sample results in dictionaries.
 
         Args:
             model_state: specifies the model to use for making predictions. "loss", "acc", "fpr", "pauc", "last" (default), "all", an integer
             test_dir (str): The directory containing the test images.
-            transform (Callable): The transformation to apply to the test images.
+            transform (Callable): The transformation to apply to the test images.            
             sample_fraction (float, optional): The fraction of samples to predict. Defaults to 1.0.
             seed (int, optional): The random seed for reproducibility. Defaults to 42.
 
         Returns:
-            A list of dictionaries with sample predictions, sample names, prediction probabilities, prediction times, actual labels and prediction classes
+            A list of dictionaries with sample predictions, prediction times, actual predictions
             A classification report as a dictionary from sckit-learng.metrics
         """
 
-        # Check model to use
-        valid_modes =  {"loss", "r2", "last", "all"}
-        if not (model_state in valid_modes or isinstance(model_state, int)):
-            self.error(f"Invalid model value: {model_state}. Must be one of {valid_modes} or an integer.")
-
-        if model_state == "last":
-            model = self.model
-        elif model_state == "loss":
-            if self.model_loss is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_loss
-        elif model_state == "r2":
-            if self.model_r2 is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_r2                        
-        elif isinstance(model_state, int):
-            if self.model_epoch is None:
-                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                model = self.model
-            else:
-                if model_state > len(self.model_epoch):
-                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                    model = self.model
-                else:
-                    model = self.model_epoch[model_state-1]
+        # Select model to use
+        model = self._load_inference_model(model_state)
 
         # Create a list of test images and checkout existence
         
@@ -1374,7 +2418,6 @@ class RegressionEngine(Common):
             # Get the sample path and ground truth class name
             pred_dict["path"] = path
             class_name = path.parent.stem
-            pred_dict["class_name"] = class_name
             
             # Start the prediction timer
             start_time = timer()
@@ -1416,9 +2459,12 @@ class RegressionEngine(Common):
             
             # Attempt a forward pass to check if the shape of transformed_image is compatible
             try:
-                # This is where the model will "complain" if the shape is incorrect
+
+                # Here is where the model will "complain" if the shape is incorrect
                 check = model(signal)
-            except Exception as e:
+
+            except RuntimeError as e:
+
                 # If the shape is wrong, reshape X and try again
                 match = re.search(r"got input of size: (\[[^\]]+\])", str(e))
                 if match:
@@ -1434,12 +2480,15 @@ class RegressionEngine(Common):
                 else:
                     self.error(f"Unexpected input shape after exception handling: {signal.shape}")
             
-            # Get prediction probability, predicition label and prediction class
+            except Exception as e:                
+
+                # Catch any unexpected errors (not shape-related)
+                self.error(f"Unexpected error during input shape compatibility checking: {str(e)}")
+            
+            # Get prediction forms: logits, probabilities, predicted label, predicted class
             with inference_context:
                 pred = model(signal) # perform inference on target sample             
-
-                # Make sure things in the dictionary are on CPU (required for inspecting predictions later on) 
-                pred_dict["pred"] = round(pred.unsqueeze(0).max().cpu().item(), 4)                
+                pred_dict["pred_prob"] = round(pred.cpu().item(), 4)
                 
                 # End the timer and calculate time per pred
                 end_time = timer()
@@ -1448,17 +2497,7 @@ class RegressionEngine(Common):
             # Add the dictionary to the list of preds
             pred_list.append(pred_dict)
 
-            clear_output(wait=True)       
+            clear_output(wait=True)
 
-        # Generate the classification report
-        classification_report_dict = classification_report(
-            y_true=y_true,
-            y_pred=y_pred,
-            target_names="None",
-            labels="None",
-            output_dict=True
-            )
-
-        # Return list of prediction dictionaries
-        return pred_list, classification_report_dict
-    
+        # Return list of prediction dictionary
+        return pred_list

@@ -23,6 +23,7 @@ from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 from torchvision.transforms.functional import to_pil_image
 import torchvision.transforms.functional as F
 from torchvision.transforms import v2 as T
+from .common_utils import theme_presets
 
 def collate_fn(batch):
     return tuple(zip(*batch))
@@ -382,12 +383,6 @@ def display_and_save_predictions(
 
     plt.close("all")
 
-     # Theme presets
-    theme_presets = {
-        "light": {"bg": "white", "text": "black"},
-        "dark": {"bg": "#1e1e1e", "text": "white"}
-    }
-
     # Resolve theme
     if isinstance(theme, dict):
         figure_color_map = theme
@@ -476,21 +471,16 @@ def visualize_transformed_data(
     """
     Visualizes the original and transformed image along with bounding boxes and masks.
     
-    Parameters:
-    - img: Original image tensor.
-    - target: Original target dictionary (contains boxes, masks, labels).
-    - transformed_img: Transformed image tensor.
-    - transformed_target: Transformed target dictionary.
-    - color_conversion: Optional OpenCV color conversion code (e.g., cv2.COLOR_HSV2RGB).
+    Args:
+        img: Original image tensor.
+        target: Original target dictionary (contains boxes, masks, labels).
+        transformed_img: Transformed image tensor.
+        transformed_target: Transformed target dictionary.
+        color_conversion: Optional OpenCV color conversion code (e.g., cv2.COLOR_HSV2RGB).
                         https://docs.opencv.org/3.4/d8/d01/group__imgproc__color__conversions.html
                         If None, assumes image is already in RGB.
+        theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     """
-    
-    # Theme presets
-    theme_presets = {
-        "light": {"bg": "white", "text": "black"},
-        "dark": {"bg": "#1e1e1e", "text": "white"}
-    }
 
     # Resolve theme
     if isinstance(theme, dict):

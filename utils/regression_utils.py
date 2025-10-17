@@ -14,15 +14,16 @@ import torch
 import random
 import matplotlib.pyplot as plt
 from typing import Literal, Dict, Union
+from .common_utils import theme_presets
 
 def display_random_images_regression(
-        dataset: torch.utils.data.dataset.Dataset, # or torchvision.datasets.ImageFolder?
-        n: int = 10,
-        display_shape: bool = True,
-        rows: int = 5,
-        cols: int = 5,
-        seed: int = None,
-        theme: Union[Literal["light", "dark"], Dict[str, str]] = "light"):
+    dataset: torch.utils.data.dataset.Dataset, # or torchvision.datasets.ImageFolder?
+    n: int = 10,
+    display_shape: bool = True,
+    rows: int = 5,
+    cols: int = 5,
+    seed: int = None,
+    theme: Union[Literal["light", "dark"], Dict[str, str]] = "light"):
 
    
     """Displays a number of random images from a given dataset for regression.
@@ -38,21 +39,16 @@ def display_random_images_regression(
         theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     
     Usage:
-    display_random_images(train_data, 
-                      n=16, 
-                      classes=class_names,
-                      rows=4,
-                      cols=4,
-                      display_shape=False,
-                      seed=None,
-                      theme='dark')
+    display_random_images(
+        train_data, 
+        n=16, 
+        classes=class_names,
+        rows=4,
+        cols=4,
+        display_shape=False,
+        seed=None,
+        theme='dark')
     """
-
-    # Theme presets
-    theme_presets = {
-        "light": {"bg": "white", "text": "black"},
-        "dark": {"bg": "#1e1e1e", "text": "white"}
-    }
 
     # Resolve theme
     if isinstance(theme, dict):
@@ -96,12 +92,10 @@ def display_random_images_regression(
         # Plot adjusted samples
         ax = plt.subplot(rows, cols, i + 1)
         ax.imshow(targ_image_adjust)
-        ax.set_title(f"Score: {score:.2f}", color=figure_color_map['text'])
+        ax.set_title(f"Score: {score:.2f}", )
         ax.axis("off")
         ax.set_facecolor(figure_color_map['bg'])
-
         if display_shape:
             print(f"[{i}] shape: {targ_image_adjust.shape}, score: {score:.2f}")
     
-    plt.tight_layout()
     plt.show()

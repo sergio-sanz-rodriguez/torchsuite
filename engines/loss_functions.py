@@ -516,7 +516,7 @@ class DiceCrossEntropyLoss(nn.Module):
         else:
             self.ce_loss = nn.BCEWithLogitsLoss()
 
-    def forward(self, y_true, y_pred):
+    def forward(self, y_pred, y_true):
         dice_loss = DiceLoss(self.num_classes, self.threshold, self.eps)(y_true, y_pred)
         ce_loss = self.ce_loss(y_pred, y_true.float())
         

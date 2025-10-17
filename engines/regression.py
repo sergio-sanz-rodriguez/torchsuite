@@ -14,7 +14,6 @@ import copy
 import warnings
 import re
 import gzip
-import tempfile
 import inspect
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -29,7 +28,6 @@ from IPython.display import clear_output, display, HTML
 from timeit import default_timer as timer
 from contextlib import nullcontext
 from sklearn.metrics import r2_score
-from sklearn.preprocessing import LabelEncoder
 from scipy.stats import pearsonr, spearmanr
 try:
     from torch.amp import GradScaler, autocast
@@ -156,13 +154,14 @@ class RegressionEngine(Common):
         
         if self.plot_curves:
             self.metric_labels = {
-                'loss': ['loss', 'loss', 'Loss'],
-                'r2':   ['r2', 'r2', 'R2'],
-                'plcc': ['plcc', 'plcc', 'Pearson Linear Correlation Coeff. (PLCC)'],
-                'srocc': ['srocc', 'srocc', 'Spearman''s Rank Correlation Coeff. (SROCC)'],
-                'time': ['time [s]', 'time', 'Time [MMmSSs]'],
-                'kde_train':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],
-                'kde_test':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],                
+                'loss':      ['loss', 'loss', 'Loss'],
+                'r2':        ['r2', 'r2', 'R2'],
+                'plcc':      ['plcc', 'plcc', 'Pearson Linear Correlation Coeff. (PLCC)'],
+                'srocc':     ['srocc', 'srocc', 'Spearman''s Rank Correlation Coeff. (SROCC)'],
+                'time':      ['time [s]', 'time', 'Time [MMmSSs]'],
+                'kde_train': ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],
+                'kde_test':  ['kde_gt', 'kde_pred', 'Prediction Score Distributions'],
+                'lr':        ['lr', 'lr', 'Learning Rate']    
             }
 
     # Function to set the settings and line width for visualization
@@ -355,11 +354,12 @@ class RegressionEngine(Common):
             label_train = f"train_{self.metric_labels[metric][1]}"
             label_test = f"test_{self.metric_labels[metric][1]}"
             title = self.metric_labels[metric][2]
-            ax.plot(range_epochs, self.results[idx_train], label=label_train, color=self.color_train_plt, linewidth=self.linewidth)
+            marker = 'o' if range_epochs[-1] == 1 else ''
+            ax.plot(range_epochs, self.results[idx_train], label=label_train, color=self.color_train_plt, linewidth=self.linewidth, marker=marker)
             if self.apply_validation:
-                ax.plot(range_epochs, self.results[idx_test], label=label_test, color=self.color_test_plt, linewidth=self.linewidth)
+                ax.plot(range_epochs, self.results[idx_test], label=label_test, color=self.color_test_plt, linewidth=self.linewidth, marker=marker)
             ax.set_title(title, color=self.figure_color_map['text'])
-            if 'time' in metric:
+            if metric == 'time':
                 ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: self.sec_to_min_sec(x)))            
             ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
         elif metric in ['kde_train', 'kde_test']:
@@ -375,9 +375,13 @@ class RegressionEngine(Common):
             ax.set_title(title, color=self.figure_color_map['text'])
             ax.set_xlabel('Score', color=self.figure_color_map['text'])
             ax.set_ylabel('Density', color=self.figure_color_map['text'])
-        else:            
-            ax.plot(range_epochs, self.results["lr"], label="lr", color=self.color_train_plt, linewidth=self.linewidth)
-            ax.set_title("Learning Rate", color=self.figure_color_map['text'])
+        else: #lr
+            idx = self.metric_labels[metric][0]
+            label = self.metric_labels[metric][1]
+            title = self.metric_labels[metric][2]
+            marker = 'o' if range_epochs[-1] == 1 else ''
+            ax.plot(range_epochs, self.results[idx], label=label, color=self.color_train_plt, linewidth=self.linewidth, marker=marker)
+            ax.set_title(title, color=self.figure_color_map['text'])
             ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
 
         ax.tick_params(axis='x', colors=self.figure_color_map['text'])
@@ -772,7 +776,7 @@ class RegressionEngine(Common):
 
         # Initialize use_distillation
         if not isinstance(self.use_distillation, (bool)):
-            self.error("'use_distillation' must be True or False")
+            self.error("'use_distillation' must be True or False.")
         
         # Check if model_teacher is provided
         if self.use_distillation:
@@ -822,25 +826,25 @@ class RegressionEngine(Common):
 
         # Validate plot_curves
         if not isinstance(plot_curves, (bool)):
-            self.error(f"'plot_curves' must be True or False")
+            self.error(f"'plot_curves' must be True or False.")
         else:
             self.plot_curves = plot_curves
         
         # Validate amp
         if not isinstance(amp, (bool)):
-            self.error(f"'amp' must be True or False")
+            self.error(f"'amp' must be True or False.")
         else:
             self.amp = amp
 
         # Validate enable_clipping
         if not isinstance(enable_clipping, (bool)):
-            self.error(f"'enable_clipping' must be True or False")
+            self.error(f"'enable_clipping' must be True or False.")
         else:
             self.enable_clipping = enable_clipping
 
         # Validate debug_mode
         if not isinstance(debug_mode, (bool)):
-            self.error(f"'debug_mode' must be True or False")
+            self.error(f"'debug_mode' must be True or False.")
         else:
             self.debug_mode = debug_mode
             
@@ -860,7 +864,7 @@ class RegressionEngine(Common):
                 self.error(f"'mode' must be a string or a list of strings.")
             for m in mode:
                 if m not in self.valid_modes:
-                    self.error(f"Invalid mode value: '{m}'. Must be one of {self.valid_modes}")
+                    self.error(f"Invalid mode value: '{m}'. Must be one of {self.valid_modes}.")
 
         # Assign the validated mode list
         self.mode = mode
@@ -886,7 +890,7 @@ class RegressionEngine(Common):
 
         # Initialize loss_fn
         if self.loss_fn is None:
-            self.error("Invalid 'loss_fn'. Some examples: torch.nn.MSELoss(), torch.nn.HuberLoss(delta=0.1)")
+            self.error("Invalid 'loss_fn'. Some examples: torch.nn.MSELoss(), torch.nn.HuberLoss(delta=0.1).")
 
         # No need to check scheduler, it can be None
 
@@ -903,7 +907,7 @@ class RegressionEngine(Common):
         tmp_path = self.checkpoint_path + ".tmp"
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-            self.info(f"Removed stale temp checkpoint file: {tmp_path}")
+            self.info(f"Removed stale temp checkpoint file: {tmp_path}.")
         
         # Initialize epoch number    
         self.start_epoch = 0
@@ -990,7 +994,7 @@ class RegressionEngine(Common):
             if isinstance(data, (tuple, list)) and len(data) == 2:    
                 X = data[0].unsqueeze(0).to(self.device) # Add batch dimension                
             else:
-                self.error('The training dataset should contain two elements: image, label')
+                self.error('The training dataset should contain two elements: image, label.')
 
             try:
 
@@ -1017,7 +1021,7 @@ class RegressionEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]                    
                     pass  # No change needed
                 else:
-                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}.")
 
                 with torch.no_grad():
                     y_pred = self.get_predictions(self.model(X))
@@ -1060,7 +1064,7 @@ class RegressionEngine(Common):
                 X = data[0].unsqueeze(0).to(self.device) # Add batch dimension
                 X_tch = data[1].unsqueeze(0).to(self.device) # Add batch dimension
             else:
-                self.error('The training dataset should contain three elements: image_student, image_teacher, label')
+                self.error('The training dataset should contain three elements: image_student, image_teacher, label.')
             
             try:
 
@@ -1085,7 +1089,7 @@ class RegressionEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    self.error(f"Unexpected input shape after exception handling: {X.shape}")                
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}.")                
                     
                 # Check the current shape of X and attempt a fix
                 if X_tch.ndimension() == 3 and X_tch.shape[1] == 1:  # [batch_size, 1, time_steps]
@@ -1093,7 +1097,7 @@ class RegressionEngine(Common):
                 elif X_tch.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    self.error(f"Unexpected input shape after exception handling: {X_tch.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {X_tch.shape}.")
                 
                 with torch.no_grad():
                     y_pred_std = self.get_predictions(self.model(X))
@@ -1291,7 +1295,7 @@ class RegressionEngine(Common):
                             for name, param in self.model.named_parameters():
                                 if param.grad is not None:
                                     if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}")
+                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}.")
                                         break
 
                         # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -1401,7 +1405,7 @@ class RegressionEngine(Common):
                             for name, param in self.model.named_parameters():
                                 if param.grad is not None:
                                     if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}")
+                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}.")
                                         break
 
                         # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -1867,10 +1871,10 @@ class RegressionEngine(Common):
                     'target_dir': self.target_dir,
                     'device': self.device,
                     'accumulation_steps': self.accumulation_steps,                
-                    'augmentation_off_epochs': self.augmentation_off_epochs,
-                    'augmentation_random_prob': self.augmentation_random_prob,
                     'augmentation_strategy': self.augmentation_strategy,
-                    'dataloaders': self.dataloaders,
+                    'augmentation_off_epochs': self.augmentation_off_epochs,
+                    'augmentation_random_prob': self.augmentation_random_prob,                    
+                    #'dataloaders': self.dataloaders,
                     'debug_mode': self.debug_mode,                
                     'amp': self.amp,
                     'enable_clipping': self.enable_clipping,
@@ -1974,23 +1978,24 @@ class RegressionEngine(Common):
             # Restore engine internal state
             engine_state = checkpoint.get('engine_state', {})           
             self.target_dir = engine_state.get('target_dir', 'models')
-            self.model_name = engine_state.get('model_name', 'model')
-            self.dataloaders = engine_state.get('dataloaders', None)
-            self.epochs = engine_state.get('num_epochs', 30)
-            self.device = engine_state.get('device', self.device)            
-            self.save_best_model = engine_state.get('save_best_model', True)
-            self.mode = engine_state.get('mode', "last")
-            self.squeeze_dim = engine_state.get('squeeze_dim', self.squeeze_dim)
-            self.log_verbose = engine_state.get('log_verbose', self.log_verbose)
-            self.results = engine_state.get('results', self.results)
-            self.augmentation_strategy = engine_state.get('augmentation_strategy', "always")
+            self.device = engine_state.get('device', self.device)
+            self.accumulation_steps = engine_state.get('accumulation_steps', 1)
             self.augmentation_off_epochs = engine_state.get('augmentation_off_epochs', 5)
-            self.augmentation_random_prob = engine_state.get('augmentation_random_prob', 0.5)            
-            self.plot_curves = engine_state.get('plot_curves', True)
+            self.augmentation_random_prob = engine_state.get('augmentation_random_prob', 0.5)
+            self.augmentation_strategy = engine_state.get('augmentation_strategy', "always")
+            #self.dataloaders = engine_state.get('dataloaders', None)
+            self.debug_mode = engine_state.get('debug_mode', False)
             self.amp = engine_state.get('amp', True)
             self.enable_clipping = engine_state.get('enable_clipping', True)
-            self.debug_mode = engine_state.get('debug_mode', False)
-            self.accumulation_steps = engine_state.get('accumulation_steps', 1)
+            self.keep_best_models_in_memory = engine_state.get('keep_best_models_in_memory', True)
+            self.log_verbose = engine_state.get('log_verbose', self.log_verbose)
+            self.mode = engine_state.get('mode', "last")
+            self.model_name = engine_state.get('model_name', 'model')
+            self.epochs = engine_state.get('num_epochs', 30)
+            self.plot_curves = engine_state.get('plot_curves', True)
+            self.results = engine_state.get('results', self.results)
+            self.save_best_model = engine_state.get('save_best_model', True)
+            self.squeeze_dim = engine_state.get('squeeze_dim', self.squeeze_dim)
 
             # Return the epoch to resume from
             start_epoch = checkpoint.get('next_epoch', 0)

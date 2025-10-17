@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict
+from .common_utils import theme_presets
 sys.path.append(os.path.abspath("../engines"))
 from engines.common import Logger
 
@@ -65,21 +66,40 @@ def image_overlay(image, mask, alpha=1.0, beta=0.5, gamma=0.0):
     return np.clip(image, 0.0, 1.0)
 
 
-def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0, color_map=None, title=None):
+def display_image_with_mask(
+    image,
+    mask,
+    fig=None,
+    ax=None,
+    alpha=1.0,
+    beta=0.5,
+    gamma=0.0,
+    color_map=None,
+    title=None,
+    theme='light'):
     
     """
     Displays an image with its corresponding mask overlaid.
 
-    Parameters:
-    - image (Tensor): The image tensor to be displayed (C, H, W)
-    - mask (Tensor): The mask tensor to be overlaid on the image (H, W)
-    - ax (matplotlib.axes.Axes, optional): The subplot axis to plot on. If None, creates a new figure.
-    - alpha (Float): Transparency for the original image.
-    - beta (Float):  Transparency for the segmentation map.
-    - gamma (Float): Scalar added to each sum.
-    - title (Str, optional): Title of the subplot.
+    Args:
+        image (Tensor): The image tensor to be displayed (C, H, W)
+        mask (Tensor): The mask tensor to be overlaid on the image (H, W)
+        ax (matplotlib.axes.Axes, optional): The subplot axis to plot on. If None, creates a new figure.
+        alpha (Float): Transparency for the original image.
+        beta (Float):  Transparency for the segmentation map.
+        gamma (Float): Scalar added to each sum.
+        title (Str, optional): Title of the subplot.
+        theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     """
 
+    # Resolve theme
+    if isinstance(theme, dict):
+        figure_color_map = theme
+    elif theme in theme_presets:
+        figure_color_map = theme_presets[theme]
+    else:
+        Logger().error(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
+    
     if color_map == None:
         Logger().error("The color map for the classes is not defined. Please define {idx: [R, G, B], ...}")
 
@@ -95,16 +115,19 @@ def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0
     mask = num_to_rgb(mask, color_map=color_map)
     image = image_overlay(image, mask, alpha, beta, gamma)
 
-    # If no axis is provided, create a new figure
-    if ax is None:
+    # If no axis or fig is provided, create a new figure
+    if ax is None or fig is None:        
         fig, ax = plt.subplots(figsize=(6, 6))  # Create a new figure if no axis is given
+        fig.patch.set_facecolor(figure_color_map['bg'])
+    if fig is not None:
+        fig.patch.set_facecolor(figure_color_map['bg'])
 
     # Plot the image
     ax.imshow(image)
 
     # Set title if provided
     if title:
-        ax.set_title(title)
+        ax.set_title(title, color=figure_color_map['text'])
 
     # Turn off axis for clarity
     ax.axis('off')
@@ -114,18 +137,33 @@ def display_image_with_mask(image, mask, ax=None, alpha=1.0, beta=0.5, gamma=0.0
         plt.show()
 
 
-def visualize_original_and_transformed(img_nt, target_nt, img_t, target_t, alpha):
+def visualize_original_and_transformed(
+    img_nt,
+    target_nt,
+    img_t,
+    target_t,
+    alpha,
+    theme='light'):
     
     """
     Visualize original and transformed images with their corresponding masks.
     
     Parameters:
-    - img_nt (Tensor): Original image from non-transformed dataset.
-    - target_nt (dict): Target containing masks and other info for the original image.
-    - img_t (Tensor): Transformed image from the transformed dataset.
-    - target_t (dict): Target containing masks and other info for the transformed image.
-    - alpha (float): Overlay to plot img and mask in the same image
+        img_nt (Tensor): Original image from non-transformed dataset.
+        target_nt (dict): Target containing masks and other info for the original image.
+        img_t (Tensor): Transformed image from the transformed dataset.
+        target_t (dict): Target containing masks and other info for the transformed image.
+        alpha (float): Overlay to plot img and mask in the same image
+        theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     """
+    
+    # Resolve theme
+    if isinstance(theme, dict):
+        figure_color_map = theme
+    elif theme in theme_presets:
+        figure_color_map = theme_presets[theme]
+    else:
+        Logger().error(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
     
     # Convert tensors to numpy arrays for displaying
     img_nt = img_nt.permute(1, 2, 0).cpu().numpy()  # (C, H, W) -> (H, W, C)
@@ -144,17 +182,18 @@ def visualize_original_and_transformed(img_nt, target_nt, img_t, target_t, alpha
 
     # Create figure and axes
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    fig.patch.set_facecolor(figure_color_map['bg'])
 
     # Plot the original image and mask with overlay
     axes[0].imshow(img_nt)
     axes[0].imshow(mask_nt, alpha=0.5, cmap='jet')
-    axes[0].set_title('Original Image with Mask')
+    axes[0].set_title('Original Image with Mask', color=figure_color_map['text'])
     axes[0].axis('off')  # Turn off axis for clarity
 
     # Plot the transformed image and mask
     axes[1].imshow(img_t)
     axes[1].imshow(mask_t, alpha=0.5, cmap='jet')
-    axes[1].set_title('Transformed Image with Mask')
+    axes[1].set_title('Transformed Image with Mask', color=figure_color_map['text'])
     axes[1].axis('off')  # Turn off axis for clarity
 
     # Show the plot

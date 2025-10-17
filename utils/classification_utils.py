@@ -22,7 +22,7 @@ import random
 from torch import nn
 from pathlib import Path
 from PIL import Image
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union, Literal
 from torchvision.transforms import v2
 from torchvision import datasets, transforms
 from tqdm.auto import tqdm
@@ -31,6 +31,7 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import f1_score, accuracy_score, roc_curve, auc
 from sklearn.model_selection import StratifiedKFold
 from IPython.core.display import display, HTML
+from .common_utils import theme_presets
 
 
 def plot_decision_boundary(model: torch.nn.Module, X: torch.Tensor, y: torch.Tensor):
@@ -247,14 +248,15 @@ def pred_and_plot_image_imagenet(model: torch.nn.Module,
     plt.axis(False)
 
 
-def display_random_images_classification(dataset: torch.utils.data.dataset.Dataset, # or torchvision.datasets.ImageFolder?
-                          classes: List[str] = None,
-                          n: int = 10,
-                          display_shape: bool = True,
-                          rows: int = 5,
-                          cols: int = 5,
-                          seed: int = None):
-    
+def display_random_images_classification(
+        dataset: torch.utils.data.dataset.Dataset, # or torchvision.datasets.ImageFolder?
+        classes: List[str] = None,
+        n: int = 10,
+        display_shape: bool = True,
+        rows: int = 5,
+        cols: int = 5,
+        seed: int = None,
+        theme: Union[Literal["light", "dark"], Dict[str, str]] = "light"):
    
     """Displays a number of random images from a given dataset for classification.
 
@@ -266,17 +268,28 @@ def display_random_images_classification(dataset: torch.utils.data.dataset.Datas
         rows: number of rows of the subplot
         cols: number of columns of the subplot
         seed (int, optional): The seed to set before drawing random images. Defaults to None.
+        theme (str or dict): "light", "dark", or a custom dict with keys 'bg' and 'text'.
     
     Usage:
-    display_random_images(train_data, 
-                      n=16, 
-                      classes=class_names,
-                      rows=4,
-                      cols=4,
-                      display_shape=False,
-                      seed=None)
+    display_random_images_classification(
+        train_data, 
+        n=16, 
+        classes=class_names,
+        rows=4,
+        cols=4,
+        display_shape=False,
+        seed=None,
+        theme='dark')
     """
 
+    # Resolve theme
+    if isinstance(theme, dict):
+        figure_color_map = theme
+    elif theme in theme_presets:
+        figure_color_map = theme_presets[theme]
+    else:
+        raise ValueError(f"Unknown theme '{theme}'. Use 'light', 'dark', or a dict with 'bg' and 'text'.")
+    
     # Setup the range to select images
     n = min(n, len(dataset))
     
@@ -294,7 +307,8 @@ def display_random_images_classification(dataset: torch.utils.data.dataset.Datas
     random_samples_idx = random.sample(range(len(dataset)), k=n)
 
     # Setup plot
-    plt.figure(figsize=(cols*4, rows*4))
+    fig = plt.figure(figsize=(cols*4, rows*4))
+    fig.patch.set_facecolor(figure_color_map['bg'])
 
     # Loop through samples and display random samples 
     for i, targ_sample in enumerate(random_samples_idx):
@@ -304,14 +318,16 @@ def display_random_images_classification(dataset: torch.utils.data.dataset.Datas
         targ_image_adjust = targ_image.permute(1, 2, 0)
 
         # Plot adjusted samples
-        plt.subplot(rows, cols, i+1)        
-        plt.imshow(targ_image_adjust)
-        plt.axis("off")
+        ax = plt.subplot(rows, cols, i+1)        
+        ax.imshow(targ_image_adjust)
+        ax.axis("off")
+        ax.set_facecolor(figure_color_map['bg'])
         if classes:
             title = f"class: {classes[targ_label]}"
             if display_shape:
                 title = title + f"\nshape: {targ_image_adjust.shape}"
-        plt.title(title)
+        plt.title(title, color=figure_color_map['text'])    
+    fig.show()
 
 
 def get_most_wrong_examples(model: torch.nn.Module,

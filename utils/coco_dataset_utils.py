@@ -12,13 +12,14 @@ import random
 from pathlib import Path
 from typing import List
 from PIL import Image, ImageDraw
+from .common_utils import theme_presets
 
 # Torchvision libraries
 from torchvision import datasets
 from torchvision.transforms import v2 as T
 
 # Import custom libraries
-from .classification_utils import set_seeds
+from .common_utils import set_seeds
 
 # Warnings
 import warnings

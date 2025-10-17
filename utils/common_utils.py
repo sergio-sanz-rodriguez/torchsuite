@@ -19,6 +19,12 @@ import gdown
 from pathlib import Path
 
 
+# Theme presets
+theme_presets = {
+    "light": {"bg": "white", "text": "black"},
+    "dark": {"bg": "#1e1e1e", "text": "white"}
+}
+
 # Walk through an image classification directory and find out how many files (images)
 # are in each subdirectory.
 def walk_through_dir(dir_path):
@@ -37,7 +43,6 @@ def walk_through_dir(dir_path):
 
     for dirpath, dirnames, filenames in os.walk(dir_path):
         print(f"There are {len(dirnames)} directories and {len(filenames)} images in '{dirpath}'.")
-
 
 
 # Plot linear data or training and test and predictions (optional)

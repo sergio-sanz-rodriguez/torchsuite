@@ -15,8 +15,10 @@ import re
 import gzip
 import inspect
 import matplotlib.pyplot as plt
+from . import loss_functions
 from .common import Common, Colors
 from .loss_functions import DistillationLoss
+from matplotlib.ticker import FuncFormatter
 from tqdm.auto import tqdm 
 from PIL import Image
 from pathlib import Path
@@ -155,7 +157,9 @@ class ClassificationEngine(Common):
                 'acc':  ['acc', 'accuracy', 'Accuracy'],
                 'f1':   ['f1', 'f1', 'F1-Score'],
                 'fpr':  ['fpr', 'fpr_at_recall', f"FPR at {self.recall_threshold * 100}% recall"],
-                'pauc': ['pauc', 'pauc_at_recall', f"pAUC above {self.recall_threshold_pauc * 100}% recall"]
+                'pauc': ['pauc', 'pauc_at_recall', f"pAUC above {self.recall_threshold_pauc * 100}% recall"],
+                'time': ['time [s]', 'time', 'Time [MMmSSs]'],
+                'lr':   ['lr', 'lr', 'Learning Rate']            
             }
 
     # Function to set the settings and line width for visualization
@@ -227,11 +231,11 @@ class ClassificationEngine(Common):
         if self.resume:
             self.info(f"Overriding arguments...")
             if isinstance(resume_msg, (str)) and len(resume_msg) > 0:
-                self.info(f"Resume: {resume_msg}")
+                self.info(f"Enable resume: {resume_msg}")
             else:
-                self.info(f"Resume: {self.resume}")
+                self.info(f"Enable resume: {self.resume}")
         else:
-            self.info(f"Resume: {self.resume}")        
+            self.info(f"Enable resume: {self.resume}")        
         self.info(f"Use distillation: {self.use_distillation}")
         self.info(f"Device: {self.device}")
         self.info(f"Epochs: {self.epochs}")
@@ -300,7 +304,7 @@ class ClassificationEngine(Common):
         split = split.lower()
         if split == 'train':
             return (
-                f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
+                f"{self.color_train}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
                 f"{self.color_train}Train {self.color_other}| "
                 f"{self.color_train}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}acc: {self.results[f'{split}_acc'][-1]:.4f} {self.color_other}| "
@@ -312,7 +316,7 @@ class ClassificationEngine(Common):
             )
         else:
             return (
-                f"{self.color_other}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
+                f"{self.color_test}Epoch: {self.results['epoch'][-1]}/{self.epochs} | "
                 f"{self.color_test}Test  {self.color_other}| "
                 f"{self.color_test}loss: {self.results[f'{split}_loss'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}acc: {self.results[f'{split}_acc'][-1]:.4f} {self.color_other}| "
@@ -324,19 +328,48 @@ class ClassificationEngine(Common):
             )
 
     # Visualization helper function to plot the results
-    def _plot(self, ax, range_epochs, metric):
+    def _plot(
+        self,
+        ax,
+        range_epochs,
+        metric
+        ):
 
-        idx_train = f"train_{self.metric_labels[metric][0]}"
-        idx_test = f"test_{self.metric_labels[metric][0]}"
-        label_train = f"train_{self.metric_labels[metric][1]}"
-        label_test = f"test_{self.metric_labels[metric][1]}"
-        title = self.metric_labels[metric][2]
+        """
+        Plots the evolution of a specified training or validation metric over epochs.
 
-        ax.plot(range_epochs, self.results[idx_train], label=label_train, color=self.color_train_plt, linewidth=self.linewidth)
-        if self.apply_validation:
-            ax.plot(range_epochs, self.results[idx_test], label=label_test, color=self.color_test_plt, linewidth=self.linewidth)            
-        ax.set_facecolor(self.figure_color_map['bg'])
-        ax.set_title(title, color=self.figure_color_map['text'])
+        This method handles both standard numerical metrics (like loss or accuracy)
+        and time-based metrics (in seconds), formatting the y-axis accordingly.
+
+        Args:
+            ax (matplotlib.axes.Axes): The subplot axis to draw on.
+            range_epochs (iterable): The range of epochs (x-axis).
+            metric (str): The name of the metric to plot. If 'lr', plots the learning rate.
+                        If 'time' is in the name, formats y-axis using MM:SS style.
+        """
+
+        if metric is not 'lr':
+            idx_train = f"train_{self.metric_labels[metric][0]}"
+            idx_test = f"test_{self.metric_labels[metric][0]}"
+            label_train = f"train_{self.metric_labels[metric][1]}"
+            label_test = f"test_{self.metric_labels[metric][1]}"
+            title = self.metric_labels[metric][2]            
+            marker = 'o' if range_epochs[-1] == 1 else ''
+            ax.plot(range_epochs, self.results[idx_train], label=label_train, color=self.color_train_plt, linewidth=self.linewidth, marker=marker, markersize=8)
+            if self.apply_validation:
+                ax.plot(range_epochs, self.results[idx_test], label=label_test, color=self.color_test_plt, linewidth=self.linewidth, marker=marker, markersize=8)
+            ax.set_facecolor(self.figure_color_map['bg'])
+            ax.set_title(title, color=self.figure_color_map['text'])
+            if metric == 'time':
+                    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: self.sec_to_min_sec(x)))            
+        else:
+            idx = self.metric_labels[metric][0]
+            label = self.metric_labels[metric][1]
+            title = self.metric_labels[metric][2]
+            marker = 'o' if range_epochs[-1] == 1 else ''
+            ax.plot(range_epochs, self.results[idx], label=label, color=self.color_train_plt, linewidth=self.linewidth, marker=marker, markersize=8)
+            ax.set_facecolor(self.figure_color_map['bg'])
+            ax.set_title(title, color=self.figure_color_map['text'])
         ax.set_xlabel("Epochs", color=self.figure_color_map['text'])
         ax.tick_params(axis='x', colors=self.figure_color_map['text'])
         ax.tick_params(axis='y', colors=self.figure_color_map['text'])            
@@ -542,51 +575,34 @@ class ClassificationEngine(Common):
         if not (model_state in self.valid_modes or isinstance(model_state, int)):
             self.error(f"Invalid model value: {model_state}. Must be one of {self.valid_modes} or an integer.")
 
-        if model_state == "last":
-            model = self.model
-        elif model_state == "loss":
-            if self.model_loss is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_loss
-        elif model_state == "acc":
-            if self.model_acc is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_acc
-        elif model_state == "f1":
-            if self.model_f1 is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_f1
-        elif model_state == "fpr":
-            if self.model_fpr is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_fpr
-        elif model_state == "pauc":
-            if self.model_pauc is None:
-                self.info(f"Model not found, using last-epoch model for prediction.")
-                model = self.model
-            else:
-                model = self.model_pauc
-        elif isinstance(model_state, int):
-            if self.model_epoch is None:
-                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                model = self.model
-            else:
-                if model_state > len(self.model_epoch):
-                    self.info(f"Model epoch {model_state} not found, using default model for prediction.")
-                    model = self.model
-                else:
-                    model = self.model_epoch[model_state-1]  
-        
-        return model
 
+        if not (model_state in self.valid_modes or isinstance(model_state, int)):
+            self.error(f"Invalid model value: {model_state}. Must be one of {self.valid_modes} or an integer.")
+
+        # Handle named model states
+        named_models = {
+            "last": self.model,
+            "loss": self.model_loss,
+            "acc": self.model_acc,
+            "f1": self.model_f1,
+            "fpr": self.model_fpr,
+            "pauc": self.model_pauc,
+        }
+
+        if isinstance(model_state, int):
+            if self.model_epoch is None or model_state > len(self.model_epoch):
+                self.info(f"Model epoch {model_state} not found, using default model for prediction.")
+                return self.model
+            return self.model_epoch[model_state - 1]
+
+        # Fallback for named models if they're not available
+        model = named_models.get(model_state)
+        if model is None:
+            self.info(f"Model '{model_state}' not found, using last-epoch model for prediction.")
+            model = self.model
+
+        return model
+    
 
     # ======================================= #
     # ============ VISUALIZATION ============ #
@@ -616,31 +632,47 @@ class ClassificationEngine(Common):
         
         # Plot training and test loss, accuracy, and fpr-at-recall curves.
         if self.plot_curves:
-        
-            n_plots = 5            
+            
+            # First figure (top)
+            n_cols = 3            
             plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
             curr_epoch = len(self.results["train_loss"])
             range_epochs = range(1, curr_epoch+1)            
 
             # Plot loss
-            ax = plt.subplot(1, n_plots, 1)
+            ax = plt.subplot(1, n_cols, 1)
             self._plot(ax, range_epochs, 'loss')
 
             # Plot accuracy
-            ax = plt.subplot(1, n_plots, 2)
+            ax = plt.subplot(1, n_cols, 2)
             self._plot(ax, range_epochs, 'acc')
 
             # Plot f1-score
-            ax = plt.subplot(1, n_plots, 3)
+            ax = plt.subplot(1, n_cols, 3)
             self._plot(ax, range_epochs, 'f1')
-                    
+
+            # Display plots
+            plt.show()
+
+            # Second figure (bottom)
+            n_cols = 4
+            plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
+            
             # Plot FPR at recall
-            ax = plt.subplot(1, n_plots, 4)
+            ax = plt.subplot(1, n_cols, 1)
             self._plot(ax, range_epochs, 'fpr')
 
             # Plot pAUC at recall
-            ax = plt.subplot(1, n_plots, 5)
+            ax = plt.subplot(1, n_cols, 2)
             self._plot(ax, range_epochs, 'pauc')
+
+            # Plot time
+            ax = plt.subplot(1, n_cols, 3)
+            self._plot(ax, range_epochs, 'time')
+
+            # Plot LR
+            ax = plt.subplot(1, n_cols, 4)
+            self._plot(ax, range_epochs, 'lr')
 
             # Display plots
             plt.show()
@@ -655,7 +687,7 @@ class ClassificationEngine(Common):
         self,
         target_dir: str=None,
         model_name: str=None,        
-        resume: bool=False,
+        enable_resume: bool=True,
         dataloaders: dict[str, torch.utils.data.DataLoader] = None,
         apply_validation: bool=True,
         augmentation_strategy: str="always",
@@ -679,7 +711,9 @@ class ClassificationEngine(Common):
         Args:
             target_dir (str, optional): Directory to save the models. Defaults to "models" if not provided.
             model_name (str, optional): Name of the model file to save. Defaults to the class name of the model with ".pth" extension.
-            resume (bool, opotional): If True, resumes training from the last saved checkpoint. Useful when training is interrupted.
+            enable_resume (bool, optional): Enables resuming training from the last checkpoint. Default is True.
+                - True: Training will resume from the most recent saved checkpoint. Useful if training is interrupted.
+                - False: Checkpoints will not be saved, so training cannot be resumed after interruption. This speed up training.
             dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).                                                
             apply_validation (bool, optional): Whether to apply validation after each epoch. Default is True.
             augmentation_strategy (str, optional): Determines how data augmentation is applied during training.
@@ -723,14 +757,17 @@ class ClassificationEngine(Common):
         self.info(f"Checking arguments...")
 
         # Validate resume
-        if not isinstance(resume, (bool)):
-            self.error("'resume' must be True or False.")
+        if not isinstance(enable_resume, (bool)):
+            self.error("'enable_resume' must be True or False.")
         else:
-            self.resume = resume
+            self.resume = enable_resume
+            if not self.resume:
+                self.warning("'enable_resume' is set to False. If training interrupts, the last checkpoint will not be recovered.")
+
 
         # Initialize use_distillation
         if not isinstance(self.use_distillation, (bool)):
-            self.error("'use_distillation' must be True or False")
+            self.error("'use_distillation' must be True or False.")
         
         # Check if model_teacher is provided
         if self.use_distillation:
@@ -792,25 +829,25 @@ class ClassificationEngine(Common):
 
         # Validate plot_curves
         if not isinstance(plot_curves, (bool)):
-            self.error(f"'plot_curves' must be True or False")
+            self.error(f"'plot_curves' must be True or False.")
         else:
             self.plot_curves = plot_curves
         
         # Validate amp
         if not isinstance(amp, (bool)):
-            self.error(f"'amp' must be True or False")
+            self.error(f"'amp' must be True or False.")
         else:
             self.amp = amp
 
         # Validate enable_clipping
         if not isinstance(enable_clipping, (bool)):
-            self.error(f"'enable_clipping' must be True or False")
+            self.error(f"'enable_clipping' must be True or False.")
         else:
             self.enable_clipping = enable_clipping
 
         # Validate debug_mode
         if not isinstance(debug_mode, (bool)):
-            self.error(f"'debug_mode' must be True or False")
+            self.error(f"'debug_mode' must be True or False.")
         else:
             self.debug_mode = debug_mode
             
@@ -830,7 +867,7 @@ class ClassificationEngine(Common):
                 self.error(f"'mode' must be a string or a list of strings.")
             for m in mode:
                 if m not in self.valid_modes:
-                    self.error(f"Invalid mode value: '{m}'. Must be one of {self.valid_modes}")
+                    self.error(f"Invalid mode value: '{m}'. Must be one of {self.valid_modes}.")
 
         # Assign the validated mode list
         self.mode = mode
@@ -856,19 +893,29 @@ class ClassificationEngine(Common):
 
         # Initialize loss_fn
         if self.loss_fn is None:
-            self.error("Invalid 'loss_fn'. Some examples:  torch.nn.CrossEntropyLoss, DistillationLoss")
+            self.error("Invalid 'loss_fn'. Some examples:  torch.nn.CrossEntropyLoss, DistillationLoss.")
 
         # No need to check scheduler, it can be None
 
         # Initialize the display showing the numeric results
         self._init_results()
-
-        # Load checkpoint if resume is enabled. This overrides the arguments                      
+                            
         # Default checkpoint path
         self.checkpoint_path = os.path.join(
             self.target_dir,
             f"{self.checkpoint_path_prefix}_{self.model_name}.gz"
         )
+
+        # Remove leftover temp file from previous failed save
+        tmp_path = self.checkpoint_path + ".tmp"
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            self.info(f"Removed stale temp checkpoint file: {tmp_path}.")
+
+        # Initialize epoch number    
+        self.start_epoch = 0
+
+        # Load checkpoint if resume is enabled. This overrides the arguments  
         if self.resume:
 
             # Collect all matching checkpoints recursively (newest first)
@@ -879,8 +926,8 @@ class ClassificationEngine(Common):
             )
 
             if not checkpoints or (not os.path.isfile(self.checkpoint_path) and model_name is not None):
-                self.warning(f"'resume' enabled but {self.checkpoint_path} does not exist. Disabling 'resume' and starting training from epoch 1.")
-                self.resume = False        
+                #self.warning(f"'resume' enabled but {self.checkpoint_path} does not exist. Disabling 'resume' and starting training from epoch 1.")
+                #self.resume = False        
                 self.start_epoch, resume_msg = 0, ""
             else:                
 
@@ -950,7 +997,7 @@ class ClassificationEngine(Common):
             if isinstance(data, (tuple, list)) and len(data) == 2:    
                 X = data[0].unsqueeze(0).to(self.device) # Add batch dimension                
             else:
-                self.error('The training dataset should contain two elements: image, label')
+                self.error('The training dataset should contain two elements: image, label.')
 
             try:
 
@@ -977,7 +1024,7 @@ class ClassificationEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]                    
                     pass  # No change needed
                 else:
-                    self.error(f"Unexpected input shape after exception handling: {X.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}.")
 
                 with torch.no_grad():
                     y_pred = self.get_predictions(self.model(X))
@@ -1020,7 +1067,7 @@ class ClassificationEngine(Common):
                 X = data[0].unsqueeze(0).to(self.device) # Add batch dimension
                 X_tch = data[1].unsqueeze(0).to(self.device) # Add batch dimension
             else:
-                self.error('The training dataset should contain three elements: image_student, image_teacher, label')
+                self.error('The training dataset should contain three elements: image_student, image_teacher, label.')
             
             try:
 
@@ -1045,7 +1092,7 @@ class ClassificationEngine(Common):
                 elif X.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    self.error(f"Unexpected input shape after exception handling: {X.shape}")                
+                    self.error(f"Unexpected input shape after exception handling: {X.shape}.")                
                     
                 # Check the current shape of X and attempt a fix
                 if X_tch.ndimension() == 3 and X_tch.shape[1] == 1:  # [batch_size, 1, time_steps]
@@ -1053,7 +1100,7 @@ class ClassificationEngine(Common):
                 elif X_tch.ndimension() == 2:  # [batch_size, time_steps]
                     pass  # No change needed
                 else:
-                    self.error(f"Unexpected input shape after exception handling: {X_tch.shape}")
+                    self.error(f"Unexpected input shape after exception handling: {X_tch.shape}.")
                 
                 with torch.no_grad():
                     y_pred_std = self.get_predictions(self.model(X))
@@ -1124,10 +1171,10 @@ class ClassificationEngine(Common):
                         self.model_epoch[k].to(self.device)
 
             self.best_test_loss = float("inf") 
-            self.best_test_acc = 0.0
-            self.best_test_f1 = 0.0
+            self.best_test_acc = float("-inf")
+            self.best_test_f1 = float("-inf")
             self.best_test_fpr = float("inf")
-            self.best_test_pauc = 0.0
+            self.best_test_pauc = float("-inf")
 
         # Display last checkpoint results
         if self.resume == True and self.start_epoch > 0:                        
@@ -1257,7 +1304,7 @@ class ClassificationEngine(Common):
                             for name, param in self.model.named_parameters():
                                 if param.grad is not None:
                                     if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}")
+                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}.")
                                         break
 
                         # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -1369,7 +1416,7 @@ class ClassificationEngine(Common):
                             for name, param in self.model.named_parameters():
                                 if param.grad is not None:
                                     if torch.any(torch.isnan(param.grad)) or torch.any(torch.isinf(param.grad)):
-                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}")
+                                        self.warning(f"NaN or Inf gradient detected in {name} at batch {batch}.")
                                         break
 
                         # scaler.step() first unscales the gradients of the optimizer's assigned parameters.
@@ -1419,6 +1466,7 @@ class ClassificationEngine(Common):
             self.warning(f"Inaccurate calculation of final pAUC at recall: {e}")
             train_pauc = 0.0
         
+        # Clear local variables
         del all_preds, all_labels
         self.clear_cuda_memory(['X', 'y', 'y_pred', 'y_pred_class', 'loss'], locals())
         if self.use_distillation:
@@ -1853,44 +1901,73 @@ class ClassificationEngine(Common):
             - scheduler state_dict
             - engine internal state (device, mode, results, etc.)
         """
+        if self.resume:
+            
+            # Define paths
+            final_path = self.checkpoint_path           # e.g., 'checkpoint.pth.gz'
+            temp_path = self.checkpoint_path + ".tmp"   # e.g., 'checkpoint.pth.gz.tmp'
+            backup_path = self.checkpoint_path + "_bk"  # e.g., 'checkpoint.pth.gz_bk'
 
-        checkpoint = {
-            'model_state': self.model.state_dict(),
-            'model_tch_state': self.model_teacher.state_dict() if self.use_distillation else None,
-            'use_distillation': self.use_distillation,
-            'optimizer_state': self.optimizer.state_dict(),
-            'scheduler_state': self.scheduler.state_dict() if self.scheduler is not None else None,
-            'loss_fn': self.loss_fn, #Warning: this checkpoint will not work if the class is renamed, removed, or moved.
-            'checkpoint_path': self.checkpoint_path,
-            'next_epoch': next_epoch,                        
-            'engine_state': {                
-                'target_dir': self.target_dir,
-                'device': self.device,
-                'accumulation_steps': self.accumulation_steps,                
-                'augmentation_off_epochs': self.augmentation_off_epochs,
-                'augmentation_random_prob': self.augmentation_random_prob,
-                'augmentation_strategy': self.augmentation_strategy,
-                'dataloaders': self.dataloaders,
-                'debug_mode': self.debug_mode,                
-                'amp': self.amp,
-                'enable_clipping': self.enable_clipping,
-                'keep_best_models_in_memory': self.keep_best_models_in_memory,
-                'log_verbose': self.log_verbose,
-                'mode': self.mode,
-                'model_name': self.model_name,
-                'num_epochs': self.epochs,
-                'plot_curves': self.plot_curves,
-                'recall_threshold': self.recall_threshold,
-                'recall_threshold_pauc': self.recall_threshold_pauc,
-                'results': self.results,
-                'save_best_model': self.save_best_model,
-                'squeeze_dim': self.squeeze_dim,                
+            checkpoint = {
+                'model_state': self.model.state_dict(),
+                'model_tch_state': self.model_teacher.state_dict() if self.use_distillation else None,
+                'use_distillation': self.use_distillation,
+                'optimizer_state': self.optimizer.state_dict(),
+                'scheduler_state': self.scheduler.state_dict() if self.scheduler is not None else None,
+                'loss_fn': self.loss_fn, #Warning: this checkpoint will not work if the class is renamed, removed, or moved.
+                'checkpoint_path': self.checkpoint_path,
+                'next_epoch': next_epoch,                        
+                'engine_state': {                
+                    'target_dir': self.target_dir,
+                    'device': self.device,
+                    'accumulation_steps': self.accumulation_steps,
+                    'augmentation_strategy': self.augmentation_strategy,
+                    'augmentation_off_epochs': self.augmentation_off_epochs,
+                    'augmentation_random_prob': self.augmentation_random_prob,                    
+                    #'dataloaders': self.dataloaders,
+                    'debug_mode': self.debug_mode,                
+                    'amp': self.amp,
+                    'enable_clipping': self.enable_clipping,
+                    'keep_best_models_in_memory': self.keep_best_models_in_memory,
+                    'log_verbose': self.log_verbose,
+                    'mode': self.mode,
+                    'model_name': self.model_name,
+                    'num_epochs': self.epochs,
+                    'plot_curves': self.plot_curves,
+                    'recall_threshold': self.recall_threshold,
+                    'recall_threshold_pauc': self.recall_threshold_pauc,
+                    'results': self.results,
+                    'save_best_model': self.save_best_model,
+                    'squeeze_dim': self.squeeze_dim,                
+                }
             }
-        }
-        with gzip.open(f"{self.checkpoint_path}", 'wb') as f:
-            torch.save(checkpoint, f)
+
+            try:
+                # Save new checkpoint to a temporary file
+                with gzip.open(temp_path, 'wb') as f:
+                    torch.save(checkpoint, f)
+
+                # Move current checkpoint to backup (if exists)
+                if os.path.exists(final_path):
+                    os.replace(final_path, backup_path)
+
+                # Replace final path with the new checkpoint
+                os.replace(temp_path, final_path)
+
+                # Delete backup if everything went fine
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+
+            except Exception as e:
+                self.error(f"Failed to save checkpoint: {str(e)}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)  # Clean up temp file
+                print.info("Original checkpoint is still safe.")
+                raise
+            
+            #finally:
+                #self.info(f"Saved {self.checkpoint_path} to resume training later.")
         
-        #self.info(f"Saved {self.checkpoint_path} to resume training later.")
 
     def _load_checkpoint(self):
 
@@ -1946,25 +2023,26 @@ class ClassificationEngine(Common):
             # Restore engine internal state
             engine_state = checkpoint.get('engine_state', {})           
             self.target_dir = engine_state.get('target_dir', 'models')
-            self.model_name = engine_state.get('model_name', 'model')
-            self.dataloaders = engine_state.get('dataloaders', None)
-            self.epochs = engine_state.get('num_epochs', 30)
-            self.device = engine_state.get('device', self.device)            
-            self.save_best_model = engine_state.get('save_best_model', True)
-            self.mode = engine_state.get('mode', "last")
-            self.squeeze_dim = engine_state.get('squeeze_dim', self.squeeze_dim)
-            self.log_verbose = engine_state.get('log_verbose', self.log_verbose)
-            self.results = engine_state.get('results', self.results)
+            self.device = engine_state.get('device', self.device)
+            self.accumulation_steps = engine_state.get('accumulation_steps', 1)
             self.augmentation_strategy = engine_state.get('augmentation_strategy', "always")
             self.augmentation_off_epochs = engine_state.get('augmentation_off_epochs', 5)
-            self.augmentation_random_prob = engine_state.get('augmentation_random_prob', 0.5)
-            self.recall_threshold = engine_state.get('recall_threshold', 0.95)
-            self.recall_threshold_pauc = engine_state.get('recall_threshold_pauc', 0.95)
-            self.plot_curves = engine_state.get('plot_curves', True)
+            self.augmentation_random_prob = engine_state.get('augmentation_random_prob', 0.5)            
+            #self.dataloaders = engine_state.get('dataloaders', None)
+            self.debug_mode = engine_state.get('debug_mode', False)
             self.amp = engine_state.get('amp', True)
             self.enable_clipping = engine_state.get('enable_clipping', True)
-            self.debug_mode = engine_state.get('debug_mode', False)
-            self.accumulation_steps = engine_state.get('accumulation_steps', 1)
+            self.keep_best_models_in_memory = engine_state.get('keep_best_models_in_memory', True)
+            self.log_verbose = engine_state.get('log_verbose', self.log_verbose)
+            self.mode = engine_state.get('mode', "last")
+            self.model_name = engine_state.get('model_name', 'model')
+            self.epochs = engine_state.get('num_epochs', 30)
+            self.plot_curves = engine_state.get('plot_curves', True)
+            self.recall_threshold = engine_state.get('recall_threshold', 0.95)
+            self.recall_threshold_pauc = engine_state.get('recall_threshold_pauc', 0.95)
+            self.results = engine_state.get('results', self.results)
+            self.save_best_model = engine_state.get('save_best_model', True)
+            self.squeeze_dim = engine_state.get('squeeze_dim', self.squeeze_dim)
 
             # Return the epoch to resume from
             start_epoch = checkpoint.get('next_epoch', 0)
@@ -2033,9 +2111,9 @@ class ClassificationEngine(Common):
 
         Args:
             target_dir (str): A directory where the model is located.
-            model_name (str): The name of the model to load. Should include.
+            model_name (str): The name of the model to load. Should include:
+                ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
             is_teacher (bool, optional): Whether the model to load is teacher (if use_distillation is True) or not.
-            ".pth", ".pt", ".pkl", ".h5", or ".torch" as the file extension.
             export (bool, optional): If True, returns the loaded model instead of just loading it. Default is False.
 
         Returns:
@@ -2071,7 +2149,7 @@ class ClassificationEngine(Common):
         self,
         target_dir: str=None,
         model_name: str=None,
-        resume: bool=False,
+        enable_resume: bool=True,
         dataloaders: dict[str, torch.utils.data.DataLoader]=None, 
         save_best_model: Union[str, List[str]] = "last",
         keep_best_models_in_memory: bool=False,                
@@ -2105,7 +2183,9 @@ class ClassificationEngine(Common):
             target_dir (str, optional): Directory to save the trained model.
             model_name (str, optional): Name for the saved model file. Must include file extension
                 such as ".pth", ".pt", ".pkl", ".h5", or ".torch".
-            resume (bool, optional): If True, resumes training from the last saved checkpoint. Useful when training is interrupted.
+            enable_resume (bool, optional): Enables resuming training from the last checkpoint. Default is True.
+                - True: Training will resume from the most recent saved checkpoint. Useful if training is interrupted.
+                - False: Checkpoints will not be saved, so training cannot be resumed after interruption. This speed up training.
             dataloaders (dict[str, torch.utils.data.DataLoader]): A dictionary containing a dataloader for training the model (mandatory), a dataloader for testing/validating the model (optional), and a dataloader without augmentation (optional).            
             save_best_model (Union[str, List[str]], optional): Criterion(s) for saving the model.
                 Options include:
@@ -2180,7 +2260,7 @@ class ClassificationEngine(Common):
         self._init_train(
             target_dir=target_dir,
             model_name=model_name,            
-            resume=resume,
+            enable_resume=enable_resume,
             dataloaders=dataloaders,
             save_best_model=save_best_model,
             keep_best_models_in_memory=keep_best_models_in_memory,

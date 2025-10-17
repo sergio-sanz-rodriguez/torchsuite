@@ -37,6 +37,7 @@ class Colors:
     # Matplotlib compatible color names
     MATPLOTLIB_COLORS = {
         'black': '#000000',
+        'off-black': '#1e1e1e',
         'blue': '#1f77b4',
         'orange': '#FFA500',
         'green': '#008000',
@@ -47,6 +48,7 @@ class Colors:
         'white': '#FFFFFF',
         'light_gray': '#D3D3D3',
         'dark_gray': '#A9A9A9',
+        'very_dark_gray': '#1e1e1e',
         'light_blue': '#ADD8E6',
         'light_green': '#32CD32',
         'light_red': '#FF6347',
@@ -54,6 +56,9 @@ class Colors:
         'light_magenta': '#EE82EE',
         'light_cyan': '#E0FFFF'
     	}
+    
+    # Linewidth
+    LINEWIDTH = 2
 
     @staticmethod
     def get_console_color(color_name):
@@ -64,33 +69,82 @@ class Colors:
     def get_matplotlib_color(color_name):
         # Return Matplotlib-compatible hex color
         return Colors.MATPLOTLIB_COLORS.get(color_name.lower(), '#000000')  # Default to black
+    
+    @staticmethod
+    def get_linewidth():
+        # Return linewidth
+        return Colors.LINEWIDTH
 
 # Logger class
 class Logger:
-    def __init__(self, log_verbose: bool=True):
 
-        self.info_tag =    f"{Colors.GREEN}[INFO]{Colors.BLACK}"
-        self.warning_tag = f"{Colors.ORANGE}[WARNING]{Colors.BLACK}"
-        self.error_tag =   f"{Colors.RED}[ERROR]{Colors.BLACK}"
+    """
+    Logger class to handle console messages with color-coded tags.
+    Supports 'light' and 'dark' themes, and verbosity control.
+
+    Attributes:
+        theme (str): The current theme, either 'light' or 'dark'.
+        log_verbose (bool): If True, messages are printed; otherwise, suppressed.
+        info_tag (str): Colored tag for info messages.
+        warning_tag (str): Colored tag for warning messages.
+        error_tag (str): Colored tag for error messages.
+    """
+
+    def __init__(self, theme: str='light', log_verbose: bool=True):
+    
+        """
+        Initializes the Logger with a theme and verbosity setting.
+
+        Args:
+            theme (str): Either 'light' or 'dark'. Defaults to 'light'.
+            log_verbose (bool): Enable or disable logging. Defaults to True.
+        """
+
+        # Ensure theme is valid
+        if theme.lower() not in ['light', 'dark']:
+            self.theme = 'light'
+        else:
+            self.theme = theme
+
+        # Reset console color after each tag
+        reset = '\033[0m'
+
+        # Define colored tags depending on the theme
+        if self.theme == 'light':
+            self.info_tag =    f"{Colors.GREEN}[INFO]{Colors.BLACK}{reset}"
+            self.warning_tag = f"{Colors.ORANGE}[WARNING]{Colors.BLACK}{reset}"
+            self.error_tag =   f"{Colors.RED}[ERROR]{Colors.BLACK}{reset}"
+        else:
+            self.info_tag =    f"{Colors.GREEN}[INFO]{Colors.WHITE}{reset}"
+            self.warning_tag = f"{Colors.ORANGE}[WARNING]{Colors.WHITE}{reset}"
+            self.error_tag =   f"{Colors.LIGHT_RED}[ERROR]{Colors.WHITE}{reset}"
+
+        # Verbosity control
         self.log_verbose = log_verbose
-    
-    def info(self, message: str):
-        print(f"{self.info_tag} {message}") if self.log_verbose else None
-    
-    def warning(self, message: str):
-        print(f"{self.warning_tag} {message}", file=sys.stderr) if self.log_verbose else None
-    
-    def error(self, message: str):
-        print(f"{self.error_tag} {message}", file=sys.stderr) if self.log_verbose else None
+
+    def info(self, message: str):        
+        if self.log_verbose:
+            print(f"{self.info_tag} {message}")
+
+    def warning(self, message: str):        
+        if self.log_verbose:
+            print(f"{self.warning_tag} {message}") #, file=sys.stderr)
+
+    def error(self, message: str):        
+        if self.log_verbose:
+            print(f"{self.error_tag} {message}") #, file=sys.stderr)
         raise ValueError(message)
 
 
 # Common utility class
 class Common(Logger):
 
-    """A class containing utility functions for classification tasks."""
-    def __init__(self, log_verbose: bool=True):
-        super().__init__(log_verbose=log_verbose)
+    """
+    A class containing utility functions for classification tasks.
+    """
+
+    def __init__(self, theme: str='light', log_verbose: bool=True):
+        super().__init__(theme=theme, log_verbose=log_verbose)
 
     def sec_to_min_sec(self, seconds):
 
@@ -120,7 +174,8 @@ class Common(Logger):
     
     def calculate_f1_score(self, y_true, y_pred, num_classes, average="macro"):
 
-        """Calculates the F1 score for multi-class classification.
+        """
+        Calculates the F1 score for multi-class classification.
 
         Args:
             y_true (torch.Tensor): Ground truth labels (shape: [batch_size]).
@@ -393,7 +448,7 @@ class Common(Logger):
     def get_predictions(self, output):
         if isinstance(output, torch.Tensor):
             return output.contiguous()
-        elif hasattr(output, "logits"):            
+        elif hasattr(output, "logits"):
             return output.logits.contiguous()
         else:
             self.error(f"Unexpected model output type: {type(output)}")

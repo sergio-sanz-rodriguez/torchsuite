@@ -2,31 +2,41 @@
   <img src="images/logo/logo_tochsuite_1_resized_1.jpg" alt="Into Picture" width="450"/>
 </div>
 
-# TorchSuite 
-TorchSuite is a versatile and feature-rich PyTorch-based library designed to simplify and accelerate deep learning development. It provides essential modules and utilities for training, inference, data handling, and model optimization, making it an invaluable tool for researchers, machine learning professionals, and practitioners.  
+# PyTorch Deep Learning Framework for Multimedia and Medical Imaging
+TorchSuite is a versatile, feature-rich, and PyTorch-based library designed to simplify and accelerate deep learning development for multimedia applications — including audio, image, and video processing — and medical imaging segmentation.
+
+It provides essential modules and utilities for training, inference, data handling, and model optimization, making it a valuable tool for researchers, engineers, and practitioners.
 
 ## Features
 
-The main highlights of the library are listed next:
+Key highlights of the framework include:
 
 - Simplified model training and evaluation
-- CPU and GPU-accelerated computations
-- Support for a variety of deep learning architectures
-- Easy-to-use API for seamless experimentation
+- CPU and GPU acceleration
+- Easily customizable architectures: ViTs, U-Net, ConvNeXt, R-CNNs, YOLO, Wav2Vec2
+- Extensive set of loss functions and schedulers
+- Intuitive API for rapid experimentation
 
-Currently, TorchSuite is fully optimized for the following machine learning areas:
+TorchSuite is currently optimized for:
 - Image and audio classification and distillation
 - Image regression 
 - Object detection
-- Image segmentation
+- Image segmentation, including medical imaging
+
+Additional capabilities:
+- Augmentation scheduling for training stabilization
+- Automatic Mixed Precision (AMP) for faster training
+- Gradient accumulation for memory-efficient learning
+- In-notebook live monitoring
+- Training resume and checkpointing
 
 Future versions will include support for other data types, such as video and text.
 
 ## Modules  
-- **CPU and GPU-accelerated computation:** optimized for both CPU and GPU, enabling flexible model training and inference
-- **Training and inference engines:** `classification.py`, `regression.py` (new feature), `obj_detection.py`, `segmentation.py` for training and evaluation workflows
-- **Flexible data loading:** `image/audio/obj_dect/segmentation_dataloaders.py` to streamline dataset preparation and augmentation.
-- **Utility functions:** `classification/obj_detection/segmentation_utils.py` offering a collection of utility functions to enhance productivity.
+- **CPU and GPU-accelerated computation:** optimized for both CPU and GPU, enabling flexible model training and inference.
+- **Training and inference engines:** `classification.py`, `regression.py`, `obj_detection.py`, `segmentation.py` for training and evaluation workflows.
+- **Flexible data loading:** loaders for image, audio, detection, and segmentation (`*_dataloaders.py`) to streamline dataset preparation and augmentation.
+- **Utility functions:** helper scripts (`*_utils.py`) for productivity and experiment reproducibility.
 - **Vision Transformer (ViT) support:** `vision_transformer.py` for implementing ViTs with PyTorch.
 - **ConvNeXT support:**  `convnext.py`, the [original implementation](https://github.com/facebookresearch/ConvNeXt) by Meta Platforms, Inc.
 - **Wav2Vec2 support:** `wav2vec2.py` includes a Transformer-based acoustic model for audio classification.
@@ -35,9 +45,6 @@ Future versions will include support for other data types, such as video and tex
 - **Learning rate scheduling:** `schedulers.py` provides adaptive learning rate strategies. Some classes have been taken from [kamrulhasanrony](https://github.com/kamrulhasanrony/Vision-Transformer-based-Food-Classification/tree/master). 
 - **Custom loss functions:** `loss_functions.py` including various loss formulations for different tasks.
 - **Code examples:** a series of notebooks demonstrating Python code for training deep learning models.
-
-## ToDo
-- Code example for regression taks.
 
 ## Installation
 
@@ -83,34 +90,44 @@ print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N
 
 ## Dependencies
 
-The required libraries are listed in `requirements.txt`:
+The required libraries are listed in `requirements.txt` (`pipreqs /path/to/your/project --force --ignore <comma_separated_folders_or_files>`):
 
 ```bash
+gdown==5.2.0
+gradio==5.49.1
 ipython==8.12.3
-matplotlib==3.10.1
-numpy==1.26.4
+matplotlib==3.10.7
+numpy==2.3.4
+opencv_python==4.12.0.88
 opencv_python_headless==4.9.0.80
-pandas==2.2.3
-Pillow==10.4.0
-Requests==2.32.3
-scikit_learn==1.5.2
-timm==1.0.12
-torch==2.5.0
-torchaudio==2.5.0
-torchvision==0.20.0
+pandas==2.3.3
+Pillow==12.0.0
+Requests==2.32.5
+scikit_learn==1.7.2
+scipy==1.16.2
+seaborn==0.13.2
+timm==1.0.20
+torch==2.5.1+cu121
+torch==2.5.1
+torchaudio==2.5.1+cu121
+torchaudio==2.5.1
+torchvision==0.20.1+cu121
+torchvision==0.20.1
 tqdm==4.66.6
 transformers==4.48.3
+ultralytics==8.3.174
 ```
 
 ## Code Examples  
 The following notebooks demonstrate how to implement and train deep learning models using the modules described above:
 
-- `image_classification.ipynb` shows the implementation of a transformer-based image classification model using the library.
-- `image_distillation.ipynb` shows how to implement model distillation for image-based tasks.
-- `audio_waveform_classification.ipynb` and `audio_spectrogram_classification.ipynb` focuses on training and evaluating models for audio classification based on raw waveforms and spectrograms.
-- `object_detection_custom.ipynb` and `object_detection_standard.ipynb` to train custom and PyTorch-standard R-CNN models for object detection and segmentation taks.
-
-These notebooks provide hands-on examples of the core functionality of the library.
+- `image_classification.ipynb`: transformer-based image classification.
+- `image_distillation.ipynb`: model distillation for image tasks.
+- `audio_waveform_classification.ipynb` and `audio_spectrogram_classification.ipynb`: waveform- and spectrogram-based audio classification.
+- `image_regression.ipynb`: ConvNeXt-Large model predicting image quality of filtered images.
+- `object_detection_rcnn_custom.ipynb` and `object_detection_rcnn_standard.ipynb`: custom and standard R-CNN object detection and segmentation workflows.
+- `object_detection_yolo.ipynb`: YOLO-based object detection.
+- `image_segmentation_medical_img.ipynb` and `image_segmentation_vehicles.ipynb`: U-Net-based segmentation notebooks for medical imaging and vehicle detection use cases.
 
 ## Best Practices for Deep Learning Training
 

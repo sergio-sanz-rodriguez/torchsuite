@@ -7,7 +7,6 @@ import os
 import random
 import torch
 import sys
-import librosa
 import torchaudio
 from torchaudio.transforms import Resample, FrequencyMasking, TimeMasking, AmplitudeToDB, PitchShift
 from torchvision.transforms import v2
@@ -17,7 +16,7 @@ from typing import Optional
 sys.path.append(os.path.abspath("../engines"))
 from engines.common import Logger
 sys.path.append(os.path.abspath("../utils"))
-from utils.classification_utils import set_seeds
+from utils.common_utils import set_seeds
 
 NUM_WORKERS = os.cpu_count()
 
@@ -173,7 +172,7 @@ class PadWaveform(torch.nn.Module):
         self.target_length = target_length  # Stores the target length as an instance attribute.
     
     # Padding function
-    def pad_waveform(self, waveform):
+    def _pad_waveform(self, waveform):
 
         """
         Pads or truncates the waveform to ensure a fixed length.
@@ -202,7 +201,7 @@ class PadWaveform(torch.nn.Module):
             Tensor: The processed waveform with the specified target length.
         """
 
-        waveform = self.pad_waveform(waveform)
+        waveform = self._pad_waveform(waveform)
        
         return waveform 
 
@@ -238,7 +237,7 @@ class AudioAugmentations(Logger, torch.nn.Module):
             target_length (int, optional): Target length for time masking.
             hop_length (int, optional): Hop length used for spectrogram.
             seed (int): The seed for random number generation.
-            augment_magnitude (int): Strength of augmentation.
+            augment_magnitude (int): Strength of augmentation: 0 < augment_magnitude <= 5.
         """
 
         torch.nn.Module.__init__(self)
@@ -258,7 +257,10 @@ class AudioAugmentations(Logger, torch.nn.Module):
         if not isinstance(seed, int) and seed is not None:
             self.error("'seed' must be an integer.")
         if not isinstance(augment_magnitude, int):
-            self.error("'augment_magnitude' must be an integer.")
+            self.error("'augment_magnitude' must be an integer.")        
+        if not (0 < augment_magnitude <= 5):
+            self.error("'augment_magnitude' must be between 1 and 5.")
+        
         
         signal_options = ["waveform", "spectrogram"]
         if not isinstance(signal, str):
@@ -273,10 +275,10 @@ class AudioAugmentations(Logger, torch.nn.Module):
         self.target_length = target_length
         self.hop_length = hop_length
         self.seed = seed
-        self.augment_magnitude = augment_magnitude
+        self.augment_magnitude = min(5, max(1, augment_magnitude))
 
     
-    def apply_pitch_shift(self, waveform, sample_rate, n_steps=1):
+    def _apply_pitch_shift(self, waveform, sample_rate, n_steps=1):
 
         """
         Applies pitch shifting to a waveform.
@@ -309,7 +311,7 @@ class AudioAugmentations(Logger, torch.nn.Module):
         return pitch_shift(waveform)
 
     
-    def add_background_noise(self, waveform, noise_level=0.005):
+    def _add_background_noise(self, waveform, noise_level=0.005):
 
         """
         Adds background noise to a waveform.
@@ -329,7 +331,7 @@ class AudioAugmentations(Logger, torch.nn.Module):
 
         return waveform + noise
     
-    def apply_time_augmentation(self, waveform):
+    def _apply_time_augmentation(self, waveform):
 
         """
         Applies augmentation in the time domain (waveform).
@@ -342,12 +344,12 @@ class AudioAugmentations(Logger, torch.nn.Module):
         #pitch_shift = 1 * self.augment_magnitude
         background_noise = 0.0025 * self.augment_magnitude
 
-        #waveform = self.apply_pitch_shift(waveform, sample_rate=self.sample_rate, n_steps=pitch_shift)
-        waveform = self.add_background_noise(waveform, noise_level=background_noise)
+        #waveform = self._apply_pitch_shift(waveform, sample_rate=self.sample_rate, n_steps=pitch_shift)
+        waveform = self._add_background_noise(waveform, noise_level=background_noise)
 
         return waveform
     
-    def apply_freq_augmentation(self, spectrogram):
+    def _apply_freq_augmentation(self, spectrogram):
 
         """
         Applies augmentation in the frequency domain (spectrogram).
@@ -381,9 +383,9 @@ class AudioAugmentations(Logger, torch.nn.Module):
         if not self.apply_augmentation:
             return x
         elif self.signal == "waveform":
-            return self.apply_time_augmentation(x)
+            return self._apply_time_augmentation(x)
         else:
-            return self.apply_freq_augmentation(x)
+            return self._apply_freq_augmentation(x)
 
 
 # Waveform-based audio transforms
@@ -427,7 +429,7 @@ class AudioWaveformTransforms(Logger, torch.nn.Module):
         Logger.__init__(self)
         super().__init__()
 
-        self.validate_inputs(
+        self._validate_inputs(
             augmentation, sample_rate, new_sample_rate,
             target_length, augment_magnitude)
         
@@ -458,7 +460,7 @@ class AudioWaveformTransforms(Logger, torch.nn.Module):
                 augment_magnitude=self.augment_magnitude)
         )        
                 
-    def validate_inputs(
+    def _validate_inputs(
         self, augmentation, sample_rate, new_sample_rate,
         target_length, augment_magnitude):
 
@@ -512,18 +514,20 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
     Initializes the AudioSpectrogramTransforms class with the given parameters.
     
     Args:
-        augmentation (bool): Whether to apply augmentation to the audio.
+        augmentation (bool): Whether to apply augmentation to the audio. It includes:
+            - Background noise.
+            - Frequency masking.
+            - Time masking.
         mean_std_norm (bool): Whether to normalize the spectrogram using mean and std.
-        fft_analysis_method (str): The type of FFT analysis to perform ("none", "time_freq", or "freq_band"):
-            - "none": One spectrogram fo the whole signal.
+        fft_analysis_method (str): The type of FFT analysis to perform ("single", "time_freq", or "freq_band"):
+            - "single": One spectrogram fo the whole signal. The spectrogram is replicated across the three image channels.
             - "time_freq": Three spectrograms with different time-frequency-resolution trade-offs.
             - "freq_band": Three spectrograms analyzing different (low, mid, high) frequency bands.
-            - "all": Creates an image with three channels, one channel for each fft analysis method
         fft_analysis_concat (str): Only applicable to "time_freq" and "freq_band", specifies how the spectrograms should be concatenated:
-            - "freq": Concatenation along the frequency axis (default for "freq_band").
-            - "time": Concatenation along the time axis.
-            - "channel": One spectrogram per image channel (RGB-like) (default for "time_freq")
-            - "default": "freq" for method "freq_band", "channel" for method "time_freq"
+            - "freq": Concatenation along the frequency axis (default for "freq_band"); equivalent to a vertical stack.
+            - "time": Concatenation along the time axis; equivalent to a horizontal stack.
+            - "channel": One spectrogram per image channel (RGB-like) (default for "time_freq").
+            - "default": "freq" for method "freq_band", "channel" for method "time_freq".
         sample_rate (int): The original sample rate of the audio.
         new_sample_rate (int): The resampled audio sample rate.
         target_length (int): The target length of the waveform after padding.
@@ -534,7 +538,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         power (float): The power of the spectrogram.
         img_size (tuple): The desired size of the output image (height, width).
         seed (int): The seed for random number generation.
-        augment_magnitude (int): The magnitude of augmentation applied to the audio.
+        augment_magnitude (int): The magnitude of augmentation applied to the audio: 0 < augment_magnitude <= 5.
     """
 
     def __init__(
@@ -560,10 +564,13 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         Initializes the AudioSpectrogramTransforms class with the given parameters.
         
         Args:
-            augmentation (bool): Whether to apply augmentation to the audio.
+            augmentation (bool): Whether to apply augmentation to the audio. It includes:
+                - Background noise.
+                - Frequency masking.
+                - Time masking.
             mean_std_norm (bool): Whether to normalize the spectrogram using mean and std.
             fft_analysis_method (str): The type of FFT analysis to perform ("none", "time_freq", or "freq_band"):
-                - "none": One spectrogram fo the whole signal.
+                - "single": One spectrogram fo the whole signal.
                 - "time_freq": Three spectrograms with different time-frequency-resolution trade-offs.
                 - "freq_band": Three spectrograms analyzing different (low, mid, high) frequency bands.
                 - "all": Creates an image with three channels, one channel for each fft analysis method
@@ -582,14 +589,14 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
             power (float): The power of the spectrogram.
             img_size (tuple): The desired size of the output image (height, width).
             seed (int): Specifies the seed
-            augment_magnitude (int): The magnitude of augmentation applied to the audio.
+            augment_magnitude (int): The magnitude of augmentation applied to the audio: 0 < augment_magnitude <= 5.
         """
 
         torch.nn.Module.__init__(self)
         Logger.__init__(self)
         super().__init__()
 
-        self.validate_inputs(
+        self._validate_inputs(
             augmentation, mean_std_norm, fft_analysis_method, fft_analysis_concat, sample_rate, new_sample_rate,
             target_length, n_fft, win_length, hop_length, n_mels, power, img_size, augment_magnitude)
         
@@ -634,7 +641,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         self.freq_transforms = torch.nn.Sequential(
 
             # Convert audio to Mel spectrogram
-            self.mel_spectrogram(),
+            self._mel_spectrogram(),
 
             # Apply frequency augmentation
             AudioAugmentations(
@@ -654,10 +661,10 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         self.image_transforms = v2.Compose([
             v2.Resize(img_size, antialias=True),
             v2.CenterCrop(img_size),    
-            v2.Lambda(self.expand_channel), # Convert from [1, H, W] to [3, H, W] if needed        
+            v2.Lambda(self._expand_channel), # Convert from [1, H, W] to [3, H, W] if needed        
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Lambda(self.min_max_normalize)  # Normalize to [0, 1]
+            v2.Lambda(self._min_max_normalize)  # Normalize to [0, 1]
         ])
 
         # Optional normalization
@@ -668,7 +675,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
                     std=[0.229, 0.224, 0.225])
                     )
 
-    def validate_inputs(
+    def _validate_inputs(
         self, augmentation, mean_std_norm, fft_analysis_method, fft_analysis_concat, sample_rate, new_sample_rate,
         target_length, n_fft, win_length, hop_length, n_mels, power, img_size, augment_magnitude):
 
@@ -730,7 +737,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
 
 
     @staticmethod
-    def min_max_normalize(x):
+    def _min_max_normalize(x):
 
         """
         Normalizes tensor to [0, 1] range.
@@ -739,16 +746,16 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         return (x - x.min()) / (x.max() - x.min() + 1e-6)  # Avoid division by zero
 
     @staticmethod
-    def abs_normalize(x):
+    def _abs_normalize(x):
 
         """
         Normalizes tensor to [-1, 1] range
         """
 
-        return x / x.abs().max()
+        return x / (x.abs().max() + 1e-9)
         
     @staticmethod
-    def expand_channel(x):
+    def _expand_channel(x):
 
         """
         Expands the input tensor to have 3 channels.
@@ -760,7 +767,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         return x
     
     @staticmethod
-    def squeeze_channel(x):
+    def _squeeze_channel(x):
 
         """
         Removes the channel dimension from the input tensor.
@@ -769,7 +776,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         return torch.squeeze(x, dim=1)
 
     @staticmethod
-    def log_freq_band_split(f_min, f_max):
+    def _log_freq_band_split(f_min, f_max):
 
         """
         Split the frequency range [f_min, f_max] into three logarithmic subbands
@@ -811,7 +818,40 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
 
         return f1, f2, f3
 
-    def mel_spectrogram_default(self):
+
+    class _MultiFFTMelSpec(torch.nn.Module):
+
+        """
+        Compute multiple Mel spectrograms and concatenate them along a given dimension.
+        This class replaces any use of lambda and is fully picklable.
+        """
+
+        def __init__(self, specs, dim=0, squeeze=False, normalize_fn=None, squeeze_fn=None):
+            super().__init__()
+            self.specs = torch.nn.ModuleList(specs)  # register submodules
+            self.dim = dim
+            self.squeeze = squeeze
+            self.normalize_fn = normalize_fn
+            self.squeeze_fn = squeeze_fn
+
+        def forward(self, x):
+            # Normalize first
+            if self.normalize_fn is not None:
+                x = self.normalize_fn(x)
+
+            # Apply the three spectrogram transforms
+            outs = [spec(x) for spec in self.specs]
+
+            # Concatenate along the given dimension
+            x = torch.cat(outs, dim=self.dim)
+
+            # Optionally squeeze channel dimension
+            if self.squeeze and self.squeeze_fn is not None:
+                x = self.squeeze_fn(x)
+
+            return x
+    
+    def _mel_spectrogram_default(self):
 
         """
         Creates a sequential transformation pipeline to generate a Mel spectrogram 
@@ -827,7 +867,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
         compositor =  torch.nn.Sequential(
 
             # Apply normalization to [-1, 1] range
-            v2.Lambda(self.abs_normalize),
+            v2.Lambda(self._abs_normalize),
 
             # Compute Mel spectrogram
             torchaudio.transforms.MelSpectrogram(
@@ -838,15 +878,12 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
                 n_mels=self.n_mels,
                 power=self.power
             ),
-
-            # Convert (1, H, W) to (3, H, W)
-            #v2.Lambda(self.expand_channels),
         )
 
         return compositor
 
     # Generate Mel Spectrogram for the different channels
-    def mel_spectrogram_time_freq(self):
+    def _mel_spectrogram_time_freq(self):
 
         """
         Generates a Mel spectrogram using multiple FFT sizes to capture different 
@@ -923,31 +960,44 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
             power=self.power
         )
 
-        # Move to device
-        spec_1 = spec_1.to(device)
-        spec_2 = spec_2.to(device)
-        spec_3 = spec_3.to(device)
+        specs = [spec_1, spec_2, spec_3]
 
-        # Define the transformation function
-        compositor = torch.nn.Sequential(
-            
-            # Apply normalization to [-1, 1] range
-            v2.Lambda(self.abs_normalize),
-
-            # Compute Mel spectrogram
-            v2.Lambda(lambda x: torch.cat([
-                spec_1(x.to(device)),
-                spec_2(x.to(device)),
-                spec_3(x.to(device)),
-            ], dim=dim)),
-            
-            # Convert (1, H, W) to (3, H, W)
-            v2.Lambda(self.squeeze_channel) if squeeze else v2.Lambda(lambda x: x)
+        # Return a picklable Sequential transform
+        return torch.nn.Sequential(
+            self._MultiFFTMelSpec(
+                specs,
+                dim=dim,
+                squeeze=squeeze,
+                normalize_fn=self._abs_normalize,
+                squeeze_fn=self._squeeze_channel if squeeze else None
+            )
         )
 
-        return compositor
+        # Move to device
+        #spec_1 = spec_1.to(device)
+        #spec_2 = spec_2.to(device)
+        #spec_3 = spec_3.to(device)
 
-    def mel_spectrogram_freq_band(self):
+        # Define the transformation function
+        #compositor = torch.nn.Sequential(
+            
+        #    # Apply normalization to [-1, 1] range
+        #    v2.Lambda(self.abs_normalize),
+
+        #    # Compute Mel spectrogram
+        #    v2.Lambda(lambda x: torch.cat([
+        #        spec_1(x.to(device)),
+        #        spec_2(x.to(device)),
+        #        spec_3(x.to(device)),
+        #    ], dim=dim)),
+            
+        #    # Convert (1, H, W) to (3, H, W)
+        #    v2.Lambda(self.squeeze_channel) if squeeze else v2.Lambda(lambda x: x)
+        #)
+
+        #return compositor
+
+    def _mel_spectrogram_freq_band(self):
 
         """
         Generates a Mel spectrogram using the frequency band method.
@@ -995,7 +1045,7 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
             squeeze = True
 
         # Compute frequency limits
-        f_max1, f_max2, f_max3 = self.log_freq_band_split(0, self.new_sample_rate / 2)
+        f_max1, f_max2, f_max3 = self._log_freq_band_split(0, self.new_sample_rate / 2)
 
         # Compute overlap amount
         overlap1 = (f_max1 - 0) * self.overlap_ratio
@@ -1043,35 +1093,45 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
             f_max=f_max3
         )
 
-        # Move to device
-        spec_1 = spec_1.to(device)
-        spec_2 = spec_2.to(device)
-        spec_3 = spec_3.to(device)
+        specs = [spec_1, spec_2, spec_3]
 
-        # Define the transformation function
-        compositor = torch.nn.Sequential(
-            
-            # Apply normalization to [-1, 1] range
-            v2.Lambda(self.abs_normalize),
-
-            # Compute Mel spectrogram
-            v2.Lambda(lambda x: torch.cat([
-                spec_1(x.to(device)),
-                spec_2(x.to(device)),
-                spec_3(x.to(device)),
-            ], dim=dim)),
-            
-            # Convert (1, H, W) to (3, H, W)
-            v2.Lambda(self.squeeze_channel) if squeeze else v2.Lambda(lambda x: x)
-
-            # Convert (1, H, W) to (3, H, W) for image channels
-            #v2.Lambda(self.expand_channels)
+        # Return a picklable Sequential transform
+        return torch.nn.Sequential(
+            self._MultiFFTMelSpec(
+                specs,
+                dim=dim,
+                squeeze=squeeze,
+                normalize_fn=self._abs_normalize,
+                squeeze_fn=self._squeeze_channel if squeeze else None
+            )
         )
 
-        return compositor
+        ## Move to device
+        #spec_1 = spec_1.to(device)
+        #spec_2 = spec_2.to(device)
+        #spec_3 = spec_3.to(device)
+
+        ## Define the transformation function
+        #compositor = torch.nn.Sequential(
+            
+        #    # Apply normalization to [-1, 1] range
+        #    v2.Lambda(self._abs_normalize),
+
+        #    # Compute Mel spectrogram
+        #    v2.Lambda(lambda x: torch.cat([
+        #        spec_1(x.to(device)),
+        #        spec_2(x.to(device)),
+        #        spec_3(x.to(device)),
+        #    ], dim=dim)),
+            
+        #    # Convert (1, H, W) to (3, H, W)
+        #    v2.Lambda(self._squeeze_channel) if squeeze else v2.Lambda(lambda x: x)
+        #)
+
+        #return compositor
     
 
-    def mel_spectrogram(self):
+    def _mel_spectrogram(self):
 
         """
         Determines the type of Mel spectrogram transformation to apply based on the 'fft_analysis_method' parameter.
@@ -1082,15 +1142,15 @@ class AudioSpectrogramTransforms(Logger, torch.nn.Module):
 
         # Default spectrogram transformation
         if self.fft_analysis_method == "single":
-            return self.mel_spectrogram_default()
+            return self._mel_spectrogram_default()
         
         # Spectrogram concatenation by time-frequency trade-offs
         elif self.fft_analysis_method == "time_freq":
-            return self.mel_spectrogram_time_freq()
+            return self._mel_spectrogram_time_freq()
         
         # Spectrogram concatenation by frequency bands
         elif self.fft_analysis_method == "freq_band":
-            return self.mel_spectrogram_freq_band()
+            return self._mel_spectrogram_freq_band()
         
 
     def forward(self, x):

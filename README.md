@@ -2,7 +2,7 @@
   <img src="images/logo/logo_tochsuite_1_resized_1.jpg" alt="Into Picture" width="450"/>
 </div>
 
-# PyTorch Deep Learning Framework for Multimedia and Medical Imaging
+# PyTorch Deep Learning Framework for Multimedia
 TorchSuite is a versatile, feature-rich, and PyTorch-based library designed to simplify and accelerate deep learning development for multimedia applications — including audio, image, and video processing — and medical imaging segmentation.
 
 It provides essential modules and utilities for training, inference, data handling, and model optimization, making it a valuable tool for researchers, engineers, and practitioners.

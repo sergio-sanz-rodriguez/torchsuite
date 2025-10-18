@@ -127,7 +127,7 @@ The following notebooks demonstrate how to implement and train deep learning mod
 - `image_regression.ipynb`: ConvNeXt-Large model predicting image quality of filtered images.
 - `object_detection_rcnn_custom.ipynb` and `object_detection_rcnn_standard.ipynb`: custom and standard R-CNN object detection and segmentation workflows.
 - `object_detection_yolo.ipynb`: YOLO-based object detection.
-- `image_segmentation_medical_img.ipynb` and `image_segmentation_vehicles.ipynb`: U-Net-based segmentation notebooks for medical imaging and vehicle detection use cases.
+- `image_segmentation_organs.ipynb` and `image_segmentation_vehicles.ipynb`: U-Net-based segmentation notebooks for medical imaging and vehicle detection use cases.
 
 ## Best Practices for Deep Learning Training
 

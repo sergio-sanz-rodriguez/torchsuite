@@ -3,16 +3,26 @@
 All notable changes to this project will be documented in this file.
 
 ## [1.0.0] - 2025-10-20
-### New features
+### Key features
+- Image classification: training and inference
+- Audio classification: training and inference
+- Image distillation: training and inference
 - Image regression: training and inference
-- Performance optimizations: training and inference
+- Object detection (and segmentation): training and inference
 - Third-party YOLO-based object detection training
+- Performance optimized: training and inference
+- Object detection app: DeepCount
 - Simplified API
-- Training resume and checkpointing
-- Gradient accumulation for memory-efficient training
+- Support for CPU and GPU-accelerated training and inference
+- Customizable cutting-edge architectures: Vision Transformers (ViT), U-Net, ConvNeXt
 - Augmentation scheduling for training stabilization
+- Automatic Mixed Precision (AMP) for faster training
+- Gradient accumulation for memory-efficient training
+- Custom schedulers, loss functions
+- Training resume and checkpointing
 - In-notebook live monitoring
 - Color themes: dark and light
+- Example notebooks
 
 ### Changed
 - Code reorganization and refactorization

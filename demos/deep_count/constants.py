@@ -44,15 +44,10 @@ def resource_path(rel_path):
         return os.path.join(sys._MEIPASS, rel_path)
     return os.path.join(os.path.abspath("."), rel_path)
 
-MODEL_WEIGHTS = "yolo_10b_50_4_best.pt"
-MODEL_PATH = resource_path(MODEL_WEIGHTS)
-
 # App text
 TITLE = "DeepCount<br>📷🚶🏽‍♀️🏃‍♀️📷"
 AUTHOR = "by [Sergio Sanz](https://www.linkedin.com/in/sergio-sanz-rodriguez/)"
 DESCRIPTION = "A cutting-edge AI model to detect and count humans in images."
-#WARNING_MESSAGE = "⚠️ Processing times may be longer than usual due to high server demand. If that's the case, consider trying again later for faster response times. ⚠️"
-#WARNING_MESSAGE = "⚠️ Large image files may take longer to upload and could slow down processing. For faster performance, consider selecting the 'Downscale Image' checkbox to reduce the image size. ⚠️"  
 WARNING_MESSAGE = "⚠️ Large image files may take longer to upload and could slow down processing. ⚠️"  
 
 TECH_COPY_TEXT = """

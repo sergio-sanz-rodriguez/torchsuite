@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [1.0.0] - 2025-10-20
-### Key features
+### Main features
 - Image classification: training and inference
 - Audio classification: training and inference
 - Image distillation: training and inference
@@ -33,11 +33,11 @@ All notable changes to this project will be documented in this file.
 - General bug fixes
 
 ## [0.3.0] - 2025-03-04
-### New features
+### Main features
 - General improvements in object detection
 
 ## [0.3.0-rc1] - 2025-03-28
-### New features
+### Main features
 - Image segmentation: prediction
 - Support for audio classification based on spectrograms
 
@@ -46,7 +46,7 @@ All notable changes to this project will be documented in this file.
 - Image folder reorganization
 
 ## [0.2.0-rc1] - 2025-03-10
-### New featuers
+### Main featuers
 - Image segmentation: training only
 - U-Net CNN architectures: vanille (original), enhanced (more features), pretrained
 - Added support for pretrained U-Net networks from: https://github.com/mberkay0/pretrained-backbones-unet.git
@@ -58,7 +58,7 @@ All notable changes to this project will be documented in this file.
 - Image folder reorganization
 
 ## [0.1.0] - 2025-02-22
-### New features
+### Main features
 - Image classification: training and inference
 - Audio classification: training and inference
 - Image distillation: training and inference

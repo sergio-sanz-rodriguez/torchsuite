@@ -127,8 +127,34 @@ transform_yolo = v2.Compose([
 # Initialize ToPILImage transform
 to_pil = ToPILImage()
 
-# Load the Yolo models
-model_b = YOLO("yolo_10b_50_4_best.pt").eval()
+
+# Load YOLO model
+def load_yolo(model_path):
+    """
+    Loads a YOLO model from the given path and set it to evaluation mode.
+
+    Args:
+        model_path (str): Path to the YOLO .pt model file.
+
+    Returns:
+        YOLO: Loaded YOLO model ready for inference.
+
+    Raises:
+        ValueError: If the model cannot be loaded (e.g., invalid path or file).
+    """
+
+    try:
+        print(f"Loading YOLO model from '{model_path}' ...")
+        model = YOLO(model_path)
+        model.eval()  # set to evaluation mode
+        print("Model loaded successfully!")
+        return model
+    except FileNotFoundError:
+        raise ValueError(f"Model file not found at '{model_path}'. Check the path.")
+    except RuntimeError as e:
+        raise ValueError(f"Error loading the YOLO model: {e}")
+    except Exception as e:
+        raise ValueError(f"Unexpected error while loading model: {e}")
 
 # Function to dimm regions outside the bounding boxes
 def dimm_background(image: torch.Tensor,
@@ -425,7 +451,8 @@ def detect_items(
         conf=DEFAULT_CONFIDENCE,
         color=DEFAULT_BOX_COLOR,
         dimm=DEFAULT_DIMM,
-        state=None):        
+        state=None,
+        model=None):        
 
     """
     Transforms and performs a prediction on the image and returns prediction details.
@@ -435,10 +462,15 @@ def detect_items(
         color (str): Color of the bounding box.
         dimm (float): Set the dimm level of the background
         state (dict): Contains previously stored predictions to avoid redundant model inference.
+        state (YOLO): YOLO model object
     Returns:
         Tuple[image, int, dict]: A tuple containing the output image with bounding boxes,
                                count of detected objects, and the prediction time.
     """
+    
+    # Check model
+    if model is None:
+        raise ValueError("No model provided for detection.")
     
     # Nothing to show for the first time
     if state is None:        
@@ -469,8 +501,8 @@ def detect_items(
             if img_np.shape[2] == 4:
                 img_np = img_np[:, :, :3]  # drop alpha channel
 
-            # Run the YOLO model                                    
-            results = model_b.predict(image, imgsz=640, device='cpu', verbose=False, conf=0.0, iou=1.0)
+            # Run the YOLO model                      
+            results = model.predict(image, imgsz=640, device='cpu', verbose=False, conf=0.0, iou=1.0)
             yolo_preds = results[0]
 
             # Extract boxes, scores, class IDs

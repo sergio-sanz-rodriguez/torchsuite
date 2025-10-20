@@ -128,6 +128,7 @@ The following notebooks demonstrate how to implement and train deep learning mod
 - `object_detection_rcnn_custom.ipynb` and `object_detection_rcnn_standard.ipynb`: custom and standard R-CNN object detection and segmentation workflows.
 - `object_detection_yolo.ipynb`: YOLO-based object detection.
 - `image_segmentation_organs.ipynb` and `image_segmentation_vehicles.ipynb`: U-Net-based segmentation notebooks for medical imaging and vehicle detection use cases.
+- `demos/deep_count`: Gradio-based human detection app using YOLO.
 
 ## Best Practices for Deep Learning Training
 

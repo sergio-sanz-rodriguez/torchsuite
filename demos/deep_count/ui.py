@@ -1,13 +1,14 @@
 # Graphical user interface
 import gradio as gr
+from functools import partial
 from constants import (
     TITLE, AUTHOR, DESCRIPTION, WARNING_MESSAGE, TECH_COPY_TEXT, APP_THEME_COLOR,
     EXAMPLES, MAX_ALPHA, MIN_ALPHA, DEFAULT_ALPHA, DEFAULT_STEP, MAX_DIM,
     CONF_MED, DEFAULT_BOX_COLOR, DEFAULT_DOWNSCALE, COLOR_CHOICES, CONF_CHOICES
 )
-from backend import detect_items, show_analyzing, prev_split, next_split, fresh_state, downscale_status
+from backend import load_yolo, detect_items, show_analyzing, prev_split, next_split, fresh_state, downscale_status
 
-def build_interface():
+def build_interface(model_path):
     
     # Define theme
     theme = gr.themes.Ocean(
@@ -19,6 +20,13 @@ def build_interface():
         display: none !important;
     }
     """
+
+    # Load YOLO model from model_path
+    model = load_yolo(model_path)
+
+    # Wrap detect_items so it uses your loaded model
+    def wrapped_detect_items(image, conf, color, dimm, state=None):
+        return detect_items(image, conf, color, dimm, state, model=model)
 
     # Gradio interface setup
     with gr.Blocks(theme=theme, css=css) as demo:
@@ -141,7 +149,7 @@ def build_interface():
             inputs=[state],
             outputs=[state]
         ).then(
-            detect_items,
+            wrapped_detect_items,
             inputs=[image_input, conf_input, color_input, dimm_input, state],
             outputs=[image_output, count_output, conf_output, state],
             show_progress=False
@@ -152,7 +160,7 @@ def build_interface():
             inputs=[state],
             outputs=[state]
         ).then(
-            detect_items,
+            wrapped_detect_items,
             inputs=[image_input, conf_input, color_input, dimm_input, state],
             outputs=[image_output, count_output, conf_output, state],
             show_progress=False
@@ -169,7 +177,7 @@ def build_interface():
         # Events when changing parameters
         for input_widget in (conf_input, color_input, dimm_input):
             input_widget.change(
-                detect_items,
+                wrapped_detect_items,
                 inputs=[image_input, conf_input, color_input, dimm_input, state],
                 outputs=[image_output, count_output, conf_output, state],
                 show_progress=False
@@ -185,7 +193,7 @@ def build_interface():
 
         # Event when loading a new image
         image_input.change(
-            detect_items,
+            wrapped_detect_items,
             inputs=[image_input, conf_input, color_input, dimm_input, state],
             outputs=[image_output, count_output, conf_output, state],
             show_progress=False

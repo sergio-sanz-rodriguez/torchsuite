@@ -13,13 +13,14 @@ Key highlights of the framework include:
 
 - Simplified model training and evaluation
 - CPU and GPU acceleration
+- Support for knowledge distillation for classification and regression
 - Easily customizable architectures: ViTs, U-Net, ConvNeXt, R-CNNs, YOLO, Wav2Vec2
 - Extensive set of loss functions and schedulers
 - Intuitive API for rapid experimentation
 
 TorchSuite is currently optimized for:
-- Image and audio classification and distillation
-- Image regression 
+- Image and audio classification 
+- Image and audio regression 
 - Object detection
 - Image segmentation, including medical imaging
 

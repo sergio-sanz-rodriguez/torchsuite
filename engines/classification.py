@@ -14,10 +14,13 @@ import warnings
 import re
 import gzip
 import inspect
-import matplotlib.pyplot as plt
+#import mpld3
+#import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from . import loss_functions
 from .common import Common, Colors
 from .loss_functions import DistillationLoss
+from .gui import EnginePlotApp
 from matplotlib.ticker import FuncFormatter
 from tqdm.auto import tqdm 
 from PIL import Image
@@ -28,6 +31,9 @@ from timeit import default_timer as timer
 from contextlib import nullcontext
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import LabelEncoder
+from plotly.graph_objects import Figure, Scatter
+#from plotly.subplots import make_subplots
+#from mpld3 import plugins
 try:
     from torch.amp import GradScaler, autocast
 except ImportError:
@@ -115,6 +121,10 @@ class ClassificationEngine(Common):
         self.squeeze_dim = False
         self.checkpoint_path_prefix = "ckpt"
         self.valid_modes =  {"loss", "acc", "f1", "fpr", "pauc", "last", "all"}
+        self._ui_new_data = False          # set True whenever new plots are ready
+        self._ui_cache_html = (None, None) # (top_html, bottom_html) for quick reuse
+        self._ui_plotly_cache = (None, None)  # (fig_top, fig_bottom)
+        self._ui_last_epoch_built = 0      # last epoch number we built plots for  
         
         # Check if model is provided
         if self.model is None:
@@ -141,13 +151,13 @@ class ClassificationEngine(Common):
             "train_f1": [],
             "train_fpr": [],
             "train_pauc": [],
-            "train_time [s]": [],
+            "train_time": [],
             "test_loss": [],
             "test_acc": [],
             "test_f1": [],
             "test_fpr": [],
             "test_pauc": [],
-            "test_time [s]": [],
+            "test_time": [],
             "lr": [],
             }
         
@@ -158,7 +168,7 @@ class ClassificationEngine(Common):
                 'f1':   ['f1', 'f1', 'F1-Score'],
                 'fpr':  ['fpr', 'fpr_at_recall', f"FPR at {self.recall_threshold * 100}% recall"],
                 'pauc': ['pauc', 'pauc_at_recall', f"pAUC above {self.recall_threshold_pauc * 100}% recall"],
-                'time': ['time [s]', 'time', 'Time [MMmSSs]'],
+                'time': ['time', 'time', 'Time [MMmSSs]'],
                 'lr':   ['lr', 'lr', 'Learning Rate']            
             }
 
@@ -311,7 +321,7 @@ class ClassificationEngine(Common):
                 f"{self.color_train}f1: {self.results[f'{split}_f1'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}fpr: {self.results[f'{split}_fpr'][-1]:.4f} {self.color_other}| "
                 f"{self.color_train}pauc: {self.results[f'{split}_pauc'][-1]:.4f} {self.color_other}| "
-                f"{self.color_train}time: {self.sec_to_min_sec(self.results[f'{split}_time [s]'][-1])} {self.color_other}| "            
+                f"{self.color_train}time: {self.sec_to_min_sec(self.results[f'{split}_time'][-1])} {self.color_other}| "            
                 f"{self.color_train}lr: {self.results['lr'][-1]:.10f}"
             )
         else:
@@ -323,9 +333,101 @@ class ClassificationEngine(Common):
                 f"{self.color_test}f1: {self.results[f'{split}_f1'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}fpr: {self.results[f'{split}_fpr'][-1]:.4f} {self.color_other}| "
                 f"{self.color_test}pauc: {self.results[f'{split}_pauc'][-1]:.4f} {self.color_other}| "
-                f"{self.color_test}time: {self.sec_to_min_sec(self.results[f'{split}_time [s]'][-1])} {self.color_other}| "            
+                f"{self.color_test}time: {self.sec_to_min_sec(self.results[f'{split}_time'][-1])} {self.color_other}| "            
                 f"{self.color_test}lr: {self.results['lr'][-1]:.10f}"
             )
+
+    # Visualization helper function to plot the results
+    def _plot_(
+        self,        
+        range_epochs,
+        metric
+        ) -> Figure:
+
+        """
+        Plots the evolution of a specified training or validation metric over epochs.
+
+        This method handles both standard numerical metrics (like loss or accuracy)
+        and time-based metrics (in seconds), formatting the y-axis accordingly.
+
+        Args:            
+            range_epochs (iterable): The range of epochs (x-axis).
+            metric (str): The name of the metric to plot. If 'lr', plots the learning rate.
+                        If 'time' is in the name, formats y-axis using MM:SS style.
+        
+        Returns:
+            Figure object with the plot
+        """
+        
+        fig = go.Figure()
+        mode = 'markers' if range_epochs[-1] == 1 else 'lines'
+        template = "plotly_dark" if getattr(self, "theme", "light") == "dark" else "plotly_white"
+
+        if metric != 'lr':        
+            idx_train = f"train_{self.metric_labels[metric][0]}"
+            idx_test = f"test_{self.metric_labels[metric][0]}"        
+            title = self.metric_labels[metric][2]             
+            y_train = self.results[idx_train]            
+            fig.add_trace(
+                Scatter(
+                    x=range_epochs,
+                    y=y_train,
+                    mode=mode,
+                    name='train',
+                    line=dict(color=self.color_train_plt),
+                    marker=dict(symbol="circle", size=8)))
+            if self.apply_validation or metric != 'lr':
+                y_test = self.results[idx_test]                
+                fig.add_trace(
+                    Scatter(
+                        x=range_epochs,
+                        y=y_test,
+                        mode=mode,
+                        name='test',
+                        line=dict(color=self.color_test_plt),
+                        marker=dict(symbol="circle", size=8)))
+        
+        else:
+            idx = self.metric_labels[metric][0]
+            title = self.metric_labels[metric][2]
+            y = self.results[idx]            
+            fig.add_trace(
+                Scatter(
+                    x=range_epochs,
+                    y=y,
+                    mode=mode,
+                    line=dict(color=self.color_train_plt),
+                    marker=dict(symbol="circle", size=8)))
+
+        fig.update_layout(
+            template=template,
+            title=dict(
+                text=title,
+                font=dict(size=12),
+                x=0.5, xanchor="center"
+            ),
+            height=500,
+            margin=dict(l=5, r=5, t=30, b=40),
+            legend=dict(
+                orientation="v",
+                x=0.98,
+                y=1.0,
+                xanchor="center",
+                yanchor="bottom",                    
+                font=dict(size=9)
+            ) if metric != 'lr' else None,
+            xaxis=dict(
+                title=dict(text="Epochs", font=dict(size=12)),
+                tickfont=dict(size=10)
+            ),
+            yaxis=dict(
+                title=dict(font=dict(size=12)),
+                tickfont=dict(size=10)
+            ),
+        )
+
+        return fig
+
 
     # Visualization helper function to plot the results
     def _plot(
@@ -348,7 +450,7 @@ class ClassificationEngine(Common):
                         If 'time' is in the name, formats y-axis using MM:SS style.
         """
 
-        if metric is not 'lr':
+        if metric != 'lr':
             idx_train = f"train_{self.metric_labels[metric][0]}"
             idx_test = f"test_{self.metric_labels[metric][0]}"
             label_train = f"train_{self.metric_labels[metric][1]}"
@@ -609,7 +711,10 @@ class ClassificationEngine(Common):
     # ======================================= #
 
     # Function to display and plot the results
-    def _display_results(self):
+    def _display_results(
+            self,
+            return_html: bool = True,
+            clear_notebook: bool = True):
     
         """
         Displays the training and validation results both numerically and visually.
@@ -622,61 +727,129 @@ class ClassificationEngine(Common):
                 - FPR at recall curves
         """
         
-        # Clear output
-        clear_output(wait=True)
+        # optional: keep notebook output intact when browser UI is running
+        if clear_notebook:
+            try:
+                from IPython.display import clear_output as _clear
+                _clear(wait=True)
+            except Exception:
+                pass
 
-        # Print results   
-        print(self._format_epoch_results("train"))        
-        if self.apply_validation:
+        # print logs to the notebook
+        print(self._format_epoch_results("train"))
+        if getattr(self, "apply_validation", False):
             print(self._format_epoch_results("test"))
+
+        # ensure UI state exists
+        if not hasattr(self, "_ui_plotly_cache"):
+            self._ui_plotly_cache = (None,) * 7
+        if not hasattr(self, "_ui_new_data"):
+            self._ui_new_data = False
+        if not hasattr(self, "_ui_last_epoch_built"):
+            self._ui_last_epoch_built = 0
+
+        # Nothing to plot yet
+        if not getattr(self, "plot_curves", True) or "train_loss" not in self.results:
+            empties = tuple(Figure() for _ in range(7))
+            self._ui_plotly_cache = empties
+            self._ui_last_epoch_built = 0
+            self._ui_new_data = True
+            return empties if return_html else None
+
+        # Some helpers        
+        curr_epoch = len(self.results.get("train_loss", []))
+        range_epochs = list(range(1, curr_epoch+1)) 
         
-        # Plot training and test loss, accuracy, and fpr-at-recall curves.
-        if self.plot_curves:
-            
-            # First figure (top)
-            n_cols = 3            
-            plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
-            curr_epoch = len(self.results["train_loss"])
-            range_epochs = range(1, curr_epoch+1)            
+        # Plot loss
+        fig_loss = self._plot_(range_epochs, 'loss')
 
-            # Plot loss
-            ax = plt.subplot(1, n_cols, 1)
-            self._plot(ax, range_epochs, 'loss')
+        # Plot accuracy
+        fig_acc = self._plot_(range_epochs, 'acc')
 
-            # Plot accuracy
-            ax = plt.subplot(1, n_cols, 2)
-            self._plot(ax, range_epochs, 'acc')
+        # Plot f1-score
+        fig_f1 = self._plot_(range_epochs, 'f1')
 
-            # Plot f1-score
-            ax = plt.subplot(1, n_cols, 3)
-            self._plot(ax, range_epochs, 'f1')
+        # Plot FPR at recall
+        fig_fpr = self._plot_(range_epochs, 'fpr')
 
-            # Display plots
-            plt.show()
+        # Plot pAUC at recall
+        fig_pauc = self._plot_(range_epochs, 'pauc')
 
-            # Second figure (bottom)
-            n_cols = 4
-            plt.figure(figsize=(25, 6), facecolor=self.figure_color_map['bg'])
-            
-            # Plot FPR at recall
-            ax = plt.subplot(1, n_cols, 1)
-            self._plot(ax, range_epochs, 'fpr')
+        # Plot time
+        fig_time = self._plot_(range_epochs, 'time')
 
-            # Plot pAUC at recall
-            ax = plt.subplot(1, n_cols, 2)
-            self._plot(ax, range_epochs, 'pauc')
+        # Plot learning rate
+        fig_lr = self._plot_(range_epochs, 'lr')
 
-            # Plot time
-            ax = plt.subplot(1, n_cols, 3)
-            self._plot(ax, range_epochs, 'time')
+        # cache + signal
+        cache = (fig_loss, fig_acc, fig_f1, fig_fpr, fig_pauc, fig_time, fig_lr)
+        self._ui_plotly_cache = cache
+        self._ui_last_epoch_built = curr_epoch
+        self._ui_new_data = True
 
-            # Plot LR
-            ax = plt.subplot(1, n_cols, 4)
-            self._plot(ax, range_epochs, 'lr')
+        return cache if return_html else None
 
-            # Display plots
-            plt.show()
+    #def _plotly_theme(self):
+    #    return "plotly_dark" if getattr(self, "theme", "light") == "dark" else "plotly_white"
 
+    #def _build_plotly_top(self):
+    #    """Loss / Acc / F1 (top row)"""
+    #    n = len(self.results.get("train_loss", []))
+    #    if n == 0:
+    #        return go.Figure()
+    #    x = list(range(1, n+1))
+    #    fig = go.Figure()
+    #    def add(name, label):
+    #        ys = self.results.get(name, [])
+    #        if ys and len(ys) >= 1:
+    #            fig.add_trace(go.Scatter(x=x[:len(ys)], y=ys, mode="lines", name=label))
+    #    add("train_loss", "train_loss");   add("test_loss",  "val_loss")
+    #    add("train_acc",  "train_acc");    add("test_acc",   "val_acc")
+    #    add("train_f1",   "train_f1");     add("test_f1",    "val_f1")
+    #    fig.update_layout(template=self._plotly_theme(), height=420,
+    #                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    #                    margin=dict(l=40, r=10, t=30, b=40),
+    #                    xaxis_title="epoch")
+    #    return fig
+
+    #def _build_plotly_bottom(self):
+    #    """FPR / pAUC / time / LR (bottom row)"""
+    #    n = len(self.results.get("train_loss", []))
+    #    if n == 0:
+    #        return go.Figure()
+    #    x = list(range(1, n+1))
+    #    fig = go.Figure()
+    #    for key, label in [
+    #        ("train_fpr","train_fpr"), ("test_fpr","val_fpr"),
+    #        ("train_pauc","train_pauc"), ("test_pauc","val_pauc"),
+    #        ("train_time","train_time"), ("test_time","val_time"),
+    #        ("lr","lr"),
+    #    ]:
+    #        ys = self.results.get(key, [])
+    #        if ys and len(ys) >= 1:
+    #            fig.add_trace(go.Scatter(x=x[:len(ys)], y=ys, mode="lines", name=label))
+    #    fig.update_layout(template=self._plotly_theme(), height=420,
+    #                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    #                    margin=dict(l=40, r=10, t=30, b=40),
+    #                    xaxis_title="epoch")
+    #    return fig
+
+    #def _update_plotly_cache(self):
+    #    """Builds Plotly figs from current results and sets the UI refresh flag."""
+    #    curr_epoch = len(self.results.get("train_loss", []))
+    #    fig_top = self._build_plotly_top()
+    #    fig_bot = self._build_plotly_bottom()
+    #    self._ui_plotly_cache = (fig_top, fig_bot)
+    #    self._ui_last_epoch_built = curr_epoch
+    #    self._ui_new_data = True
+
+    #def get_plots_plotly(self):
+    #    """Return cached Plotly figs if present; otherwise build once."""
+    #    top, bot = getattr(self, "_ui_plotly_cache", (None, None))
+    #    if top is None or bot is None:
+    #        self._update_plotly_cache()
+    #        top, bot = self._ui_plotly_cache
+    #    return top, bot
 
     # ======================================= #
     # ===== INTERNAL CORE TRAINING LOGIC ==== #
@@ -1488,7 +1661,7 @@ class ClassificationEngine(Common):
         self.results["train_f1"].append(train_f1)
         self.results["train_fpr"].append(train_fpr)
         self.results["train_pauc"].append(train_pauc)
-        self.results["train_time [s]"].append(elapsed_time)
+        self.results["train_time"].append(elapsed_time)
         self.results["lr"].append(lr)
 
     # Validation/test step for a single epoch
@@ -1702,7 +1875,7 @@ class ClassificationEngine(Common):
         self.results["test_f1"].append(test_f1)
         self.results["test_fpr"].append(test_fpr)        
         self.results["test_pauc"].append(test_pauc)
-        self.results["test_time [s]"].append(elapsed_time)        
+        self.results["test_time"].append(elapsed_time)        
     
     # Scheduler step after the optimizer
     def _scheduler_step(
@@ -2252,57 +2425,75 @@ class ClassificationEngine(Common):
             test_pauc: [0.3154, 0.4817]
         }
         """
+        start_browser_ui = True
+        browser_mode = True
+        browser_port: int=7860
+        browser_refresh_sec: float=1.0,
 
-        # Starting training time
-        start_time = time.time()
+        app = None
+        if start_browser_ui:            
+            try:                
+                app = EnginePlotApp(self, interval=browser_refresh_sec, port=browser_port).start()
+            except Exception as e:
+                if self.log_verbose:
+                    self.error(f"Failed to start GUI: {e}")
 
-        # Initialize training process and check arguments
-        self._init_train(
-            target_dir=target_dir,
-            model_name=model_name,            
-            enable_resume=enable_resume,
-            dataloaders=dataloaders,
-            save_best_model=save_best_model,
-            keep_best_models_in_memory=keep_best_models_in_memory,
-            apply_validation=apply_validation,
-            augmentation_strategy=augmentation_strategy,
-            augmentation_off_epochs=augmentation_off_epochs,
-            augmentation_random_prob=augmentation_random_prob,
-            recall_threshold=recall_threshold,
-            recall_threshold_pauc=recall_threshold_pauc,
-            epochs=epochs, 
-            plot_curves=plot_curves,
-            amp=amp,
-            enable_clipping=enable_clipping,
-            accumulation_steps=accumulation_steps,
-            debug_mode=debug_mode,
-            )
-            
-        # Loop through training and testing steps for a number of epochs
-        # If 'resume' is True, resume training from 'self.start_epoch', the checkpoint epoch, otherwise self.start_epoch = 0
-        # 'self.epochs' is the total number of epochs originally set
-        for epoch in range(self.start_epoch, self.epochs):
+        try:
+            # Starting training time
+            start_time = time.time()
 
-            # Perform training step  
-            self._train_step(epoch)            
+            # Initialize training process and check arguments
+            self._init_train(
+                target_dir=target_dir,
+                model_name=model_name,            
+                enable_resume=enable_resume,
+                dataloaders=dataloaders,
+                save_best_model=save_best_model,
+                keep_best_models_in_memory=keep_best_models_in_memory,
+                apply_validation=apply_validation,
+                augmentation_strategy=augmentation_strategy,
+                augmentation_off_epochs=augmentation_off_epochs,
+                augmentation_random_prob=augmentation_random_prob,
+                recall_threshold=recall_threshold,
+                recall_threshold_pauc=recall_threshold_pauc,
+                epochs=epochs, 
+                plot_curves=plot_curves,
+                amp=amp,
+                enable_clipping=enable_clipping,
+                accumulation_steps=accumulation_steps,
+                debug_mode=debug_mode,
+                )
+                
+            # Loop through training and testing steps for a number of epochs
+            # If 'resume' is True, resume training from 'self.start_epoch', the checkpoint epoch, otherwise self.start_epoch = 0
+            # 'self.epochs' is the total number of epochs originally set
+            for epoch in range(self.start_epoch, self.epochs):
 
-            # Perform test step
-            self._test_step(epoch)            
-            
-            # Show results
-            self._display_results()
+                # Perform training step  
+                self._train_step(epoch)            
 
-            # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.            
-            df_results = self._update_model()
-            
-            # Save a checkpoint to allow resuming training later            
-            self._save_checkpoint(next_epoch = epoch + 1)
+                # Perform test step
+                self._test_step(epoch)            
+                
+                # Show results
+                #self._display_results()
+                self._display_results(return_html=True, clear_notebook=not browser_mode)
 
-        # Finish training process
-        total_elapsed_time = time.time() - start_time
-        self._finish_train(total_elapsed_time)
+                # Update and save the best model, model_epoch list based on the specified mode, and the actual-epoch model.            
+                df_results = self._update_model()
+                
+                # Save a checkpoint to allow resuming training later            
+                self._save_checkpoint(next_epoch = epoch + 1)
 
-        return df_results
+            # Finish training process
+            total_elapsed_time = time.time() - start_time
+            self._finish_train(total_elapsed_time)
+
+            return df_results
+    
+        finally:
+            if app is not None:
+                app.stop()
 
     def predict(
         self,
@@ -2323,7 +2514,7 @@ class ClassificationEngine(Common):
             (list): All of the predicted class labels represented by prediction probabilities (softmax)
         """
 
-        self.info(f"Checking arguments...")
+        self.info(f"Checking Checking arguments...")
 
         # Select model to use
         model = self._load_inference_model(model_state)          

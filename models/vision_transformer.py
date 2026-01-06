@@ -218,13 +218,15 @@ class PatchEmbedding(nn.Module):
         assert img_size % patch_size == 0, f"Image size must be divisible by patch size, image size: {img_size}, patch size: {patch_size}."
 
         # Create a layer to turn an image into patches
+        # from [batch, in_channels, height, width] to [batch, out_channels, H_patches, W_patches] with H_patches = H / patch_size and W_patches = W / patch_size
         self.conv_proj = nn.Conv2d(in_channels=in_channels,
-                                   out_channels=emb_dim,
+                                   out_channels=emb_dim, # This defines the number of filters in the Conv2D
                                    kernel_size=patch_size,
                                    stride=patch_size,
                                    padding=0)
 
         # Create a layer to flatten the patch feature maps into a single dimension
+        # from batch, out_channels, H_patches, W_patches] to [batch_size, emb_dim, H_patches * W_patches]
         self.flatten = nn.Flatten(start_dim=2, # only flatten the feature map dimensions into a single vector. dim=0 is the batch size, dim=1 is the embedding dimension.
                                   end_dim=3)
         
@@ -240,7 +242,7 @@ class PatchEmbedding(nn.Module):
 
     # Define the forward method
     def forward(self, x):
-        
+         
         # Linear projection of patches 
         x = self.conv_proj(x)
 
@@ -251,7 +253,7 @@ class PatchEmbedding(nn.Module):
         x = x.permute(0, 2, 1)
 
         # Create class token and prepend
-        class_token = self.class_token.expand(x.shape[0], -1, -1)
+        class_token = self.class_token.expand(x.shape[0], -1, -1) # Expand to match with batch size
         x = torch.cat((class_token, x), dim=1)
         
         # Create position embedding
@@ -266,7 +268,7 @@ class PatchEmbedding(nn.Module):
 class MultiheadSelfAttentionBlock(nn.Module):
 
     """
-    Creates a multi-head self-attention block ("MSA block" for short).
+    Creates a multi-head self- attention block ("MSA block" for short).
     """
 
     # Initialize the class with hyperparameters from Table 1
@@ -298,10 +300,6 @@ class MultiheadSelfAttentionBlock(nn.Module):
                                    need_weights=False) # do we need the weights or just the layer outputs?
         return x
     
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 class MultiheadSelfAttentionBlockV2(nn.Module):
 
     """

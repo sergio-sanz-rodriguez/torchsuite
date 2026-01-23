@@ -411,10 +411,12 @@ class DistillationLoss(nn.Module):
             torch.Tensor: The computed distillation loss.
         """
         
+        T = self.temperature
         soft_loss = self.kl_div(
-            torch.nn.functional.log_softmax(student_logits / self.temperature, dim=1),
-            torch.nn.functional.softmax(teacher_logits / self.temperature, dim=1)
-        )
+            torch.nn.functional.log_softmax(student_logits / T, dim=1),
+            torch.nn.functional.softmax((teacher_logits / T).detach(), dim=1)
+        ) * (T * T)
+
         hard_loss = self.ce_loss(student_logits, labels)
         return self.alpha * hard_loss + (1 - self.alpha) * soft_loss
 

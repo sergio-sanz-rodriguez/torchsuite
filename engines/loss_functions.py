@@ -7,6 +7,7 @@ Additional loss functions for other tasks (e.g., object detection, segmentation)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Callable, Optional, Union, Sequence
 from .common import Logger
 
 # Image/Audio Classification: Cross-Entropy + pAUC Loss
@@ -396,7 +397,37 @@ class DistillationLoss(nn.Module):
         self.kl_div = nn.KLDivLoss(reduction="batchmean")
         self.ce_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     
-    def forward(self, student_logits, teacher_logits, labels):
+    def _get_alpha(self, epoch) -> float:
+
+        """
+        Gets the value of alpha based on the current epoch.
+
+        Args:
+            epoch (int): The current epoch
+
+        Returns:
+            float: The alpha value
+        """
+
+        if isinstance(self.alpha, (list, tuple)):
+            if len(self.alpha) == 0:
+                raise ValueError("Alpha schedule list/tuple is empty.")
+            # If training runs longer than schedule, hold last value
+            idx = min(epoch, len(self.alpha) - 1)
+            a = float(self.alpha[idx])
+        else:
+            a = float(self.alpha)
+
+        a = max(0.0, min(1.0, a))
+        return a
+    
+    def forward(
+        self,
+        student_logits: torch.Tensor,
+        teacher_logits: torch.Tensor,
+        labels: torch.Tensor,
+        epoch: int
+        ) -> torch.Tensor:
 
         """
         Computes the combined distillation loss by calculating the soft loss and hard loss
@@ -406,12 +437,14 @@ class DistillationLoss(nn.Module):
             student_logits (torch.Tensor): The logits produced by the student model.
             teacher_logits (torch.Tensor): The logits produced by the teacher model.
             labels (torch.Tensor): The ground truth labels.
+            epoch (int): The current epoch.
 
         Returns:
             torch.Tensor: The computed distillation loss.
         """
         
         T = self.temperature
+        alpha = self._get_alpha(epoch)
         soft_loss = self.kl_div(
             torch.nn.functional.log_softmax(student_logits / T, dim=1),
             torch.nn.functional.softmax((teacher_logits / T).detach(), dim=1)
@@ -421,6 +454,120 @@ class DistillationLoss(nn.Module):
         return self.alpha * hard_loss + (1 - self.alpha) * soft_loss
 
 
+# Image distillation (classification) Loss
+class DistillationLossForDeiT(nn.Module):
+
+    """
+    This class implements the knowledge distillation loss, which combines both
+    a soft target loss (based on the teacher's logits) and a hard target loss 
+    (based on the ground truth labels). It is particularly designed to train DeiT models.
+
+    The loss is a weighted sum of:
+        - Hard loss (alpha): The Cross Entropy loss between the student's logits and 
+          the true labels.
+        - Soft loss (1-alpha): The Kullback-Leibler divergence between the teacher's and 
+          student's softened logits.        
+
+    Attributes:
+        alpha (float): Weight for the hard loss (CrossEntropyLoss). Defaults to 0.5.
+        temperature (float): Temperature for softening the logits.
+            - temperature = 1: regular softmmax, no softening
+            - temperature > 1: softer distribution, more signal on similarities, more useful for learning            
+            Recommended values for temperature: 2 to 5. Defaults to 3.0.
+        kl_div (nn.KLDivLoss): The Kullback-Leibler divergence loss function.
+        ce_loss (nn.CrossEntropyLoss): The Cross Entropy loss function.
+
+    Methods:
+        forward(student_logits, teacher_logits, labels):
+            Computes the combined distillation loss.
+    """
+
+    def __init__(
+        self,
+        alpha: Union[float, Sequence[float]] = 0.5,
+        temperature: float = 3.0,
+        label_smoothing: float = 0.1,        
+    ):
+
+        """
+        Initializes the DistillationLoss object with the specified alpha and temperature values.
+
+        Args:
+            alpha (float): Controls the weighting between hard (alpha) and soft losses (1-alpha). Defaults to 0.5.
+            temperature (float): Smooths the teacher’s probability distribution, making it easier for the student to learn from.
+                - temperature = 1: regular softmmax, no softening
+                - temperature > 1: softer distribution, more signal on similarities, more useful for learning
+                Typical values for temperature: 2 to 5. Defaults to 3.0.
+            label_smoothing: Controlls the confidence of the ground truth labels, helping to prevent overfitting. Defaults to 0.1.
+        """
+
+        super().__init__()
+        self.alpha = alpha
+        self.temperature = max(temperature, 1.0) # Avoid temperature < 1
+        self.kl_div = nn.KLDivLoss(reduction="batchmean")
+        self.ce_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing)        
+    
+    def _get_alpha(self, epoch) -> float:
+
+        """
+        Gets the value of alpha based on the current epoch.
+
+        Args:
+            epoch (int): The current epoch
+
+        Returns:
+            float: The alpha value
+        """
+
+        if isinstance(self.alpha, (list, tuple)):
+            if len(self.alpha) == 0:
+                raise ValueError("Alpha schedule list/tuple is empty.")
+            # If training runs longer than schedule, hold last value
+            idx = min(epoch, len(self.alpha) - 1)
+            a = float(self.alpha[idx])
+        else:
+            a = float(self.alpha)
+
+        a = max(0.0, min(1.0, a))
+        return a
+    
+    def forward(
+        self,
+        student_logits_cls: torch.Tensor,
+        student_logits_dst: torch.Tensor,
+        teacher_logits: torch.Tensor,
+        labels: torch.Tensor,
+        epoch: int,        
+    ) -> torch.Tensor:
+
+        """
+        Computes the combined distillation loss by calculating the soft loss and hard loss
+        and returning their weighted sum.
+
+        Args:
+            student_logits_cls (torch.Tensor): The logits produced by the classification head of the student model
+            student_logits_dst (torch.Tensor): The logits produced by the distillation head of the student model
+            teacher_logits (torch.Tensor): The logits produced by the teacher model.
+            labels (torch.Tensor): The ground truth labels.
+            epoch (int): The current epoch.
+
+        Returns:
+            torch.Tensor:
+
+        Returns:
+            torch.Tensor: The computed distillation loss.
+        """
+        
+        T = self.temperature
+        alpha = self._get_alpha(epoch)
+        soft_loss = self.kl_div(
+            torch.nn.functional.log_softmax(student_logits_dst / T, dim=1),
+            torch.nn.functional.softmax((teacher_logits / T).detach(), dim=1)
+        ) * (T * T)
+
+        hard_loss = self.ce_loss(student_logits_cls, labels)
+        return alpha * hard_loss + (1.0 - alpha) * soft_loss
+    
 # Image segmentation: Dice Loss
 class DiceLoss(nn.Module):
     def __init__(self, num_classes=1, from_logits=True, eps=1e-6, reduction='mean'):

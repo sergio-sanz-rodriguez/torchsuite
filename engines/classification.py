@@ -348,7 +348,7 @@ class ClassificationEngine(Common):
                         If 'time' is in the name, formats y-axis using MM:SS style.
         """
 
-        if metric is not 'lr':
+        if metric != 'lr':
             idx_train = f"train_{self.metric_labels[metric][0]}"
             idx_test = f"test_{self.metric_labels[metric][0]}"
             label_train = f"train_{self.metric_labels[metric][1]}"
@@ -603,6 +603,84 @@ class ClassificationEngine(Common):
 
         return model
     
+
+    def _unpack_student_output(
+            self,
+            output):
+        
+        """
+        Unpacks the student output for distillation tasks.
+        A student can provide a single output (classification token),
+        and optionally an extra output (distillation token)
+
+        Args:
+            output: Model output
+
+        Returns:
+            logits_cls: Tensor
+            logits_dist: Tensor or None
+        """
+
+        if isinstance(output, torch.Tensor):
+            #print(
+            #    f"type={type(output)} | shape={tuple(output.shape)} | "
+            #    f"batch={output.shape[0] if output.ndim > 0 else 'n/a'} | "
+            #    f"dtype={output.dtype} | device={output.device}"
+            #)
+            return output, None
+
+        #print(f"type={type(output)}")
+
+        if isinstance(output, tuple):
+            #print(f"tuple len={len(output)}")
+            #for i, o in enumerate(output):
+            #    if isinstance(o, torch.Tensor):
+            #        print(f"  [{i}] Tensor shape={tuple(o.shape)} dtype={o.dtype} device={o.device}")
+            #    else:
+            #        print(f"  [{i}] type={type(o)}")
+
+            if len(output) == 2:
+                return output[0], output[1]
+            if len(output) == 1:
+                return output[0], None
+            self.error(f"Unexpected output tuple length: {len(output)}")
+
+        return output, None
+    
+    def _process_student_output(self, output):
+
+        """
+        Processes the student model output for distillation tasks.
+        Ensures that classification logits are returned as contiguous tensors,
+        and optionally processes distillation logits if provided.
+
+        Args:
+            output: Model output
+
+        Returns:
+            y_pred: Tensor
+            y_pred_dist: Tensor or None
+        """
+
+        logits_cls, logits_dist = self._unpack_student_output(output)
+
+        if logits_cls is None:
+            self.error("Student model did not return classification logits.")
+
+        # Main classification prediction (must exist)
+        y_pred = self.get_predictions(logits_cls)
+
+        # Optional distillation prediction
+        y_pred_dist = (
+            self.get_predictions(logits_dist)
+            if logits_dist is not None
+            else None
+        )
+
+        return y_pred, y_pred_dist
+
+
+
 
     # ======================================= #
     # ============ VISUALIZATION ============ #
@@ -961,10 +1039,10 @@ class ClassificationEngine(Common):
             self.error(f"Error inspecting loss function: {e}. "
                        "Perhaps the loss_fn is not correctly instantiated.")
         # Distillation: forward(student logits, teacher logits, target) / CrossEntropyLoss: forward(input, target)        
-        expected_args = 3 if self.use_distillation else 2
-        if num_args != expected_args:            
+        min_expected_args = 3 if self.use_distillation else 2
+        if num_args < min_expected_args:            
             self.error(f"Unexpected number of arguments in loss_fn.forward: {num_args}. "
-                       f"Expected {expected_args} for use_distillation={self.use_distillation}.")
+                       f"Expected {min_expected_args} for use_distillation={self.use_distillation}.")
 
         # Validate fields in the dataloaders
         self._validate_dataloaders()
@@ -1056,7 +1134,7 @@ class ClassificationEngine(Common):
         
         # Distillation
         else:
-            
+
              # Set the teacher model in evaluation model
             self.model_teacher.eval()
 
@@ -1072,7 +1150,7 @@ class ClassificationEngine(Common):
             try:
 
                 # Here is where the model will "complain" if the shape is incorrect
-                y_pred_std = self.get_predictions(self.model(X))   
+                y_pred, y_pred_dist = self._process_student_output(self.model(X))
                 y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
 
             except RuntimeError as e:
@@ -1103,7 +1181,7 @@ class ClassificationEngine(Common):
                     self.error(f"Unexpected input shape after exception handling: {X_tch.shape}.")
                 
                 with torch.no_grad():
-                    y_pred_std = self.get_predictions(self.model(X))
+                    y_pred, y_pred_dist = self._process_student_output(self.model(X))
                     y_pred_tch = self.get_predictions(self.model(X_tch))  
 
             except Exception as e:
@@ -1117,8 +1195,8 @@ class ClassificationEngine(Common):
                 try:
 
                     # If y_pred was successfully computed, get the number of classes
-                    if 'y_pred_std' in locals() or 'y_pred_tch' in locals():
-                        self.num_classes = y_pred_std.shape[1]
+                    if 'y_pred' in locals() or 'y_pred_tch' in locals() or 'y_pred_std' in locals():
+                        self.num_classes = y_pred.shape[1]
                         num_classes_tch = y_pred_tch.shape[1]
                         self.info(f"Detected number of classes: {self.num_classes}.")
 
@@ -1132,7 +1210,7 @@ class ClassificationEngine(Common):
                 except Exception as e:
 
                     # Throw an exception if the shape of the output tensor is unexpected
-                    self.error(f"Unexpected shape in of the prediction output: {y_pred_std.shape}.")
+                    self.error(f"Unexpected shape in of the prediction output: {y_pred.shape}.")
 
         #self.info("Making an in-memory copy of the model...")
 
@@ -1347,26 +1425,47 @@ class ClassificationEngine(Common):
                     with autocast(device_type='cuda', dtype=torch.float16):
 
                         # Forward pass
-                        y_pred = self.get_predictions(self.model(X))
-                        y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
+                        #y_pred, y_pred_dist = map(self.get_predictions, self._unpack_student_output(self.model(X)))
+                        y_pred, y_pred_dist = self._process_student_output(self.model(X))
+                        with torch.no_grad():
+                            y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
 
                         # Check if the output has NaN or Inf values
                         if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
                             if self.enable_clipping:
-                                self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
-                                #y_pred = torch.clamp(y_pred, min=-1e5, max=1e5)
+                                self.warning(f"y_pred is NaN or Inf at batch {batch}. Replacing Nans/Infs...")                                
                                 y_pred = torch.nan_to_num(
                                     y_pred,
                                     nan=torch.mean(y_pred).item(), 
                                     posinf=torch.max(y_pred).item(), 
                                     neginf=torch.min(y_pred).item()
-                                    )
+                                    )                                
                             else:
                                 self.warning(f"y_pred is NaN or Inf at batch {batch}. Skipping batch...")
                                 continue
-                        
+
                         # Calculate loss, normalize by accumulation steps
-                        loss = self.loss_fn(y_pred, y_pred_tch, y) / self.accumulation_steps
+                        if y_pred_dist is not None and (torch.isnan(y_pred_dist).any() or torch.isinf(y_pred_dist).any()):
+                            if self.enable_clipping:
+                                self.warning(f"y_pred_dist is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                                if y_pred_dist is not None:
+                                    y_pred_dist = torch.nan_to_num(
+                                    y_pred_dist,
+                                    nan=torch.mean(y_pred_dist).item(), 
+                                    posinf=torch.max(y_pred_dist).item(), 
+                                    neginf=torch.min(y_pred_dist).item()
+                                    )
+                            else:
+                                self.warning(f"y_pred_dist is NaN or Inf at batch {batch}. Skipping batch...")
+                                continue
+
+                        if y_pred_dist is None:
+                            # Regular knowledge distillation
+                            loss = self.loss_fn(y_pred, y_pred_tch, y, epoch)
+                        else:
+                            # DeiT-style distillation (two tokens)
+                            loss = self.loss_fn(y_pred, y_pred_dist, y_pred_tch, y, epoch)
+                        loss = loss / self.accumulation_steps
                     
                         # Check for NaN or Inf in loss
                         if self.debug_mode and (torch.isnan(loss) or torch.isinf(loss)):
@@ -1383,12 +1482,20 @@ class ClassificationEngine(Common):
 
                 else:
 
-                    # Forward pass
-                    y_pred = self.get_predictions(self.model(X))
-                    y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
+                    # Forward pass                    
+                    #y_pred, y_pred_dist = map(self.get_predictions, self._unpack_student_output(self.model(X)))
+                    y_pred, y_pred_dist = self._process_student_output(self.model(X))
+                    with torch.no_grad():
+                        y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
                     
                     # Calculate loss, normalize by accumulation steps
-                    loss = self.loss_fn(y_pred, y_pred_tch, y) / self.accumulation_steps
+                    if y_pred_dist is None:                          
+                        # Regular knowledge distillation
+                        loss = self.loss_fn(y_pred, y_pred_tch, y, epoch)
+                    else:                            
+                        # DeiT-style distillation (two tokens)
+                        loss = self.loss_fn(y_pred, y_pred_dist, y_pred_tch, y, epoch)
+                    loss = loss / self.accumulation_steps
 
                     # Backward pass
                     loss.backward()
@@ -1435,7 +1542,12 @@ class ClassificationEngine(Common):
 
                 # Accumulate metrics
                 train_loss += loss.item() * self.accumulation_steps  # Scale back to original loss
-                y_pred = y_pred.float() # Convert to float for stability
+                
+                # Convert to float for stability
+                if y_pred_dist is None:
+                    y_pred = y_pred.float() 
+                else:
+                    y_pred = (y_pred.float() + y_pred_dist.float()) / 2.0
                 y_pred_class = y_pred.argmax(dim=1)
                 train_acc += self.calculate_accuracy(y, y_pred_class)
 
@@ -1470,7 +1582,7 @@ class ClassificationEngine(Common):
         del all_preds, all_labels
         self.clear_cuda_memory(['X', 'y', 'y_pred', 'y_pred_class', 'loss'], locals())
         if self.use_distillation:
-            self.clear_cuda_memory(['X_tch', 'y_pred_tch'], locals())
+            self.clear_cuda_memory(['X_tch', 'y_pred_dist', 'y_pred_tch'], locals())
         
         # Compute elapsed time 
         elapsed_time = time.time() - start_time
@@ -1535,7 +1647,11 @@ class ClassificationEngine(Common):
                     X = data[0].unsqueeze(0)
                     # Remove dimension 1 for audio signals: [1, time]
                     X = self._squeeze(X)
-                    y_pred = self.get_predictions(self.model(X.to(self.device)))
+                    if not(self.use_distillation):
+                        y_pred = self.get_predictions(self.model(X.to(self.device)))
+                    else:
+                        #y_pred, _ = map(self.get_predictions, self._unpack_student_output(self.model(X)))
+                        y_pred, _ = self._process_student_output(self.model(X))
                     
             except RuntimeError:
                 inference_context = torch.no_grad()
@@ -1618,8 +1734,10 @@ class ClassificationEngine(Common):
                         with torch.autocast(device_type='cuda', dtype=torch.float16) if self.amp else nullcontext():
 
                             # Forward pass
-                            y_pred = self.get_predictions(self.model(X))
-                            y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
+                            #y_pred, y_pred_dist = map(self.get_predictions, self._unpack_student_output(self.model(X)))
+                            y_pred, y_pred_dist = self._process_student_output(self.model(X))
+                            with torch.no_grad():
+                                y_pred_tch = self.get_predictions(self.model_teacher(X_tch))
 
                             # Check for NaN/Inf in predictions
                             if torch.isnan(y_pred).any() or torch.isinf(y_pred).any():
@@ -1634,9 +1752,28 @@ class ClassificationEngine(Common):
                                 else:
                                     self.warning(f"Predictions contain NaN/Inf at batch {batch}. Skipping batch...")
                                     continue
+                            
+                            if y_pred_dist is not None and (torch.isnan(y_pred_dist).any() or torch.isinf(y_pred_dist).any()):
+                                if self.enable_clipping:
+                                    self.warning(f"Predictions using y_pred_dist is NaN or Inf at batch {batch}. Replacing Nans/Infs...")
+                                    if y_pred_dist is not None:
+                                        y_pred_dist = torch.nan_to_num(
+                                        y_pred_dist,
+                                        nan=torch.mean(y_pred_dist).item(), 
+                                        posinf=torch.max(y_pred_dist).item(), 
+                                        neginf=torch.min(y_pred_dist).item()
+                                        )
+                                else:
+                                    self.warning(f"Predictions using y_pred_dist is NaN or Inf at batch {batch}. Skipping batch...")
+                                    continue
 
                             # Calculate and accumulate loss
-                            loss = self.loss_fn(y_pred, y_pred_tch, y)
+                            if y_pred_dist is None:
+                                # Regular knowledge distillation
+                                loss = self.loss_fn(y_pred, y_pred_tch, y, epoch)
+                            else:
+                                # DeiT-style distillation (two tokens)
+                                loss = self.loss_fn(y_pred, y_pred_dist, y_pred_tch, y, epoch)
                             test_loss += loss.item()
 
                             # Debug NaN/Inf loss
@@ -1645,7 +1782,10 @@ class ClassificationEngine(Common):
                                 continue
 
                         # Calculate and accumulate accuracy
-                        y_pred = y_pred.float() # Convert to float for stability
+                        if y_pred_dist is None:
+                            y_pred = y_pred.float() 
+                        else:
+                            y_pred = (y_pred.float() + y_pred_dist.float()) / 2.0
                         y_pred_class = y_pred.argmax(dim=1)
                         test_acc += self.calculate_accuracy(y, y_pred_class)
 

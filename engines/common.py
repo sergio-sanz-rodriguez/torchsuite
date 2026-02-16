@@ -447,11 +447,13 @@ class Common(Logger):
     
     def get_predictions(self, output):
         if isinstance(output, torch.Tensor):
-            return output.contiguous()
+            return output.contiguous()        
         elif hasattr(output, "logits"):
             return output.logits.contiguous()
+
         else:
             self.error(f"Unexpected model output type: {type(output)}")
+
     
     def clear_cuda_memory(self, var_names, namespace):
         """Clears listed variable names and empties CUDA cache."""

@@ -9,11 +9,43 @@ from .pretrained_models import build_pretrained_model
 #, xavier_normal_, zeros_, orthogonal_, kaiming_normal_
 
 class HyperspectralToRGB(nn.Module):
+
+    """
+    Simple hyperspectral-to-RGB projection using a single 3D convolution.
+
+    Expects a hyperspectral cube (with spectral dimension represented as channels in a 3D tensor)
+    and produces a 3-channel (RGB-like) output by learning a 3D convolutional projection.
+
+    Args:
+        None
+
+    Returns:
+        torch.Tensor: Output tensor after 3D convolution. Shape depends on the input shape and
+            convolution settings, but typically follows the same spatial dimensions as the input
+            with 3 output channels.
+    """
+
     def __init__(self):
+
+        """
+        Initializes the HyperspectralToRGB module.        
+        """
+
         super(HyperspectralToRGB, self).__init__()
         self.conv1 = nn.Conv3d(in_channels=125, out_channels=3, kernel_size=(3, 3, 3), padding=1)
     
     def forward(self, x):
+
+        """
+        Forward pass for hyperspectral-to-RGB projection.
+
+        Args:
+            x (torch.Tensor): Hyperspectral input tensor expected by Conv3d.
+
+        Returns:
+            torch.Tensor: Projected tensor with 3 output channels.
+        """
+
         return self.conv1(x) 
 
 class SpatialConcatenation(nn.Module):
@@ -44,6 +76,20 @@ class SpatialConcatenation(nn.Module):
         device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
         ):
         super(SpatialConcatenation, self).__init__()
+
+        """
+        Initializes the SpatialConcatenation module.
+
+        Args:
+            in_channels (int): Number of input channels. Defaults to 125.
+            spatial_dim (int): Target output spatial resolution (height and width). Defaults to 384.
+            row_blocks (int): Number of vertical blocks used for spatial concatenation. Defaults to 6.
+            column_blocks (int): Number of horizontal blocks used for spatial concatenation. Defaults to 6.
+            device (torch.device): Device to place learnable layers on. Defaults to CUDA if available else CPU.
+
+        Returns:
+            None
+        """
 
         # Convolutional layer to reduce the number of channels to 108
         self.spatial_dim = spatial_dim
@@ -76,6 +122,16 @@ class SpatialConcatenation(nn.Module):
         self.pool = nn.MaxPool2d(2, 2)
 
     def forward(self, x):
+
+        """
+        Forward pass that converts an input tensor into a 3-channel, image-like representation.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [batch_size, in_channels, H, W].
+
+        Returns:
+            torch.Tensor: Output tensor of shape [batch_size, 3, spatial_dim, spatial_dim].
+        """
                 
         # Step 1: Modify the channel dimension
         x = self.convert_channels(x)
@@ -105,6 +161,27 @@ class SpatialConcatenation(nn.Module):
         return x
     
 class HyperspectralConv3D(nn.Module):
+
+    """
+    Hyperspectral-to-RGB (or 3-channel) embedding using a learnable 3D convolution.
+
+    Treats the spectral dimension as the depth dimension for Conv3d by reshaping an input
+    hyperspectral image (B, C, H, W) into (B, 1, C, H, W), then applies a 3D convolution
+    that typically spans (part of) the spectral axis to produce a 3-channel output.
+
+    Args:
+        in_channels (int): Number of input channels for Conv3d. Defaults to 1 (after unsqueeze).
+        out_channels (int): Number of output channels (e.g., 3 for RGB-like). Defaults to 3.
+        kernel_size (tuple): 3D convolution kernel size (D, H, W). Defaults to (125, 1, 1).
+        stride (int): Convolution stride. Defaults to 1.
+        padding (int): Convolution padding. Defaults to 0.
+        bias (bool): Whether to use bias in convolution. Defaults to False.
+        device (torch.device): Device to place learnable layers on. Defaults to CUDA if available else CPU.
+
+    Returns:
+        torch.Tensor: Output tensor of shape [batch_size, out_channels, H, W].
+    """
+
     def __init__(
         self,
         in_channels: int=1,
@@ -115,6 +192,22 @@ class HyperspectralConv3D(nn.Module):
         bias: bool=False,
         device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
         ):
+
+        """
+        Initializes the HyperspectralConv3D module.
+
+        Args:
+            in_channels (int): Number of input channels for Conv3d. Defaults to 1.
+            out_channels (int): Number of output channels. Defaults to 3.
+            kernel_size (tuple): 3D kernel size (D, H, W). Defaults to (125, 1, 1).
+            stride (int): Convolution stride. Defaults to 1.
+            padding (int): Convolution padding. Defaults to 0.
+            bias (bool): Whether to use bias. Defaults to False.
+            device (torch.device): Device to place learnable layers on. Defaults to CUDA if available else CPU.
+
+        Returns:
+            None
+        """
 
         super(HyperspectralConv3D, self).__init__()
         
@@ -128,6 +221,17 @@ class HyperspectralConv3D(nn.Module):
         ).to(device)
         
     def forward(self, x):
+
+        """
+        Forward pass for 3D convolutional hyperspectral embedding.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [batch_size, C, H, W], where C is the spectral bands.
+
+        Returns:
+            torch.Tensor: Output tensor of shape [batch_size, out_channels, H, W].
+        """
+
         # Input x: (B, C, H, W)
         x = x.unsqueeze(1)  # -> (B, 1, C, H, W)
         #print(x.shape)
@@ -139,6 +243,31 @@ class HyperspectralConv3D(nn.Module):
 
 
 class SpectralViT(nn.Module):
+
+    """
+    Wrapper model that adapts hyperspectral inputs for a pretrained RGB ViT-style backbone.
+
+    This module:
+      1) Converts a hyperspectral tensor into a 3-channel image-like tensor using a chosen embedding algorithm,
+      2) Feeds the resulting (B, 3, H, W) tensor into a pretrained vision model built by `build_pretrained_model`.
+
+    Args:
+        model (str): Name/identifier for the pretrained backbone to build. Defaults to 'vit_b_16_224'.
+        embedding_alg (str): Hyperspectral-to-3ch embedding algorithm. Supported values:
+            'spatial_concat' (SpatialConcatenation) or anything else (HyperspectralConv3D). Defaults to 'spatial_concat'.
+        spatial_dim (int): Output spatial resolution used by SpatialConcatenation. Defaults to 384.
+        block_size_spatial_emb (int): Number of row/column blocks for SpatialConcatenation. Defaults to 6.
+        num_classes (int): Number of output classes (or regression outputs). Defaults to 1.
+        dropout (float): Dropout used in the pretrained head (as supported by `build_pretrained_model`). Defaults to 0.0.
+        kernel_size (tuple): Kernel size for HyperspectralConv3D. Defaults to (125, 1, 1).
+        freeze_model (bool): If True, freezes the pretrained backbone parameters. Defaults to False.
+        seed (int): Random seed forwarded to `build_pretrained_model`. Defaults to 42.
+        device (torch.device): Device to run the model on. Defaults to CUDA if available else CPU.
+
+    Returns:
+        torch.Tensor: Model output of shape [batch_size, num_classes].
+    """
+
     def __init__(
         self,
         model: str='vit_b_16_224',
@@ -152,6 +281,25 @@ class SpectralViT(nn.Module):
         seed: int=42,
         device: torch.device = "cuda" if torch.cuda.is_available() else "cpu"
         ):
+
+        """
+        Initializes the SpectralViT model.
+
+        Args:
+            model (str): Pretrained backbone identifier. Defaults to 'vit_b_16_224'.
+            embedding_alg (str): Embedding strategy for hyperspectral inputs. Defaults to 'spatial_concat'.
+            spatial_dim (int): Target spatial resolution for SpatialConcatenation. Defaults to 384.
+            block_size_spatial_emb (int): Row/column blocks for SpatialConcatenation. Defaults to 6.
+            num_classes (int): Number of output classes/targets. Defaults to 1.
+            dropout (float): Dropout probability forwarded to the backbone builder. Defaults to 0.0.
+            kernel_size (tuple): Kernel size for HyperspectralConv3D. Defaults to (125, 1, 1).
+            freeze_model (bool): Whether to freeze the backbone parameters. Defaults to False.
+            seed (int): Random seed forwarded to the backbone builder. Defaults to 42.
+            device (torch.device): Device to run the model on. Defaults to CUDA if available else CPU.
+
+        Returns:
+            None
+        """
         
         super().__init__()
 
@@ -187,6 +335,18 @@ class SpectralViT(nn.Module):
 
     def forward(self, x):
 
+        """
+        Forward pass for SpectralViT.
+
+        Args:
+            x (torch.Tensor): Hyperspectral input tensor. Expected shape depends on `embedding_alg`:
+                - For SpatialConcatenation: [batch_size, C, H, W]
+                - For HyperspectralConv3D:  [batch_size, C, H, W]
+
+        Returns:
+            torch.Tensor: Output tensor of shape [batch_size, num_classes].
+        """
+
         x = self.embedding(x)  # -> (B, 3, H, W)
         x = self.model(x)  # -> (B, num_classes)
 
@@ -197,12 +357,27 @@ class SpectralViT(nn.Module):
 class PatchEmbedding(nn.Module):
 
     """
-    Turns a 2D input image into a 1D sequence learnable embedding vector.
+    Turns a 2D input image into a 1D sequence of learnable patch embeddings, and
+    adds special tokens + positional embeddings.
+
+    This module:
+      1) Projects an image into non-overlapping patches via a Conv2d (patchify + linear projection),
+      2) Flattens patches into a token sequence,
+      3) Prepends a learnable class token and appends a learnable distillation token,
+      4) Adds learnable positional embeddings,
+      5) Applies dropout to the final token sequence.
 
     Args:
-        in_channels (int): Number of color channels for the input images. Defaults to 3.
-        patch_size (int): Size of patches to convert input image into. Defaults to 16.
-        emb_dim (int): Size of embedding to turn image into. Defaults to 768.
+        img_size (int): Input image resolution (assumes square images). Must be divisible by `patch_size`.
+            Defaults to 224.
+        in_channels (int): Number of input channels (e.g., 3 for RGB). Defaults to 3.
+        patch_size (int): Patch size used to split the image into non-overlapping patches. Defaults to 16.
+        emb_dim (int): Embedding dimension for each token. Defaults to 768.
+        emb_dropout (float): Dropout probability applied after adding positional embeddings. Defaults to 0.1.
+
+    Returns:
+        torch.Tensor: Token embeddings of shape [batch_size, num_patches + 2, emb_dim],
+            where the extra 2 tokens correspond to [class_token, distillation_token].
     """
 
     # Initialize the class with appropriate variables
@@ -268,7 +443,17 @@ class PatchEmbedding(nn.Module):
 class MultiheadSelfAttentionBlock(nn.Module):
 
     """
-    Creates a multi-head self- attention block ("MSA block" for short).
+    Multi-head self-attention (MSA) block with pre-normalization.
+
+    Applies LayerNorm followed by `nn.MultiheadAttention` over the input token sequence.
+
+    Args:
+        emb_dim (int): Embedding dimension of the token sequence. Defaults to 768.
+        num_heads (int): Number of attention heads. Defaults to 12.
+        dropout (float): Dropout probability inside the attention module. Defaults to 0.
+
+    Returns:
+        torch.Tensor: Attention output of shape [batch_size, seq_len, emb_dim].
     """
 
     # Initialize the class with hyperparameters from Table 1
@@ -303,7 +488,21 @@ class MultiheadSelfAttentionBlock(nn.Module):
 class MultiheadSelfAttentionBlockV2(nn.Module):
 
     """
-    Creates a custom multi-head self-attention block using scaled dot-product attention.
+    Custom multi-head self-attention (MSA) block implemented with scaled dot-product attention.
+
+    This variant:
+      1) Applies LayerNorm (pre-norm),
+      2) Splits embeddings into multiple heads,
+      3) Computes scaled dot-product attention per head (via `F.scaled_dot_product_attention`),
+      4) Recombines heads and adds a residual connection.
+
+    Args:
+        emb_dim (int): Embedding dimension of the token sequence. Defaults to 768.
+        num_heads (int): Number of attention heads. Defaults to 12.
+        dropout (float): Dropout probability applied to attention weights. Defaults to 0.0.
+
+    Returns:
+        torch.Tensor: Output tensor of shape [batch_size, seq_len, emb_dim].
     """
     
     def __init__(self,
@@ -324,19 +523,31 @@ class MultiheadSelfAttentionBlockV2(nn.Module):
         assert emb_dim % num_heads == 0, "Embedding dimension must be divisible by number of heads."
 
     def split_into_heads(self, x):
-        """Split input tensor into multiple heads."""
+        
+        """
+        Split input tensor into multiple heads.
+        """
+
         batch_size, seq_len, emb_dim = x.shape
         x = x.view(batch_size, seq_len, self.num_heads, self.head_dim)
         return x.permute(0, 2, 1, 3)  # (batch_size, num_heads, seq_len, head_dim)
 
     def combine_heads(self, x):
-        """Combine the heads back into a single tensor."""
+        
+        """
+        Combine the heads back into a single tensor.
+        """
+
         batch_size, num_heads, seq_len, head_dim = x.shape
         x = x.permute(0, 2, 1, 3)  # (batch_size, seq_len, num_heads, head_dim)
         return x.contiguous().view(batch_size, seq_len, self.emb_dim)
 
     def forward(self, x):
-        """Forward pass for the MSA block."""
+        
+        """
+        Forward pass for the MSA block.
+        """
+
         # Apply LayerNorm to the input
         normed_x = self.layer_norm(x)
 
@@ -364,7 +575,18 @@ class MultiheadSelfAttentionBlockV2(nn.Module):
 class MLPBlock(nn.Module):
 
     """
-    Creates a layer normalized multilayer perceptron block ("MLP block" for short).
+    Feed-forward MLP block with pre-normalization.
+
+    Applies LayerNorm followed by a 2-layer MLP with GELU activation and dropout,
+    mapping emb_dim -> mlp_size -> emb_dim.
+
+    Args:
+        emb_dim (int): Embedding dimension of the token sequence. Defaults to 768.
+        mlp_size (int): Hidden dimension of the MLP. Defaults to 3072.
+        dropout (float): Dropout probability applied after dense layers. Defaults to 0.1.
+
+    Returns:
+        torch.Tensor: Output tensor of shape [batch_size, seq_len, emb_dim].
     """
 
     # Initialize the class with hyperparameters from Table 1 and Table 3
@@ -398,7 +620,22 @@ class MLPBlock(nn.Module):
 class TransformerEncoderBlock(nn.Module):
 
     """
-    Creates a Transformer Encoder block.
+    Transformer encoder block with pre-norm MSA and MLP sublayers.
+
+    This block applies:
+      1) MSA (with LayerNorm) + residual connection (optionally with DropPath),
+      2) MLP (with LayerNorm) + residual connection (optionally with DropPath).
+
+    Args:
+        emb_dim (int): Embedding dimension. Defaults to 768.
+        num_heads (int): Number of attention heads. Defaults to 12.
+        mlp_size (int): Hidden dimension of the MLP. Defaults to 3072.
+        attn_dropout (float): Dropout probability inside the attention module. Defaults to 0.
+        mlp_dropout (float): Dropout probability inside the MLP. Defaults to 0.1.
+        drop_path_rate (float): DropPath probability for residual branches. Defaults to 0.0.
+
+    Returns:
+        torch.Tensor: Output tensor of shape [batch_size, seq_len, emb_dim].
     """
 
     # Initialize the class with hyperparameters from Table 1 and Table 3
@@ -437,7 +674,35 @@ class TransformerEncoderBlock(nn.Module):
 class ViT(nn.Module):
 
     """
-    Creates a Vision Transformer architecture with ViT-Base hyperparameters by default.
+    Vision Transformer (ViT) model.
+
+    Implements a ViT-style image classifier by:
+      1) Converting an input image into a sequence of patch tokens (patch embedding),
+      2) Adding a learnable class token and learnable positional embeddings,
+      3) Processing the token sequence with a stack of Transformer encoder blocks,
+      4) Applying a final LayerNorm and a classification head on the class token.
+
+    Defaults match the ViT-Base/16 configuration (img_size=224, patch_size=16, 12 layers, 768 dim, 12 heads).
+
+    Args:
+        img_size (int): Input image resolution (assumes square images). Must be divisible by `patch_size`.
+            Defaults to 224.
+        in_channels (int): Number of input channels (e.g., 3 for RGB). Defaults to 3.
+        patch_size (int): Patch size used to split the image into non-overlapping patches. Defaults to 16.
+        num_transformer_layers (int): Number of Transformer encoder layers. Defaults to 12.
+        emb_dim (int): Token embedding dimension. Defaults to 768.
+        mlp_size (int): Hidden dimension of the MLP inside each encoder block. Defaults to 3072.
+        num_heads (int): Number of attention heads per encoder block. Defaults to 12.
+        emb_dropout (float): Dropout probability applied to embeddings (after adding positional embeddings).
+            Defaults to 0.1.
+        attn_dropout (float): Dropout probability inside attention layers. Defaults to 0.
+        mlp_dropout (float): Dropout probability inside MLP layers. Defaults to 0.1.
+        classif_head_hidden_units (int): Optional hidden dimension for an extra layer in the classifier head.
+            If 0, uses a single Linear layer. Defaults to 0.
+        num_classes (int): Number of output classes. Defaults to 1000.
+
+    Returns:
+        torch.Tensor: Class logits of shape [batch_size, num_classes].
     """
 
     # Initialize the class with hyperparameters from Table 1 and Table 3
@@ -632,6 +897,7 @@ class ViT(nn.Module):
 
     def set_params_frozen(self,                          
                           except_head:bool=True):
+        
         """
         Freezes parameters of different components, allowing exceptions.
 
@@ -664,6 +930,7 @@ class ViT(nn.Module):
 
     # Create a forward() method
     def forward(self, x):
+
         """
         Forward pass of the Vision Transformer model.
 
@@ -690,6 +957,39 @@ class ViT(nn.Module):
 
 # Create a ViT class that inherits from nn.Module
 class ViTv2(nn.Module):
+
+    """
+    Vision Transformer (ViT) model.
+
+    Implements a ViT-style image classifier by:
+      1) Converting an input image into a sequence of patch tokens (patch embedding),
+      2) Adding a learnable class token and learnable positional embeddings,
+      3) Processing the token sequence with a stack of Transformer encoder blocks,
+      4) Applying a final LayerNorm and a classification head on the class token.
+
+    Defaults match the ViT-Base/16 configuration (img_size=224, patch_size=16, 12 layers, 768 dim, 12 heads).
+
+    Args:
+        img_size (int): Input image resolution (assumes square images). Must be divisible by `patch_size`.
+            Defaults to 224.
+        in_channels (int): Number of input channels (e.g., 3 for RGB). Defaults to 3.
+        patch_size (int): Patch size used to split the image into non-overlapping patches. Defaults to 16.
+        num_transformer_layers (int): Number of Transformer encoder layers. Defaults to 12.
+        emb_dim (int): Token embedding dimension. Defaults to 768.
+        mlp_size (int): Hidden dimension of the MLP inside each encoder block. Defaults to 3072.
+        num_heads (int): Number of attention heads per encoder block. Defaults to 12.
+        emb_dropout (float): Dropout probability applied to embeddings (after adding positional embeddings).
+            Defaults to 0.1.
+        attn_dropout (float): Dropout probability inside attention layers. Defaults to 0.
+        mlp_dropout (float): Dropout probability inside MLP layers. Defaults to 0.1.
+        classif_head_hidden_units (int): Optional hidden dimension for an extra layer in the classifier head.
+            If 0, uses a single Linear layer. Defaults to 0.
+        num_classes (int): Number of output classes. Defaults to 1000.
+
+    Returns:
+        torch.Tensor: Class logits of shape [batch_size, num_classes].
+    """
+    
     # Initialize the class with hyperparameters from Table 1 and Table 3
     def __init__(self,
                  img_size:int=224, # Training resolution from Table 3 in ViT paper

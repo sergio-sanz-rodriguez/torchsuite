@@ -39,6 +39,8 @@ Future versions will include support for other data types, such as video and tex
 - **Flexible data loading:** loaders for image, audio, detection, and segmentation (`*_dataloaders.py`) to streamline dataset preparation and augmentation.
 - **Utility functions:** helper scripts (`*_utils.py`) for productivity and experiment reproducibility.
 - **Vision Transformer (ViT) support:** `vision_transformer.py` for implementing ViTs with PyTorch.
+- **Data-efficient Image Transformer (DeiT) support:** `deit.py` for implementing DeiTs with PyTorch.
+- **Swin Transformer (Swin) support:** `swiin.py` for implementing Swins with PyTorch.
 - **ConvNeXT support:**  `convnext.py`, the [original implementation](https://github.com/facebookresearch/ConvNeXt) by Meta Platforms, Inc.
 - **Wav2Vec2 support:** `wav2vec2.py` includes a Transformer-based acoustic model for audio classification.
 - **Region-based CNN (R-CNN) support:** `faster_rcnn.py` to create deep learning networks for object detection.

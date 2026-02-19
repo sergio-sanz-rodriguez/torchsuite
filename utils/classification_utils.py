@@ -30,7 +30,10 @@ from tkinter import Tk
 from torch.utils.data import DataLoader
 from sklearn.metrics import f1_score, accuracy_score, roc_curve, auc
 from sklearn.model_selection import StratifiedKFold
-from IPython.core.display import display, HTML
+try:
+    from IPython.core.display import display, HTML
+except:
+    from IPython.display import display, HTML
 from .common_utils import theme_presets
 
 
